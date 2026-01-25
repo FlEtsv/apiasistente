@@ -9,6 +9,7 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 
 @Configuration
 @EnableWebSecurity
@@ -18,8 +19,10 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 
         http
-                // En DEV puedes dejar CSRF activo (recomendado) ya que los forms llevan token.
-                .csrf(Customizer.withDefaults())
+                .csrf(csrf -> csrf
+                        // Esto crea cookie "XSRF-TOKEN" para que el JS la pueda leer
+                        .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
+                )
 
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
@@ -36,7 +39,7 @@ public class SecurityConfig {
 
                 .formLogin(form -> form
                         .loginPage("/login")
-                        .loginProcessingUrl("/login")     // coincide con action="/login"
+                        .loginProcessingUrl("/login")
                         .defaultSuccessUrl("/chat", true)
                         .failureUrl("/login?error")
                         .permitAll()
@@ -53,7 +56,6 @@ public class SecurityConfig {
 
     @Bean
     public PasswordEncoder passwordEncoder() {
-        // Permite hashes tipo "{bcrypt}..." y evita líos de encoder
         return PasswordEncoderFactories.createDelegatingPasswordEncoder();
     }
 }

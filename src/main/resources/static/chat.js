@@ -1,68 +1,82 @@
 /**
- * Chat UI - Sesiones por usuario + selector de chats + stats (messageCount/lastMessageAt)
- * Requiere Spring Security con cookie (form-login).
+ * AI Assistant JS - Versión con CSRF + sesiones
  */
 
 const chatEl = document.getElementById('chat');
 const inputEl = document.getElementById('input');
 const sendBtn = document.getElementById('send');
 const sidEl = document.getElementById('sid');
+
+const sessionListEl = document.getElementById('sessionList');
+const sessionListMobileEl = document.getElementById('sessionListMobile');
+const sessionSearchEl = document.getElementById('sessionSearch');
+const sessionSearchMobileEl = document.getElementById('sessionSearchMobile');
 const newChatBtn = document.getElementById('newChat');
 
-// Sidebar (desktop)
-const sessionList = document.getElementById('sessionList');
-const sessionSearch = document.getElementById('sessionSearch');
-
-// Drawer (mobile)
 const toggleSessionsBtn = document.getElementById('toggleSessions');
-const drawer = document.getElementById('sessionDrawer');
+const sessionDrawer = document.getElementById('sessionDrawer');
 const drawerBackdrop = document.getElementById('drawerBackdrop');
 const closeDrawerBtn = document.getElementById('closeDrawer');
-const sessionListMobile = document.getElementById('sessionListMobile');
-const sessionSearchMobile = document.getElementById('sessionSearchMobile');
 
-let sessionId = localStorage.getItem('apiasistente.sessionId') || '';
-let sessionsCache = [];
+let sessionId = localStorage.getItem('apiasistente.sessionId') || null;
 
-// ---------- UI helpers ----------
+/** ---------------- CSRF helpers ---------------- **/
+
+function getCookie(name) {
+  const m = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+  return m ? decodeURIComponent(m.pop()) : null;
+}
+
+function csrfToken() {
+  // CookieCsrfTokenRepository por defecto -> cookie "XSRF-TOKEN"
+  return getCookie('XSRF-TOKEN');
+}
+
+async function apiFetch(url, options = {}) {
+  const method = (options.method || 'GET').toUpperCase();
+
+  const headers = new Headers(options.headers || {});
+  headers.set('Accept', 'application/json');
+
+  // Para JSON bodies
+  if (options.body && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  // CSRF para métodos mutadores
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+    const token = csrfToken();
+    if (token) headers.set('X-XSRF-TOKEN', token);
+  }
+
+  const res = await fetch(url, {
+    ...options,
+    method,
+    headers,
+    credentials: 'same-origin'
+  });
+
+  // Si Spring te echa por auth/CSRF, lo tratamos claro
+  if (res.status === 401) {
+    window.location.href = '/login';
+    return res;
+  }
+  if (res.status === 403) {
+    // CSRF inválido o permisos. En tu caso era CSRF.
+    throw new Error('403 Forbidden (CSRF / permisos). Recarga la página y reintenta.');
+  }
+
+  return res;
+}
+
+/** ---------------- UI helpers ---------------- **/
 
 function scrollDown() {
-  requestAnimationFrame(() => chatEl.scrollTo({ top: chatEl.scrollHeight, behavior: 'smooth' }));
+  requestAnimationFrame(() => {
+    chatEl.scrollTo({ top: chatEl.scrollHeight, behavior: 'smooth' });
+  });
 }
 
-function escapeHtml(str) {
-  return (str ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
-}
-
-function setSid(id) {
-  sessionId = id || '';
-  if (sessionId) localStorage.setItem('apiasistente.sessionId', sessionId);
-  sidEl.textContent = sessionId ? sessionId.substring(0, 8) : '-';
-}
-
-function showWelcomeIfEmpty() {
-  if (chatEl.querySelector('.opacity-50')) return;
-  if (chatEl.children.length === 0) {
-    chatEl.innerHTML = `
-      <div class="flex flex-col items-center justify-center h-full text-slate-500 opacity-50 space-y-2">
-        <svg class="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path>
-        </svg>
-        <p>Inicia una conversación...</p>
-      </div>
-    `;
-  }
-}
-
-/**
- * Mensajes (mantiene tu estilo)
- */
 function addMsg(who, text, sources = []) {
   if (chatEl.querySelector('.opacity-50')) chatEl.innerHTML = '';
 
@@ -79,7 +93,7 @@ function addMsg(who, text, sources = []) {
   div.className = `${baseClasses} ${isUser ? userClasses : aiClasses}`;
 
   const content = document.createElement('div');
-  content.innerHTML = escapeHtml(text).replace(/\n/g, '<br>');
+  content.innerHTML = (text || '').toString().replace(/\n/g, '<br>');
   div.appendChild(content);
 
   if (sources && sources.length > 0) {
@@ -94,19 +108,13 @@ function addMsg(who, text, sources = []) {
     sources.forEach((s, idx) => {
       const sourceCard = document.createElement('div');
       sourceCard.className = "text-[11px] bg-slate-800/50 p-2 rounded-lg border border-slate-700/30 hover:border-blue-500/30 transition-colors";
-
-      const docTitle = escapeHtml(s.documentTitle || ('Documento ' + (idx + 1)));
-      const snippet = escapeHtml(s.snippet || '');
-      const pct = (Number(s.score || 0) * 100).toFixed(0);
-
       sourceCard.innerHTML = `
         <div class="flex justify-between font-bold text-blue-400 mb-1">
-          <span>${docTitle}</span>
-          <span class="opacity-60 text-[9px]">Relevancia: ${pct}%</span>
+            <span>${s.documentTitle || ('Documento ' + (idx+1))}</span>
+            <span class="opacity-60 text-[9px]">Relevancia: ${((s.score || 0) * 100).toFixed(0)}%</span>
         </div>
-        <div class="text-slate-400 italic font-light">"${snippet}"</div>
+        <div class="text-slate-400 italic font-light">"${s.snippet || ''}"</div>
       `;
-
       sourcesDiv.appendChild(sourceCard);
     });
 
@@ -136,215 +144,151 @@ function showTyping() {
   return id;
 }
 
-// ---------- Auth / API helpers ----------
-
-function looksLikeLoginHtml(res) {
-  const ct = (res.headers.get('content-type') || '').toLowerCase();
-  return ct.includes('text/html');
-}
-
-function redirectToLogin() {
-  window.location.href = '/login';
-}
-
-/**
- * Fetch protegido: si Spring te devuelve HTML de /login o 401/403, redirige.
- */
-async function apiFetch(url, options = {}) {
-  const res = await fetch(url, options);
-  if (looksLikeLoginHtml(res) || res.status === 401 || res.status === 403) {
-    redirectToLogin();
-    throw new Error('Not authenticated');
-  }
-  if (!res.ok) throw new Error(await res.text());
-  return res;
-}
-
-// ---------- Drawer mobile ----------
-
-function openDrawer() { if (drawer) drawer.classList.remove('hidden'); }
-function closeDrawer() { if (drawer) drawer.classList.add('hidden'); }
-
-// ---------- Sessions / Sidebar ----------
-
-function fmtDate(d) {
-  if (!d) return 'sin mensajes';
-  try {
-    return d.toLocaleString(undefined, {
-      year: '2-digit', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit'
-    });
-  } catch {
-    return 'sin mensajes';
-  }
-}
-
-function getSearchQuery() {
-  const q1 = (sessionSearch?.value || '').trim();
-  const q2 = (sessionSearchMobile?.value || '').trim();
-  return (q2.length > 0 ? q2 : q1).toLowerCase();
-}
-
-function renderSessions() {
-  const q = getSearchQuery();
-
-  const filtered = sessionsCache.filter(s => {
-    const title = (s.title || '').toLowerCase();
-    return q === '' || title.includes(q);
-  });
-
-  const renderInto = (container) => {
-    if (!container) return;
-    container.innerHTML = '';
-
-    if (filtered.length === 0) {
-      container.innerHTML = `<div class="text-xs text-slate-500 p-3">No hay chats.</div>`;
-      return;
-    }
-
-    filtered.forEach(s => {
-      const active = (s.id === sessionId);
-      const item = document.createElement('div');
-      item.className = `
-        group p-3 rounded-xl border transition cursor-pointer
-        ${active ? 'border-blue-500/50 bg-blue-500/10' : 'border-slate-700/40 hover:border-slate-600/60 hover:bg-slate-800/20'}
-      `.trim();
-
-      const title = escapeHtml(s.title || 'Sin título');
-      const msgCount = Number(s.messageCount || 0);
-      const lastMsg = s.lastMessageAt ? new Date(s.lastMessageAt) : null;
-
-      item.innerHTML = `
-        <div class="flex items-center justify-between gap-2">
-          <div class="min-w-0">
-            <div class="text-sm font-semibold truncate">${title}</div>
-            <div class="text-[10px] text-slate-500 mt-1 truncate">
-              ${escapeHtml(s.id.substring(0, 8))} · ${msgCount} msgs · ${fmtDate(lastMsg)}
-            </div>
-          </div>
-          <button class="deleteSession opacity-0 group-hover:opacity-100 transition text-[11px] px-2 py-1 rounded-lg border border-slate-700/50 hover:border-red-400/40 hover:bg-red-500/10">
-            🗑
-          </button>
-        </div>
-      `;
-
-      // click => abrir (si no has pulsado borrar)
-      item.addEventListener('click', async (e) => {
-        if (e.target && e.target.classList.contains('deleteSession')) return;
-        await selectSession(s.id);
-        closeDrawer();
-      });
-
-      // double click => renombrar
-      item.addEventListener('dblclick', async () => {
-        const next = prompt('Nuevo título del chat:', s.title || '');
-        if (next === null) return;
-        await renameSession(s.id, next);
-        await loadSessions();
-      });
-
-      // borrar
-      item.querySelector('.deleteSession').addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const ok = confirm('¿Borrar este chat? Esta acción no se puede deshacer.');
-        if (!ok) return;
-
-        await deleteSession(s.id);
-
-        // Si borraste el activo, pedimos una sesión activa nueva
-        if (s.id === sessionId) {
-          await ensureActiveSession();
-          await loadHistory(true);
-        }
-
-        await loadSessions();
-      });
-
-      container.appendChild(item);
-    });
-  };
-
-  renderInto(sessionList);
-  renderInto(sessionListMobile);
-}
+/** ---------------- Sessions ---------------- **/
 
 async function loadSessions() {
-  const res = await apiFetch('/api/chat/sessions');
-  sessionsCache = await res.json();
-  renderSessions();
+  try {
+    const res = await apiFetch('/api/chat/sessions');
+    if (!res.ok) return;
+    const sessions = await res.json();
+    renderSessions(sessions);
+  } catch (e) {
+    console.error('Error cargando sesiones', e);
+  }
 }
 
-async function selectSession(id) {
-  await apiFetch(`/api/chat/sessions/${id}/activate`, { method: 'PUT' });
-  setSid(id);
-  await loadHistory(true);
-  await loadSessions(); // refresca orden + activo
-}
+function renderSessions(sessions) {
+  const q1 = (sessionSearchEl?.value || '').toLowerCase().trim();
+  const q2 = (sessionSearchMobileEl?.value || '').toLowerCase().trim();
+  const q = q1 || q2;
 
-async function renameSession(id, title) {
-  await apiFetch(`/api/chat/sessions/${id}/title`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title })
+  const filtered = (sessions || []).filter(s => {
+    const title = (s.title || '').toLowerCase();
+    const id = (s.id || '').toLowerCase();
+    return !q || title.includes(q) || id.includes(q);
   });
+
+  const makeItem = (s) => {
+    const isActive = sessionId && s.id === sessionId;
+    const el = document.createElement('div');
+    el.className =
+      "p-3 rounded-xl border transition cursor-pointer " +
+      (isActive
+        ? "bg-blue-600/20 border-blue-500/30"
+        : "bg-slate-900/30 border-slate-700/40 hover:border-blue-500/20 hover:bg-slate-900/40");
+
+    el.innerHTML = `
+      <div class="flex items-start justify-between gap-2">
+        <div class="min-w-0">
+          <p class="text-sm font-semibold truncate">${s.title || 'Chat sin título'}</p>
+          <p class="text-[10px] text-slate-500 mt-1 font-mono truncate">${(s.id || '').slice(0, 8)} · msgs: ${s.messageCount ?? 0}</p>
+        </div>
+        <button class="deleteSession text-[10px] px-2 py-1 rounded-lg bg-red-600/20 border border-red-500/20 hover:bg-red-600/30">
+          Borrar
+        </button>
+      </div>
+    `;
+
+    // Activar al click (no si pulsas borrar)
+    el.addEventListener('click', async (ev) => {
+      if (ev.target && ev.target.classList.contains('deleteSession')) return;
+      await activateSession(s.id);
+      if (sessionDrawer) sessionDrawer.classList.add('hidden');
+    });
+
+    // Borrar
+    el.querySelector('.deleteSession').addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      if (!confirm('¿Borrar este chat?')) return;
+      await deleteSession(s.id);
+    });
+
+    return el;
+  };
+
+  if (sessionListEl) {
+    sessionListEl.innerHTML = '';
+    filtered.forEach(s => sessionListEl.appendChild(makeItem(s)));
+  }
+  if (sessionListMobileEl) {
+    sessionListMobileEl.innerHTML = '';
+    filtered.forEach(s => sessionListMobileEl.appendChild(makeItem(s)));
+  }
+}
+
+async function activateSession(id) {
+  try {
+    // PUT requiere CSRF -> apiFetch ya lo mete
+    const res = await apiFetch(`/api/chat/sessions/${id}/activate`, { method: 'PUT' });
+    if (!res.ok) throw new Error(await res.text());
+
+    sessionId = id;
+    localStorage.setItem('apiasistente.sessionId', sessionId);
+    sidEl.textContent = sessionId.substring(0, 8);
+
+    chatEl.innerHTML = '';
+    await loadHistory();
+    await loadSessions();
+  } catch (e) {
+    console.error(e);
+    addMsg('assistant', '⚠️ No pude activar esa sesión: ' + e.message);
+  }
 }
 
 async function deleteSession(id) {
-  await apiFetch(`/api/chat/sessions/${id}`, { method: 'DELETE' });
-}
+  try {
+    const res = await apiFetch(`/api/chat/sessions/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(await res.text());
 
-// ---------- Session active + history ----------
+    if (sessionId === id) {
+      sessionId = null;
+      localStorage.removeItem('apiasistente.sessionId');
+      sidEl.textContent = '-';
+      chatEl.innerHTML = '';
+    }
+    await loadSessions();
+  } catch (e) {
+    console.error(e);
+    addMsg('assistant', '⚠️ No pude borrar la sesión: ' + e.message);
+  }
+}
 
 async function ensureActiveSession() {
-  // 1) Si hay sessionId guardada, probamos si es válida (history)
-  if (sessionId) {
-    try {
-      const probe = await fetch(`/api/chat/${sessionId}/history`, { method: 'GET' });
-      if (!looksLikeLoginHtml(probe) && probe.ok) {
-        setSid(sessionId);
-        return;
-      }
-    } catch (_) { /* caemos al active */ }
-  }
+  // Opcional: si no hay sessionId local, pide al backend una activa o crea una nueva
+  try {
+    const res = await apiFetch('/api/chat/active');
+    if (!res.ok) return;
 
-  // 2) Pedimos al backend la sesión activa del usuario
-  const res = await apiFetch('/api/chat/active');
-  const data = await res.json();
-  setSid(data.sessionId);
+    const data = await res.json(); // { sessionId: "..." }
+    if (data?.sessionId) {
+      sessionId = data.sessionId;
+      localStorage.setItem('apiasistente.sessionId', sessionId);
+      sidEl.textContent = sessionId.substring(0, 8);
+    }
+  } catch (e) {
+    console.error('Error ensureActiveSession', e);
+  }
 }
 
-async function loadHistory(clear = false) {
+/** ---------------- Chat history & send ---------------- **/
+
+async function loadHistory() {
   if (!sessionId) return;
+
+  sidEl.textContent = sessionId.substring(0, 8);
 
   try {
     const res = await apiFetch(`/api/chat/${sessionId}/history`);
-    const msgs = await res.json();
+    if (!res.ok) return;
 
-    if (clear) chatEl.innerHTML = '';
+    const msgs = await res.json();
     if (msgs.length > 0) chatEl.innerHTML = '';
 
     msgs.forEach(m => addMsg(m.role === 'USER' ? 'user' : 'assistant', m.content));
-    if (msgs.length === 0) showWelcomeIfEmpty();
   } catch (e) {
     console.error("Error cargando historial", e);
   }
 }
-
-// ---------- New chat ----------
-
-async function newChat() {
-  chatEl.innerHTML = '';
-  addMsg('assistant', '✅ Nuevo chat creado. Escribe tu primera pregunta.');
-
-  const res = await apiFetch('/api/chat/sessions', { method: 'POST' });
-  const data = await res.json();
-  setSid(data.sessionId);
-
-  await loadSessions();
-  closeDrawer();
-}
-
-// ---------- Send message ----------
 
 async function send() {
   const text = inputEl.value.trim();
@@ -355,62 +299,71 @@ async function send() {
 
   const typingId = showTyping();
   sendBtn.disabled = true;
-  inputEl.disabled = true;
 
   try {
     const res = await apiFetch('/api/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionId, message: text })
     });
 
     const typingEl = document.getElementById(typingId);
     if (typingEl) typingEl.remove();
 
+    if (!res.ok) throw new Error(await res.text());
+
     const data = await res.json();
-    setSid(data.sessionId);
+    sessionId = data.sessionId;
+    localStorage.setItem('apiasistente.sessionId', sessionId);
+    sidEl.textContent = sessionId.substring(0, 8);
+
     addMsg('assistant', data.reply, data.sources);
-
-    // refresca sidebar (título automático / lastActivity / stats)
     await loadSessions();
-
   } catch (e) {
     const typingEl = document.getElementById(typingId);
     if (typingEl) typingEl.remove();
     addMsg('assistant', '⚠️ Error: ' + e.message);
   } finally {
     sendBtn.disabled = false;
-    inputEl.disabled = false;
     inputEl.focus();
   }
 }
 
-// ---------- Listeners ----------
+/** ---------------- Mobile drawer ---------------- **/
+
+function openDrawer() {
+  if (sessionDrawer) sessionDrawer.classList.remove('hidden');
+}
+function closeDrawer() {
+  if (sessionDrawer) sessionDrawer.classList.add('hidden');
+}
+
+/** ---------------- Wire up ---------------- **/
 
 sendBtn?.addEventListener('click', send);
+inputEl?.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
 
-inputEl?.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') send();
+sessionSearchEl?.addEventListener('input', loadSessions);
+sessionSearchMobileEl?.addEventListener('input', loadSessions);
+
+newChatBtn?.addEventListener('click', async () => {
+  // Simple: reset local sessionId -> backend creará una nueva al primer POST /api/chat
+  sessionId = null;
+  localStorage.removeItem('apiasistente.sessionId');
+  sidEl.textContent = '-';
+  chatEl.innerHTML = '';
+  addMsg('assistant', 'Listo. Escribe tu primer mensaje para crear un chat nuevo.');
+  await loadSessions();
 });
-
-newChatBtn?.addEventListener('click', () => newChat().catch(err => addMsg('assistant', '⚠️ ' + err.message)));
-
-sessionSearch?.addEventListener('input', renderSessions);
-sessionSearchMobile?.addEventListener('input', renderSessions);
 
 toggleSessionsBtn?.addEventListener('click', openDrawer);
 drawerBackdrop?.addEventListener('click', closeDrawer);
 closeDrawerBtn?.addEventListener('click', closeDrawer);
 
-// ---------- Init ----------
-
+// Init
 (async function init() {
-  try {
-    await ensureActiveSession();
-    await loadHistory(false);
-    await loadSessions();
-  } catch (e) {
-    console.error(e);
-    addMsg('assistant', '⚠️ No se pudo inicializar: ' + e.message);
-  }
+  // Importante: asegura que exista cookie XSRF-TOKEN.
+  // Con CookieCsrfTokenRepository normalmente se setea al cargar cualquier página.
+  await ensureActiveSession();
+  await loadSessions();
+  await loadHistory();
 })();
