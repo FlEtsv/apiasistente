@@ -13,7 +13,7 @@ public class SystemPrompt {
     private String name;
 
     @Lob
-    @Column(nullable=false)
+    @Column(nullable = false, columnDefinition = "LONGTEXT")
     private String content;
 
     @Column(nullable=false)

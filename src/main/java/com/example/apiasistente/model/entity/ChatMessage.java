@@ -2,6 +2,8 @@ package com.example.apiasistente.model.entity;
 
 import jakarta.persistence.*;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "chat_message")
@@ -22,11 +24,14 @@ public class ChatMessage {
     private Role role;
 
     @Lob
-    @Column(columnDefinition = "LONGTEXT", nullable = false)
+    @Column(nullable = false, columnDefinition = "LONGTEXT")
     private String content;
 
     @Column(nullable = false)
     private Instant createdAt = Instant.now();
+
+    @OneToMany(mappedBy = "message", cascade = CascadeType.REMOVE, orphanRemoval = true)
+    private List<ChatMessageSource> sources = new ArrayList<>();
 
     public Long getId() { return id; }
 
@@ -40,4 +45,6 @@ public class ChatMessage {
     public void setContent(String content) { this.content = content; }
 
     public Instant getCreatedAt() { return createdAt; }
+
+    public List<ChatMessageSource> getSources() { return sources; }
 }
