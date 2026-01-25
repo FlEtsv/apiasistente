@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="es" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Login · ApiAsistente</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; background: radial-gradient(circle at top right, #1e293b, #0f172a, #020617); }
+        .glass { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
+    </style>
+</head>
+
+<body class="min-h-screen flex items-center justify-center text-slate-200 px-4">
+
+<div class="w-full max-w-md glass rounded-2xl p-6 shadow-2xl border border-slate-700/40">
+    <div class="flex items-center gap-3 mb-6">
+        <div class="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/20">
+            <span class="text-xl font-bold">A</span>
+        </div>
+        <div>
+            <h1 class="font-bold text-lg leading-tight">ApiAsistente</h1>
+            <p class="text-xs text-slate-400">Login</p>
+        </div>
+    </div>
+
+    <!-- Mensajes de error / logout -->
+    <div th:if="${param.error}" class="mb-4 p-3 rounded-xl border border-red-500/30 bg-red-500/10 text-sm">
+        Usuario o contraseña incorrectos.
+    </div>
+    <div th:if="${param.logout}" class="mb-4 p-3 rounded-xl border border-green-500/30 bg-green-500/10 text-sm">
+        Sesión cerrada.
+    </div>
+
+    <form method="post" action="/login" class="space-y-4">
+        <div>
+            <label class="text-xs uppercase tracking-widest text-slate-500 font-semibold">Usuario</label>
+            <input name="username" autocomplete="username"
+                   class="mt-2 w-full bg-slate-900/30 border border-slate-700/50 rounded-xl px-4 py-3 outline-none focus:border-blue-500/50"
+                   placeholder="tu usuario" required />
+        </div>
+
+        <div>
+            <label class="text-xs uppercase tracking-widest text-slate-500 font-semibold">Contraseña</label>
+            <input type="password" name="password" autocomplete="current-password"
+                   class="mt-2 w-full bg-slate-900/30 border border-slate-700/50 rounded-xl px-4 py-3 outline-none focus:border-blue-500/50"
+                   placeholder="••••••••" required />
+        </div>
+
+        <button class="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-xl transition-all active:scale-[0.99] shadow-lg shadow-blue-600/20">
+            Entrar
+        </button>
+    </form>
+
+    <div class="mt-6 flex items-center justify-between text-xs text-slate-400">
+        <a href="/register" class="hover:text-slate-200 underline underline-offset-4">Crear cuenta</a>
+        <a href="/chat" class="hover:text-slate-200 underline underline-offset-4">Volver</a>
+    </div>
+</div>
+
+</body>
+</html>

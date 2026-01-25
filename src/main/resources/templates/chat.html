@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" xmlns:th="http://www.thymeleaf.org" xmlns:sec="https://www.thymeleaf.org/extras/spring-security">
 <head>
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
@@ -41,7 +41,15 @@
                     <span class="w-2 h-2 bg-green-500 rounded-full"></span>
                     RAG + Ollama Activo
                     <span class="opacity-40">•</span>
-                    <span class="text-slate-300">Usuario: <span class="font-semibold" th:text="${#authentication.name}">user</span></span>
+
+                    <!-- FIX: no usar #authentication.name directamente -->
+                    <span class="text-slate-300">
+                      Usuario:
+                      <span sec:authorize="isAuthenticated()" class="font-semibold">
+                        <span sec:authentication="name"></span>
+                      </span>
+                      <span sec:authorize="!isAuthenticated()" class="font-semibold opacity-70">Invitado</span>
+                    </span>
                 </p>
             </div>
         </div>
