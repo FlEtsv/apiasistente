@@ -1,5 +1,7 @@
 <!DOCTYPE html>
-<html lang="es" xmlns:th="http://www.thymeleaf.org" xmlns:sec="https://www.thymeleaf.org/extras/spring-security">
+<html lang="es"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:sec="https://www.thymeleaf.org/extras/spring-security">
 <head>
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
@@ -42,13 +44,12 @@
                     RAG + Ollama Activo
                     <span class="opacity-40">•</span>
 
-                    <!-- FIX: no usar #authentication.name directamente -->
-                    <span class="text-slate-300">
-                      Usuario:
-                      <span sec:authorize="isAuthenticated()" class="font-semibold">
-                        <span sec:authentication="name"></span>
-                      </span>
-                      <span sec:authorize="!isAuthenticated()" class="font-semibold opacity-70">Invitado</span>
+                    <!-- FIX: no usamos #authentication directamente, usamos sec:* -->
+                    <span class="text-slate-300" sec:authorize="isAuthenticated()">
+                        Usuario: <span class="font-semibold" sec:authentication="name">user</span>
+                    </span>
+                    <span class="text-slate-300" sec:authorize="!isAuthenticated()">
+                        Usuario: <span class="font-semibold">anon</span>
                     </span>
                 </p>
             </div>
