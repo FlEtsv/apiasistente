@@ -43,3 +43,8 @@ rag:
   chunk:
     size: 900
     overlap: 150
+
+
+logging:
+  level:
+    org.springframework.security: DEBUG

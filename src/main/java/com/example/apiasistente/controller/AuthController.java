@@ -1,27 +1,39 @@
 package com.example.apiasistente.controller;
 
-import com.example.apiasistente.service.UserService;
+import com.example.apiasistente.service.AuthService;
 import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 
 @Controller
 public class AuthController {
 
-    private final UserService users;
+    private final AuthService authService;
 
-    public AuthController(UserService users) {
-        this.users = users;
+    public AuthController(AuthService authService) {
+        this.authService = authService;
+    }
+
+    @GetMapping("/register")
+    public String registerPage() {
+        return "register";
+    }
+
+    @PostMapping("/register")
+    public String doRegister(@RequestParam String username,
+                             @RequestParam String password,
+                             Model model) {
+        try {
+            authService.register(username, password);
+            return "redirect:/login?registered=1";
+        } catch (IllegalArgumentException ex) {
+            model.addAttribute("error", ex.getMessage());
+            return "register";
+        }
     }
 
     @GetMapping("/login")
-    public String loginPage() { return "login"; }
-
-    @GetMapping("/register")
-    public String registerPage() { return "register"; }
-
-    @PostMapping("/register")
-    public String doRegister(@RequestParam String username, @RequestParam String password) {
-        users.register(username, password);
-        return "redirect:/login";
+    public String loginPage() {
+        return "login";
     }
 }

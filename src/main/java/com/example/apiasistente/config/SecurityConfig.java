@@ -1,42 +1,59 @@
+// src/main/java/com/example/apiasistente/config/SecurityConfig.java
 package com.example.apiasistente.config;
 
-import org.springframework.context.annotation.*;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 
 @Configuration
+@EnableWebSecurity
 public class SecurityConfig {
 
     @Bean
-    PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+
+        http
+                // En DEV puedes dejar CSRF activo (recomendado) ya que los forms llevan token.
+                .csrf(Customizer.withDefaults())
+
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(
+                                "/login",
+                                "/register",
+                                "/error",
+                                "/css/**",
+                                "/js/**",
+                                "/images/**",
+                                "/chat.js"
+                        ).permitAll()
+                        .anyRequest().authenticated()
+                )
+
+                .formLogin(form -> form
+                        .loginPage("/login")
+                        .loginProcessingUrl("/login")     // coincide con action="/login"
+                        .defaultSuccessUrl("/chat", true)
+                        .failureUrl("/login?error")
+                        .permitAll()
+                )
+
+                .logout(logout -> logout
+                        .logoutUrl("/logout")
+                        .logoutSuccessUrl("/login?logout")
+                        .permitAll()
+                );
+
+        return http.build();
     }
 
     @Bean
-    SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
-        http
-                // Si tu webchat hace fetch POST a /api/** con cookie de sesión,
-                // lo más simple es desactivar CSRF SOLO para /api/**
-                .csrf(csrf -> csrf.ignoringRequestMatchers("/api/**"))
-
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/login", "/register", "/css/**", "/js/**", "/chat.js", "/").permitAll()
-                        .anyRequest().authenticated()
-                )
-                .formLogin(form -> form
-                        .loginPage("/login")
-                        .defaultSuccessUrl("/chat", true)
-                        .permitAll()
-                )
-                .logout(logout -> logout
-                        .logoutUrl("/logout")
-                        .logoutSuccessUrl("/login")
-                )
-                .httpBasic(Customizer.withDefaults());
-
-        return http.build();
+    public PasswordEncoder passwordEncoder() {
+        // Permite hashes tipo "{bcrypt}..." y evita líos de encoder
+        return PasswordEncoderFactories.createDelegatingPasswordEncoder();
     }
 }

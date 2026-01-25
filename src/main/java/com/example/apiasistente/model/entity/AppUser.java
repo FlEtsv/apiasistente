@@ -1,6 +1,5 @@
 package com.example.apiasistente.model.entity;
 
-
 import jakarta.persistence.*;
 import java.time.Instant;
 
@@ -12,16 +11,16 @@ public class AppUser {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable=false, unique=true, length = 80)
+    @Column(nullable=false, unique=true, length=80)
     private String username;
 
-    @Column(nullable=false, length = 120)
+    @Column(name="password_hash", nullable=false, length=255)
     private String passwordHash;
 
     @Column(nullable=false)
     private boolean enabled = true;
 
-    @Column(nullable=false)
+    @Column(name="created_at", nullable=false)
     private Instant createdAt = Instant.now();
 
     public Long getId() { return id; }
