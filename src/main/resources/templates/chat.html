@@ -7,10 +7,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>AI Assistant - Premium Chat</title>
 
-    <!-- CSRF para fetch() (FIX CLAVE) -->
+    <!-- CSRF para fetch() -->
     <meta name="_csrf" th:content="${_csrf.token}"/>
     <meta name="_csrf_header" th:content="${_csrf.headerName}"/>
-    <meta name="_csrf_param" th:content="${_csrf.parameterName}"/>
 
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -66,7 +65,7 @@
                 Nuevo chat
             </button>
 
-            <!-- FIX: Logout debe ser POST y con CSRF -->
+            <!-- Logout POST + CSRF -->
             <form th:action="@{/logout}" method="post" class="inline">
                 <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
                 <button type="submit"
@@ -163,6 +162,7 @@
     </div>
 </main>
 
-<script src="/chat.js"></script>
+<!-- IMPORTANTE: cache-busting para que NO uses un chat.js viejo -->
+<script src="/chat.js?v=4"></script>
 </body>
 </html>

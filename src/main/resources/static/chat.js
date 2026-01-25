@@ -394,4 +394,22 @@ async function init() {
   bindEvents();
 
   try {
-    // Si había una sessionId antigua
+    // Si había una sessionId antigua en localStorage, puede estar muerta. loadHistory lo corrige.
+    await loadHistory();
+  } catch (e) {
+    console.error(e);
+  }
+
+  // cargar lista de chats si existe el endpoint
+  try { await loadSessionsList(); } catch {}
+
+  // si no hay sessionId, crea/obtén una
+  if (!sessionId) {
+    try {
+      await ensureActiveSession();
+      await loadHistory();
+    } catch {}
+  }
+}
+
+init();
