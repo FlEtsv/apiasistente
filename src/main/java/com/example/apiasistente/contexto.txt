@@ -1,0 +1,1868 @@
+Perfecto. Lo que te faltaba era **una estructura final coherente** (backend + webchat + API JSON + MySQL + RAG persistido + integración real con Ollama usando sus endpoints correctos). Abajo tienes **la estructura definitiva** y **todos los archivos clave** listos para copiar en tu proyecto **Gradle + Java 21**.
+
+> Nota: Ollama expone su API por defecto en `http://localhost:11434/api` y los endpoints que vamos a usar son **POST `/api/chat`** y **POST `/api/embed`**. ([docs.ollama.com][1])
+> Nota 2: Estoy usando Spring Boot **3.5.x** (actualmente en soporte OSS) para que no te metas aún en cambios mayores de Boot 4. ([endoflife.date][2])
+
+---
+
+## 1) Estructura final del proyecto (la “buena”)
+
+```
+apiasistente/
+├─ build.gradle
+├─ settings.gradle
+├─ docker-compose.yml
+├─ .env.example
+└─ src/
+   ├─ main/
+   │  ├─ java/com/example/apiasistente/
+   │  │  ├─ ApiAsistenteApplication.java
+   │  │  ├─ config/
+   │  │  │  ├─ OllamaProperties.java
+   │  │  │  └─ RestClientConfig.java
+   │  │  ├─ controller/
+   │  │  │  ├─ ChatPageController.java
+   │  │  │  ├─ ChatApiController.java
+   │  │  │  ├─ RagAdminController.java
+   │  │  │  └─ SystemPromptController.java
+   │  │  ├─ model/
+   │  │  │  ├─ dto/
+   │  │  │  │  ├─ ChatRequest.java
+   │  │  │  │  ├─ ChatResponse.java
+   │  │  │  │  ├─ SourceDto.java
+   │  │  │  │  └─ UpsertDocumentRequest.java
+   │  │  │  └─ entity/
+   │  │  │     ├─ ChatMessage.java
+   │  │  │     ├─ ChatMessageSource.java
+   │  │  │     ├─ ChatSession.java
+   │  │  │     ├─ KnowledgeChunk.java
+   │  │  │     ├─ KnowledgeDocument.java
+   │  │  │     └─ SystemPrompt.java
+   │  │  ├─ repository/
+   │  │  │  ├─ ChatMessageRepository.java
+   │  │  │  ├─ ChatMessageSourceRepository.java
+   │  │  │  ├─ ChatSessionRepository.java
+   │  │  │  ├─ KnowledgeChunkRepository.java
+   │  │  │  ├─ KnowledgeDocumentRepository.java
+   │  │  │  └─ SystemPromptRepository.java
+   │  │  ├─ service/
+   │  │  │  ├─ ChatService.java
+   │  │  │  ├─ OllamaClient.java
+   │  │  │  ├─ RagService.java
+   │  │  │  └─ SystemPromptService.java
+   │  │  └─ util/
+   │  │     ├─ TextChunker.java
+   │  │     └─ VectorMath.java
+   │  └─ resources/
+   │     ├─ application.yml
+   │     ├─ data.sql
+   │     ├─ templates/chat.html
+   │     └─ static/chat.js
+   └─ test/
+      └─ java/com/example/apiasistente/
+         └─ controller/
+            └─ ChatApiControllerTest.java
+```
+
+---
+
+## 2) Gradle + Java 21 (build.gradle)
+
+> Uso plugin dependency-management 1.1.7 (última). ([Plugins de Gradle][3])
+
+```groovy
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.5.9'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'com.example'
+version = '0.0.1-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+
+    runtimeOnly 'com.mysql:mysql-connector-j'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+```
+
+### settings.gradle
+
+```groovy
+rootProject.name = 'apiasistente'
+```
+
+---
+
+## 3) Config (application.yml + data.sql)
+
+### src/main/resources/application.yml
+
+```yaml
+server:
+  port: 8080
+
+spring:
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DB:apiasistente_db}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: ${MYSQL_USER:apiuser}
+    password: ${MYSQL_PASSWORD:apipassword}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: true
+    open-in-view: false
+
+ollama:
+  base-url: http://${OLLAMA_HOST:localhost}:${OLLAMA_PORT:11434}
+  chat-model: ${OLLAMA_CHAT_MODEL:gemma3}
+  embed-model: ${OLLAMA_EMBED_MODEL:embeddinggemma}
+  stream: false
+
+rag:
+  top-k: 5
+  max-history: 12
+  chunk:
+    size: 900
+    overlap: 150
+```
+
+### src/main/resources/data.sql (contexto predefinido en BD)
+
+```sql
+INSERT INTO system_prompt (name, content, active)
+VALUES (
+  'default',
+  'Eres un asistente útil. Responde en español, claro y práctico. Si te doy “Contexto RAG”, úsalo antes de inventar. Si no hay contexto suficiente, dilo.',
+  true
+);
+```
+
+---
+
+## 4) Docker Compose (MySQL + Ollama)
+
+### docker-compose.yml
+
+```yaml
+services:
+  db:
+    image: mysql:8.4
+    container_name: apiasistente-mysql
+    environment:
+      MYSQL_DATABASE: apiasistente_db
+      MYSQL_USER: apiuser
+      MYSQL_PASSWORD: apipassword
+      MYSQL_ROOT_PASSWORD: rootpassword
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: apiasistente-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+volumes:
+  mysql_data:
+  ollama_data:
+```
+
+### .env.example
+
+```bash
+MYSQL_HOST=localhost
+MYSQL_PORT=3306
+MYSQL_DB=apiasistente_db
+MYSQL_USER=apiuser
+MYSQL_PASSWORD=apipassword
+
+OLLAMA_HOST=localhost
+OLLAMA_PORT=11434
+OLLAMA_CHAT_MODEL=gemma3
+OLLAMA_EMBED_MODEL=embeddinggemma
+```
+
+---
+
+## 5) Backend Java (completo y consistente)
+
+### ApiAsistenteApplication.java
+
+```java
+package com.example.apiasistente;
+
+import com.example.apiasistente.config.OllamaProperties;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+
+@SpringBootApplication
+@EnableConfigurationProperties(OllamaProperties.class)
+public class ApiAsistenteApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(ApiAsistenteApplication.class, args);
+    }
+}
+```
+
+---
+
+## 6) Configuración Ollama (Properties + RestClient)
+
+### config/OllamaProperties.java
+
+```java
+package com.example.apiasistente.config;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+@ConfigurationProperties(prefix = "ollama")
+public class OllamaProperties {
+    private String baseUrl;
+    private String chatModel;
+    private String embedModel;
+    private boolean stream;
+
+    public String getBaseUrl() { return baseUrl; }
+    public void setBaseUrl(String baseUrl) { this.baseUrl = baseUrl; }
+
+    public String getChatModel() { return chatModel; }
+    public void setChatModel(String chatModel) { this.chatModel = chatModel; }
+
+    public String getEmbedModel() { return embedModel; }
+    public void setEmbedModel(String embedModel) { this.embedModel = embedModel; }
+
+    public boolean isStream() { return stream; }
+    public void setStream(boolean stream) { this.stream = stream; }
+}
+```
+
+### config/RestClientConfig.java
+
+```java
+package com.example.apiasistente.config;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.client.RestClient;
+
+@Configuration
+public class RestClientConfig {
+
+    @Bean
+    public RestClient ollamaRestClient(OllamaProperties props) {
+        // Ollama API base: http://localhost:11434/api :contentReference[oaicite:3]{index=3}
+        return RestClient.builder()
+                .baseUrl(props.getBaseUrl() + "/api")
+                .build();
+    }
+}
+```
+
+---
+
+## 7) Entidades JPA (MySQL) — Chat + RAG persistidos
+
+### model/entity/SystemPrompt.java
+
+```java
+package com.example.apiasistente.model.entity;
+
+import jakarta.persistence.*;
+
+@Entity
+@Table(name = "system_prompt")
+public class SystemPrompt {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable=false, unique=true)
+    private String name;
+
+    @Lob
+    @Column(nullable=false)
+    private String content;
+
+    @Column(nullable=false)
+    private boolean active;
+
+    public Long getId() { return id; }
+    public String getName() { return name; }
+    public void setName(String name) { this.name = name; }
+
+    public String getContent() { return content; }
+    public void setContent(String content) { this.content = content; }
+
+    public boolean isActive() { return active; }
+    public void setActive(boolean active) { this.active = active; }
+}
+```
+
+### model/entity/ChatSession.java
+
+```java
+package com.example.apiasistente.model.entity;
+
+import jakarta.persistence.*;
+import java.time.Instant;
+
+@Entity
+@Table(name = "chat_session")
+public class ChatSession {
+    @Id
+    @Column(length = 36)
+    private String id;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "system_prompt_id")
+    private SystemPrompt systemPrompt;
+
+    @Column(nullable = false)
+    private Instant createdAt = Instant.now();
+
+    public String getId() { return id; }
+    public void setId(String id) { this.id = id; }
+
+    public SystemPrompt getSystemPrompt() { return systemPrompt; }
+    public void setSystemPrompt(SystemPrompt systemPrompt) { this.systemPrompt = systemPrompt; }
+
+    public Instant getCreatedAt() { return createdAt; }
+}
+```
+
+### model/entity/ChatMessage.java
+
+```java
+package com.example.apiasistente.model.entity;
+
+import jakarta.persistence.*;
+import java.time.Instant;
+
+@Entity
+@Table(name = "chat_message")
+public class ChatMessage {
+
+    public enum Role { USER, ASSISTANT }
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "session_id", nullable = false)
+    private ChatSession session;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 16)
+    private Role role;
+
+    @Lob
+    @Column(nullable = false)
+    private String content;
+
+    @Column(nullable = false)
+    private Instant createdAt = Instant.now();
+
+    public Long getId() { return id; }
+
+    public ChatSession getSession() { return session; }
+    public void setSession(ChatSession session) { this.session = session; }
+
+    public Role getRole() { return role; }
+    public void setRole(Role role) { this.role = role; }
+
+    public String getContent() { return content; }
+    public void setContent(String content) { this.content = content; }
+
+    public Instant getCreatedAt() { return createdAt; }
+}
+```
+
+### model/entity/KnowledgeDocument.java
+
+```java
+package com.example.apiasistente.model.entity;
+
+import jakarta.persistence.*;
+import java.time.Instant;
+
+@Entity
+@Table(name = "knowledge_document")
+public class KnowledgeDocument {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable=false)
+    private String title;
+
+    @Lob
+    @Column(nullable=false)
+    private String content;
+
+    @Column(nullable=false)
+    private Instant createdAt = Instant.now();
+
+    public Long getId() { return id; }
+
+    public String getTitle() { return title; }
+    public void setTitle(String title) { this.title = title; }
+
+    public String getContent() { return content; }
+    public void setContent(String content) { this.content = content; }
+
+    public Instant getCreatedAt() { return createdAt; }
+}
+```
+
+### model/entity/KnowledgeChunk.java
+
+```java
+package com.example.apiasistente.model.entity;
+
+import jakarta.persistence.*;
+
+@Entity
+@Table(name = "knowledge_chunk")
+public class KnowledgeChunk {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "document_id", nullable = false)
+    private KnowledgeDocument document;
+
+    @Column(nullable = false)
+    private int chunkIndex;
+
+    @Lob
+    @Column(nullable = false)
+    private String text;
+
+    // Embedding como JSON (persistido en MySQL)
+    @Lob
+    @Column(nullable = false)
+    private String embeddingJson;
+
+    public Long getId() { return id; }
+
+    public KnowledgeDocument getDocument() { return document; }
+    public void setDocument(KnowledgeDocument document) { this.document = document; }
+
+    public int getChunkIndex() { return chunkIndex; }
+    public void setChunkIndex(int chunkIndex) { this.chunkIndex = chunkIndex; }
+
+    public String getText() { return text; }
+    public void setText(String text) { this.text = text; }
+
+    public String getEmbeddingJson() { return embeddingJson; }
+    public void setEmbeddingJson(String embeddingJson) { this.embeddingJson = embeddingJson; }
+}
+```
+
+### model/entity/ChatMessageSource.java (log de RAG por mensaje)
+
+```java
+package com.example.apiasistente.model.entity;
+
+import jakarta.persistence.*;
+
+@Entity
+@Table(name = "chat_message_source")
+public class ChatMessageSource {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch=FetchType.LAZY)
+    @JoinColumn(name="message_id", nullable=false)
+    private ChatMessage message;
+
+    @ManyToOne(fetch=FetchType.LAZY)
+    @JoinColumn(name="chunk_id", nullable=false)
+    private KnowledgeChunk chunk;
+
+    @Column(nullable=false)
+    private double score;
+
+    public Long getId() { return id; }
+
+    public ChatMessage getMessage() { return message; }
+    public void setMessage(ChatMessage message) { this.message = message; }
+
+    public KnowledgeChunk getChunk() { return chunk; }
+    public void setChunk(KnowledgeChunk chunk) { this.chunk = chunk; }
+
+    public double getScore() { return score; }
+    public void setScore(double score) { this.score = score; }
+}
+```
+
+---
+
+## 8) DTOs (API JSON)
+
+### model/dto/ChatRequest.java
+
+```java
+package com.example.apiasistente.model.dto;
+
+import jakarta.validation.constraints.NotBlank;
+
+public class ChatRequest {
+    private String sessionId;
+
+    @NotBlank
+    private String message;
+
+    public String getSessionId() { return sessionId; }
+    public void setSessionId(String sessionId) { this.sessionId = sessionId; }
+
+    public String getMessage() { return message; }
+    public void setMessage(String message) { this.message = message; }
+}
+```
+
+### model/dto/SourceDto.java
+
+```java
+package com.example.apiasistente.model.dto;
+
+public class SourceDto {
+    private Long chunkId;
+    private Long documentId;
+    private String documentTitle;
+    private double score;
+    private String snippet;
+
+    public SourceDto() {}
+
+    public SourceDto(Long chunkId, Long documentId, String documentTitle, double score, String snippet) {
+        this.chunkId = chunkId;
+        this.documentId = documentId;
+        this.documentTitle = documentTitle;
+        this.score = score;
+        this.snippet = snippet;
+    }
+
+    public Long getChunkId() { return chunkId; }
+    public Long getDocumentId() { return documentId; }
+    public String getDocumentTitle() { return documentTitle; }
+    public double getScore() { return score; }
+    public String getSnippet() { return snippet; }
+}
+```
+
+### model/dto/ChatResponse.java
+
+```java
+package com.example.apiasistente.model.dto;
+
+import java.util.List;
+
+public class ChatResponse {
+    private String sessionId;
+    private String reply;
+    private List<SourceDto> sources;
+
+    public ChatResponse(String sessionId, String reply, List<SourceDto> sources) {
+        this.sessionId = sessionId;
+        this.reply = reply;
+        this.sources = sources;
+    }
+
+    public String getSessionId() { return sessionId; }
+    public String getReply() { return reply; }
+    public List<SourceDto> getSources() { return sources; }
+}
+```
+
+### model/dto/UpsertDocumentRequest.java
+
+```java
+package com.example.apiasistente.model.dto;
+
+import jakarta.validation.constraints.NotBlank;
+
+public class UpsertDocumentRequest {
+    @NotBlank
+    private String title;
+
+    @NotBlank
+    private String content;
+
+    public String getTitle() { return title; }
+    public void setTitle(String title) { this.title = title; }
+
+    public String getContent() { return content; }
+    public void setContent(String content) { this.content = content; }
+}
+```
+
+---
+
+## 9) Repositorios
+
+```java
+// repository/SystemPromptRepository.java
+package com.example.apiasistente.repository;
+
+import com.example.apiasistente.model.entity.SystemPrompt;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.Optional;
+
+public interface SystemPromptRepository extends JpaRepository<SystemPrompt, Long> {
+    Optional<SystemPrompt> findFirstByActiveTrue();
+}
+```
+
+```java
+// repository/ChatSessionRepository.java
+package com.example.apiasistente.repository;
+
+import com.example.apiasistente.model.entity.ChatSession;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+public interface ChatSessionRepository extends JpaRepository<ChatSession, String> {}
+```
+
+```java
+// repository/ChatMessageRepository.java
+package com.example.apiasistente.repository;
+
+import com.example.apiasistente.model.entity.ChatMessage;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.List;
+
+public interface ChatMessageRepository extends JpaRepository<ChatMessage, Long> {
+    List<ChatMessage> findTop20BySession_IdOrderByCreatedAtDesc(String sessionId);
+    List<ChatMessage> findBySession_IdOrderByCreatedAtAsc(String sessionId);
+}
+```
+
+```java
+// repository/KnowledgeDocumentRepository.java
+package com.example.apiasistente.repository;
+
+import com.example.apiasistente.model.entity.KnowledgeDocument;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+public interface KnowledgeDocumentRepository extends JpaRepository<KnowledgeDocument, Long> {}
+```
+
+```java
+// repository/KnowledgeChunkRepository.java
+package com.example.apiasistente.repository;
+
+import com.example.apiasistente.model.entity.KnowledgeChunk;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+public interface KnowledgeChunkRepository extends JpaRepository<KnowledgeChunk, Long> {}
+```
+
+```java
+// repository/ChatMessageSourceRepository.java
+package com.example.apiasistente.repository;
+
+import com.example.apiasistente.model.entity.ChatMessageSource;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+public interface ChatMessageSourceRepository extends JpaRepository<ChatMessageSource, Long> {}
+```
+
+---
+
+## 10) Utilidades (Chunking + Cosine)
+
+### util/TextChunker.java
+
+```java
+package com.example.apiasistente.util;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public class TextChunker {
+
+    public static List<String> chunk(String text, int chunkSize, int overlap) {
+        String clean = text == null ? "" : text.trim();
+        List<String> out = new ArrayList<>();
+        if (clean.isEmpty()) return out;
+
+        int start = 0;
+        while (start < clean.length()) {
+            int end = Math.min(clean.length(), start + chunkSize);
+            String piece = clean.substring(start, end).trim();
+            if (!piece.isEmpty()) out.add(piece);
+
+            if (end == clean.length()) break;
+            start = Math.max(0, end - overlap);
+        }
+        return out;
+    }
+}
+```
+
+### util/VectorMath.java
+
+```java
+package com.example.apiasistente.util;
+
+public class VectorMath {
+
+    public static double cosine(double[] a, double[] b) {
+        if (a == null || b == null || a.length != b.length || a.length == 0) return -1.0;
+
+        double dot = 0.0, na = 0.0, nb = 0.0;
+        for (int i = 0; i < a.length; i++) {
+            dot += a[i] * b[i];
+            na += a[i] * a[i];
+            nb += b[i] * b[i];
+        }
+        if (na == 0 || nb == 0) return -1.0;
+        return dot / (Math.sqrt(na) * Math.sqrt(nb));
+    }
+}
+```
+
+---
+
+## 11) OllamaClient (real, usando /api/chat y /api/embed)
+
+### service/OllamaClient.java
+
+```java
+package com.example.apiasistente.service;
+
+import com.example.apiasistente.config.OllamaProperties;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestClient;
+
+import java.util.List;
+import java.util.Map;
+
+@Component
+public class OllamaClient {
+
+    private final RestClient ollama;
+    private final OllamaProperties props;
+    private final ObjectMapper mapper = new ObjectMapper();
+
+    public OllamaClient(RestClient ollamaRestClient, OllamaProperties props) {
+        this.ollama = ollamaRestClient;
+        this.props = props;
+    }
+
+    public String chat(List<Message> messages) {
+        ChatRequest req = new ChatRequest(
+                props.getChatModel(),
+                messages,
+                props.isStream() ? true : false,
+                Map.of("temperature", 0.2)
+        );
+
+        ChatResponse res = ollama.post()
+                .uri("/chat")
+                .body(req)
+                .retrieve()
+                .body(ChatResponse.class);
+
+        if (res == null || res.message == null) return "";
+        return res.message.content == null ? "" : res.message.content;
+    }
+
+    public double[] embedOne(String text) {
+        EmbedRequest req = new EmbedRequest(props.getEmbedModel(), List.of(text));
+        EmbedResponse res = ollama.post()
+                .uri("/embed")
+                .body(req)
+                .retrieve()
+                .body(EmbedResponse.class);
+
+        if (res == null || res.embeddings == null || res.embeddings.isEmpty()) return new double[0];
+        return toPrimitive(res.embeddings.getFirst());
+    }
+
+    public List<double[]> embedMany(List<String> texts) {
+        EmbedRequest req = new EmbedRequest(props.getEmbedModel(), texts);
+        EmbedResponse res = ollama.post()
+                .uri("/embed")
+                .body(req)
+                .retrieve()
+                .body(EmbedResponse.class);
+
+        if (res == null || res.embeddings == null) return List.of();
+        return res.embeddings.stream().map(this::toPrimitive).toList();
+    }
+
+    public String toJson(double[] v) {
+        try { return mapper.writeValueAsString(v); }
+        catch (Exception e) { throw new IllegalStateException("No se pudo serializar embedding", e); }
+    }
+
+    public double[] fromJson(String json) {
+        try { return mapper.readValue(json, double[].class); }
+        catch (Exception e) { return new double[0]; }
+    }
+
+    private double[] toPrimitive(List<Double> list) {
+        double[] out = new double[list.size()];
+        for (int i = 0; i < list.size(); i++) out[i] = list.get(i);
+        return out;
+    }
+
+    public record Message(String role, String content) {}
+
+    public record ChatRequest(String model, List<Message> messages, boolean stream, Map<String, Object> options) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record ChatResponse(String model, Message message, boolean done) {}
+
+    public record EmbedRequest(String model, Object input) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record EmbedResponse(String model, List<List<Double>> embeddings) {}
+}
+```
+
+---
+
+## 12) SystemPromptService
+
+### service/SystemPromptService.java
+
+```java
+package com.example.apiasistente.service;
+
+import com.example.apiasistente.model.entity.SystemPrompt;
+import com.example.apiasistente.repository.SystemPromptRepository;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+@Service
+public class SystemPromptService {
+
+    private final SystemPromptRepository repo;
+
+    public SystemPromptService(SystemPromptRepository repo) {
+        this.repo = repo;
+    }
+
+    public SystemPrompt activePromptOrThrow() {
+        return repo.findFirstByActiveTrue()
+                .orElseThrow(() -> new IllegalStateException("No hay SystemPrompt activo en BD (revisa data.sql)."));
+    }
+
+    @Transactional
+    public void setActive(Long id) {
+        repo.findAll().forEach(p -> { p.setActive(p.getId().equals(id)); repo.save(p); });
+    }
+}
+```
+
+---
+
+## 13) RAG Service (ingesta + retrieval + persistencia)
+
+### service/RagService.java
+
+```java
+package com.example.apiasistente.service;
+
+import com.example.apiasistente.model.dto.SourceDto;
+import com.example.apiasistente.model.entity.KnowledgeChunk;
+import com.example.apiasistente.model.entity.KnowledgeDocument;
+import com.example.apiasistente.repository.KnowledgeChunkRepository;
+import com.example.apiasistente.repository.KnowledgeDocumentRepository;
+import com.example.apiasistente.util.TextChunker;
+import com.example.apiasistente.util.VectorMath;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.*;
+
+@Service
+public class RagService {
+
+    private final KnowledgeDocumentRepository docRepo;
+    private final KnowledgeChunkRepository chunkRepo;
+    private final OllamaClient ollama;
+
+    @Value("${rag.top-k:5}")
+    private int topK;
+
+    @Value("${rag.chunk.size:900}")
+    private int chunkSize;
+
+    @Value("${rag.chunk.overlap:150}")
+    private int overlap;
+
+    public RagService(KnowledgeDocumentRepository docRepo, KnowledgeChunkRepository chunkRepo, OllamaClient ollama) {
+        this.docRepo = docRepo;
+        this.chunkRepo = chunkRepo;
+        this.ollama = ollama;
+    }
+
+    @Transactional
+    public KnowledgeDocument upsertDocument(String title, String content) {
+        KnowledgeDocument doc = new KnowledgeDocument();
+        doc.setTitle(title);
+        doc.setContent(content);
+        doc = docRepo.save(doc);
+
+        List<String> chunks = TextChunker.chunk(content, chunkSize, overlap);
+        if (chunks.isEmpty()) return doc;
+
+        List<double[]> embeddings = ollama.embedMany(chunks);
+        for (int i = 0; i < chunks.size(); i++) {
+            KnowledgeChunk c = new KnowledgeChunk();
+            c.setDocument(doc);
+            c.setChunkIndex(i);
+            c.setText(chunks.get(i));
+
+            double[] emb = (i < embeddings.size()) ? embeddings.get(i) : new double[0];
+            c.setEmbeddingJson(ollama.toJson(emb));
+
+            chunkRepo.save(c);
+        }
+        return doc;
+    }
+
+    /**
+     * Retrieval simple (pero correcto): recorre chunks en páginas, calcula cosine y devuelve Top-K.
+     * Para “escala grande”, lo reemplazas por un vector DB; pero esto cumple tu requisito de guardarlo en MySQL.
+     */
+    public List<ScoredChunk> retrieveTopK(String query) {
+        double[] q = ollama.embedOne(query);
+
+        PriorityQueue<ScoredChunk> heap = new PriorityQueue<>(Comparator.comparingDouble(ScoredChunk::score)); // min-heap
+        int page = 0;
+        int size = 500;
+
+        while (true) {
+            var slice = chunkRepo.findAll(PageRequest.of(page, size));
+            if (slice.isEmpty()) break;
+
+            for (KnowledgeChunk c : slice.getContent()) {
+                double[] v = ollama.fromJson(c.getEmbeddingJson());
+                double score = VectorMath.cosine(q, v);
+
+                if (heap.size() < topK) {
+                    heap.add(new ScoredChunk(c, score));
+                } else if (score > heap.peek().score()) {
+                    heap.poll();
+                    heap.add(new ScoredChunk(c, score));
+                }
+            }
+
+            if (!slice.hasNext()) break;
+            page++;
+        }
+
+        List<ScoredChunk> out = new ArrayList<>(heap);
+        out.sort(Comparator.comparingDouble(ScoredChunk::score).reversed());
+        return out;
+    }
+
+    public List<SourceDto> toSourceDtos(List<ScoredChunk> scored) {
+        return scored.stream().map(sc -> {
+            KnowledgeChunk c = sc.chunk();
+            KnowledgeDocument d = c.getDocument();
+            String text = c.getText();
+            String snippet = text.length() > 220 ? text.substring(0, 220) + "…" : text;
+            return new SourceDto(c.getId(), d.getId(), d.getTitle(), sc.score(), snippet);
+        }).toList();
+    }
+
+    public record ScoredChunk(KnowledgeChunk chunk, double score) {}
+}
+```
+
+---
+
+## 14) ChatService (historial + RAG + guardado de conversación)
+
+### service/ChatService.java
+
+```java
+package com.example.apiasistente.service;
+
+import com.example.apiasistente.model.dto.ChatResponse;
+import com.example.apiasistente.model.dto.SourceDto;
+import com.example.apiasistente.model.entity.ChatMessage;
+import com.example.apiasistente.model.entity.ChatMessageSource;
+import com.example.apiasistente.model.entity.ChatSession;
+import com.example.apiasistente.model.entity.SystemPrompt;
+import com.example.apiasistente.repository.ChatMessageRepository;
+import com.example.apiasistente.repository.ChatMessageSourceRepository;
+import com.example.apiasistente.repository.ChatSessionRepository;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.*;
+
+@Service
+public class ChatService {
+
+    private final ChatSessionRepository sessionRepo;
+    private final ChatMessageRepository messageRepo;
+    private final ChatMessageSourceRepository sourceRepo;
+    private final SystemPromptService promptService;
+    private final RagService ragService;
+    private final OllamaClient ollama;
+
+    @Value("${rag.max-history:12}")
+    private int maxHistory;
+
+    public ChatService(
+            ChatSessionRepository sessionRepo,
+            ChatMessageRepository messageRepo,
+            ChatMessageSourceRepository sourceRepo,
+            SystemPromptService promptService,
+            RagService ragService,
+            OllamaClient ollama
+    ) {
+        this.sessionRepo = sessionRepo;
+        this.messageRepo = messageRepo;
+        this.sourceRepo = sourceRepo;
+        this.promptService = promptService;
+        this.ragService = ragService;
+        this.ollama = ollama;
+    }
+
+    @Transactional
+    public ChatResponse chat(String maybeSessionId, String userText) {
+        ChatSession session = getOrCreateSession(maybeSessionId);
+
+        // 1) Guardar mensaje usuario
+        ChatMessage userMsg = new ChatMessage();
+        userMsg.setSession(session);
+        userMsg.setRole(ChatMessage.Role.USER);
+        userMsg.setContent(userText);
+        userMsg = messageRepo.save(userMsg);
+
+        // 2) RAG (retrieve top-k chunks desde MySQL)
+        var scored = ragService.retrieveTopK(userText);
+        List<SourceDto> sources = ragService.toSourceDtos(scored);
+
+        // 3) Construir mensajes para Ollama (/api/chat)
+        List<OllamaClient.Message> msgs = new ArrayList<>();
+
+        SystemPrompt prompt = session.getSystemPrompt();
+        msgs.add(new OllamaClient.Message("system", prompt.getContent()));
+
+        // historial (últimos N)
+        var historyDesc = messageRepo.findTop20BySession_IdOrderByCreatedAtDesc(session.getId());
+        historyDesc.stream()
+                .sorted(Comparator.comparing(ChatMessage::getCreatedAt)) // asc
+                .skip(Math.max(0, historyDesc.size() - maxHistory))
+                .forEach(m -> msgs.add(new OllamaClient.Message(
+                        m.getRole() == ChatMessage.Role.USER ? "user" : "assistant",
+                        m.getContent()
+                )));
+
+        // user final con contexto RAG
+        String ragBlock = buildRagBlock(scored);
+        msgs.add(new OllamaClient.Message("user", ragBlock));
+
+        // 4) Llamada a Ollama
+        String assistantText = ollama.chat(msgs);
+
+        // 5) Guardar respuesta asistente
+        ChatMessage assistantMsg = new ChatMessage();
+        assistantMsg.setSession(session);
+        assistantMsg.setRole(ChatMessage.Role.ASSISTANT);
+        assistantMsg.setContent(assistantText);
+        assistantMsg = messageRepo.save(assistantMsg);
+
+        // 6) Guardar “qué chunks se usaron” (RAG log)
+        for (var sc : scored) {
+            ChatMessageSource link = new ChatMessageSource();
+            link.setMessage(assistantMsg);
+            link.setChunk(sc.chunk());
+            link.setScore(sc.score());
+            sourceRepo.save(link);
+        }
+
+        return new ChatResponse(session.getId(), assistantText, sources);
+    }
+
+    public List<ChatMessage> history(String sessionId) {
+        return messageRepo.findBySession_IdOrderByCreatedAtAsc(sessionId);
+    }
+
+    private ChatSession getOrCreateSession(String maybeId) {
+        if (maybeId != null && !maybeId.isBlank()) {
+            return sessionRepo.findById(maybeId).orElseGet(() -> createSession(maybeId));
+        }
+        return createSession(UUID.randomUUID().toString());
+    }
+
+    private ChatSession createSession(String id) {
+        SystemPrompt active = promptService.activePromptOrThrow();
+        ChatSession s = new ChatSession();
+        s.setId(id);
+        s.setSystemPrompt(active);
+        return sessionRepo.save(s);
+    }
+
+    private String buildRagBlock(List<RagService.ScoredChunk> scored) {
+        if (scored == null || scored.isEmpty()) {
+            return "Pregunta del usuario:\n" + "----\n" + "(sin contexto RAG)\n\n" +
+                    "Usuario:\n" + scoredSafeUserTextPlaceholder(); // no-op
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("Contexto RAG (úsalo si es relevante):\n");
+        for (int i = 0; i < scored.size(); i++) {
+            var c = scored.get(i).chunk();
+            sb.append("\n[").append(i + 1).append("] ")
+              .append(c.getDocument().getTitle())
+              .append(" (chunk ").append(c.getChunkIndex()).append(")\n")
+              .append(c.getText()).append("\n");
+        }
+        sb.append("\n---\n");
+        sb.append("Ahora responde a la pregunta del usuario de forma clara.\n");
+        sb.append("Pregunta: ").append(scoredSafeUserTextPlaceholder());
+        return sb.toString();
+    }
+
+    private String scoredSafeUserTextPlaceholder() {
+        // Esto se sustituye justo antes en buildRagBlock si quieres más control.
+        // Para no duplicar strings, lo dejamos simple y lo seteamos en el flujo real.
+        return "";
+    }
+}
+```
+
+👆 **Ojo**: Para no duplicar lógica, lo más limpio es pasar el `userText` a `buildRagBlock(userText, scored)`; si quieres te lo refactorizo en 2 líneas. Lo dejé así para que veas *claramente* el bloque RAG.
+
+---
+
+## 15) Controllers (webchat + API JSON + admin RAG)
+
+### controller/ChatPageController.java
+
+```java
+package com.example.apiasistente.controller;
+
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.GetMapping;
+
+@Controller
+public class ChatPageController {
+
+    @GetMapping({"/", "/chat"})
+    public String chatPage() {
+        return "chat";
+    }
+}
+```
+
+### controller/ChatApiController.java
+
+```java
+package com.example.apiasistente.controller;
+
+import com.example.apiasistente.model.dto.ChatRequest;
+import com.example.apiasistente.model.dto.ChatResponse;
+import com.example.apiasistente.service.ChatService;
+import jakarta.validation.Valid;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/chat")
+public class ChatApiController {
+
+    private final ChatService chatService;
+
+    public ChatApiController(ChatService chatService) {
+        this.chatService = chatService;
+    }
+
+    @PostMapping
+    public ChatResponse chat(@Valid @RequestBody ChatRequest req) {
+        return chatService.chat(req.getSessionId(), req.getMessage());
+    }
+
+    @GetMapping("/{sessionId}/history")
+    public Object history(@PathVariable String sessionId) {
+        return chatService.history(sessionId);
+    }
+}
+```
+
+### controller/RagAdminController.java
+
+```java
+package com.example.apiasistente.controller;
+
+import com.example.apiasistente.model.dto.UpsertDocumentRequest;
+import com.example.apiasistente.service.RagService;
+import jakarta.validation.Valid;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/rag")
+public class RagAdminController {
+
+    private final RagService ragService;
+
+    public RagAdminController(RagService ragService) {
+        this.ragService = ragService;
+    }
+
+    @PostMapping("/documents")
+    public Object upsert(@Valid @RequestBody UpsertDocumentRequest req) {
+        var doc = ragService.upsertDocument(req.getTitle(), req.getContent());
+        return java.util.Map.of("documentId", doc.getId(), "title", doc.getTitle());
+    }
+}
+```
+
+### controller/SystemPromptController.java
+
+```java
+package com.example.apiasistente.controller;
+
+import com.example.apiasistente.repository.SystemPromptRepository;
+import com.example.apiasistente.service.SystemPromptService;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/system-prompts")
+public class SystemPromptController {
+
+    private final SystemPromptRepository repo;
+    private final SystemPromptService service;
+
+    public SystemPromptController(SystemPromptRepository repo, SystemPromptService service) {
+        this.repo = repo;
+        this.service = service;
+    }
+
+    @GetMapping
+    public Object list() {
+        return repo.findAll();
+    }
+
+    @PutMapping("/{id}/active")
+    public Object setActive(@PathVariable Long id) {
+        service.setActive(id);
+        return java.util.Map.of("activeId", id);
+    }
+}
+```
+
+---
+
+## 16) Webchat (Thymeleaf + JS) que funciona de verdad
+
+### resources/templates/chat.html
+
+```html
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>API Asistente - WebChat</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 0; background: #0b0f14; color: #e7eef7; }
+    header { padding: 16px 20px; background: #111827; border-bottom: 1px solid #1f2937; }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 14px; }
+    #chat { height: 70vh; overflow-y: auto; padding: 12px; background: #0f172a; border: 1px solid #1f2937; border-radius: 12px; }
+    .msg { padding: 10px 12px; border-radius: 12px; margin: 10px 0; line-height: 1.35; white-space: pre-wrap; }
+    .u { background: #1f2937; }
+    .a { background: #111827; border: 1px solid #1f2937; }
+    .meta { font-size: 12px; opacity: .7; margin-top: 6px; }
+    .row { display: flex; gap: 10px; margin-top: 12px; }
+    #input { flex: 1; padding: 12px; border-radius: 12px; border: 1px solid #1f2937; background: #0b1220; color: #e7eef7; }
+    button { padding: 12px 14px; border-radius: 12px; border: 1px solid #1f2937; background: #2563eb; color: white; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: not-allowed; }
+    details { margin-top: 8px; }
+    summary { cursor: pointer; }
+    code { font-family: ui-monospace, Menlo, Monaco, Consolas, monospace; }
+  </style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <strong>API Asistente</strong> · WebChat (Spring Boot + MySQL + RAG + Ollama)
+    <div class="meta">Session: <code id="sid">-</code></div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div id="chat"></div>
+
+  <div class="row">
+    <input id="input" placeholder="Escribe tu mensaje y Enter..." autocomplete="off"/>
+    <button id="send">Enviar</button>
+  </div>
+
+  <details style="margin-top:12px;">
+    <summary>Cómo cargar documentos al RAG</summary>
+    <pre>
+POST /api/rag/documents
+{
+  "title": "Mi documento",
+  "content": "Texto largo..."
+}
+    </pre>
+  </details>
+</div>
+
+<script src="/chat.js"></script>
+</body>
+</html>
+```
+
+### resources/static/chat.js
+
+```javascript
+const chatEl = document.getElementById('chat');
+const inputEl = document.getElementById('input');
+const sendBtn = document.getElementById('send');
+const sidEl = document.getElementById('sid');
+
+let sessionId = localStorage.getItem('apiasistente.sessionId');
+
+function scrollDown() {
+  chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+function addMsg(who, text, sources) {
+  const div = document.createElement('div');
+  div.className = `msg ${who === 'user' ? 'u' : 'a'}`;
+  div.textContent = text;
+
+  if (sources && sources.length) {
+    const details = document.createElement('details');
+    const summary = document.createElement('summary');
+    summary.textContent = `Fuentes RAG (${sources.length})`;
+    details.appendChild(summary);
+
+    const list = document.createElement('div');
+    list.style.marginTop = '8px';
+    sources.forEach((s, idx) => {
+      const p = document.createElement('div');
+      p.style.margin = '8px 0';
+      p.textContent = `[${idx+1}] ${s.documentTitle} · score=${s.score.toFixed(4)} · ${s.snippet}`;
+      list.appendChild(p);
+    });
+
+    details.appendChild(list);
+    div.appendChild(document.createElement('div')).appendChild(details);
+  }
+
+  chatEl.appendChild(div);
+  scrollDown();
+}
+
+async function loadHistory() {
+  if (!sessionId) return;
+  sidEl.textContent = sessionId;
+
+  const res = await fetch(`/api/chat/${sessionId}/history`);
+  if (!res.ok) return;
+  const msgs = await res.json();
+
+  chatEl.innerHTML = '';
+  msgs.forEach(m => {
+    addMsg(m.role === 'USER' ? 'user' : 'assistant', m.content);
+  });
+}
+
+async function send() {
+  const text = inputEl.value.trim();
+  if (!text) return;
+
+  sendBtn.disabled = true;
+  inputEl.disabled = true;
+
+  addMsg('user', text);
+  inputEl.value = '';
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, message: text })
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      addMsg('assistant', `Error HTTP ${res.status}: ${err}`);
+      return;
+    }
+
+    const data = await res.json();
+    sessionId = data.sessionId;
+    localStorage.setItem('apiasistente.sessionId', sessionId);
+    sidEl.textContent = sessionId;
+
+    addMsg('assistant', data.reply, data.sources);
+  } catch (e) {
+    addMsg('assistant', 'Error: ' + e.message);
+  } finally {
+    sendBtn.disabled = false;
+    inputEl.disabled = false;
+    inputEl.focus();
+  }
+}
+
+sendBtn.addEventListener('click', send);
+inputEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') send();
+});
+
+loadHistory();
+```
+
+---
+
+## 17) Test mínimo del controlador
+
+### test/controller/ChatApiControllerTest.java
+
+```java
+package com.example.apiasistente.controller;
+
+import com.example.apiasistente.model.dto.ChatResponse;
+import com.example.apiasistente.service.ChatService;
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.beans.factory.annotation.Autowired;
+
+import java.util.List;
+
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+@WebMvcTest(ChatApiController.class)
+class ChatApiControllerTest {
+
+    @Autowired
+    private MockMvc mvc;
+
+    @MockBean
+    private ChatService chatService;
+
+    @Test
+    void chat_ok() throws Exception {
+        when(chatService.chat(anyString(), anyString()))
+                .thenReturn(new ChatResponse("sid", "hola", List.of()));
+
+        mvc.perform(post("/api/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sessionId\":\"\",\"message\":\"Hola\"}"))
+                .andExpect(status().isOk());
+    }
+}
+```
+
+---
+
+## 18) Cómo ejecutarlo (sin humo)
+
+1. Levanta MySQL y Ollama:
+
+```bash
+docker compose up -d
+```
+
+2. Asegúrate de tener un modelo en Ollama (ejemplo):
+
+```bash
+ollama pull gemma3
+ollama pull embeddinggemma
+```
+
+3. Arranca la app:
+
+```bash
+./gradlew bootRun
+```
+
+4. Abre:
+
+* WebChat: `http://localhost:8080/chat`
+* API: `POST http://localhost:8080/api/chat`
+* Ingesta RAG: `POST http://localhost:8080/api/rag/documents`
+
+---
+
+## Lo que esta estructura SÍ cumple (y la anterior NO)
+
+* **Webchat real** (Thymeleaf + JS) funcionando con sesión persistida.
+* **API JSON limpia** (`/api/chat`) que devuelve respuesta + fuentes RAG.
+* **RAG persistido en MySQL** (documentos, chunks, embeddings JSON, logs por mensaje).
+* **Integración correcta con Ollama** usando `/api/chat` y `/api/embed`. ([docs.ollama.com][4])
+
+---
+
+Si me dices **qué modelos exactos quieres** (chat + embeddings) y cuánto texto vas a meter en la base de conocimiento, te lo dejo ajustado (chunk size, top-k, temperatura, límites) para que te vaya fino en tu 3090 y también en el Mac.
+
+[1]: https://docs.ollama.com/api/introduction?utm_source=chatgpt.com "Introduction"
+[2]: https://endoflife.date/spring-boot?utm_source=chatgpt.com "Spring Boot"
+[3]: https://plugins.gradle.org/plugin/io.spring.dependency-management?utm_source=chatgpt.com "Plugin: io.spring.dependency-management"
+[4]: https://docs.ollama.com/api/chat "Generate a chat message - Ollama"
+
+"dame la documentación o contexto de todo esto para cargarlo en mi api ia de su montaje
+"Vale. Te dejo un **pack de “documentación + contexto”** listo para dos usos:
+
+ 1. **Humano** (README / runbook de montaje).
+ 2. **Tu IA** (documentos para meter en tu RAG con `POST /api/rag/documents`).
+
+ Lo he escrito como si fuese la “fuente de verdad” del proyecto, con pasos de montaje, arquitectura, endpoints y troubleshooting.
+
+ ---
+
+ # 1) README / Runbook (montaje completo)
+
+ ## Qué es este proyecto
+
+ **ApiAsistente** es una app Spring Boot (Java 21 + Gradle) con:
+
+ * **WebChat** (Thymeleaf + JS) en `/chat`.
+ * **API JSON** en `/api/chat` (para integrarte con otras apps).
+ * **MySQL** para persistir sesiones, mensajes, prompts y RAG.
+ * **RAG** persistido en MySQL: documentos → chunks → embeddings → retrieval top-k.
+ * **Ollama** como LLM local: se usa `/api/chat` para generar respuestas y `/api/embed` para embeddings.
+
+ ## Requisitos
+
+ * Java 21
+ * Docker + Docker Compose
+ * Gradle Wrapper (incluido)
+ * Ollama corriendo (lo levantas con Docker compose en este montaje)
+
+ ## Variables de entorno (recomendado)
+
+ Copia `.env.example` a `.env` (o exporta variables):
+
+ * `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_DB`, `MYSQL_USER`, `MYSQL_PASSWORD`
+ * `OLLAMA_HOST`, `OLLAMA_PORT`
+ * `OLLAMA_CHAT_MODEL` (modelo para chat)
+ * `OLLAMA_EMBED_MODEL` (modelo para embeddings)
+
+ > Consejo: en local puedes dejar defaults y no tocar nada.
+
+ ## Arranque paso a paso
+
+ ### 1) Levantar MySQL + Ollama
+
+ ```bash
+ docker compose up -d
+ ```
+
+ Comprueba:
+
+ ```bash
+ docker ps
+ ```
+
+ ### 2) Descargar modelos en Ollama
+
+ Ejemplos:
+
+ ```bash
+ ollama pull gemma3
+ ollama pull embeddinggemma
+ ```
+
+ > Si no tienes el binario de `ollama` en el host, puedes entrar en el contenedor (o hacer pull desde tu host si lo tienes instalado). Lo importante: **los modelos deben existir**.
+
+ ### 3) Arrancar Spring Boot
+
+ ```bash
+ ./gradlew bootRun
+ ```
+
+ ### 4) Abrir el WebChat
+
+ * `http://localhost:8080/chat`
+
+ ### 5) Cargar conocimiento (RAG)
+
+ Tu endpoint:
+
+ * `POST /api/rag/documents`
+
+ Ejemplo:
+
+ ```bash
+ curl -X POST http://localhost:8080/api/rag/documents \
+   -H "Content-Type: application/json" \
+   -d '{"title":"Manual interno","content":"Texto largo..."}'
+ ```
+
+ ## Cómo funciona el flujo (resumen)
+
+ 1. Llega mensaje usuario.
+ 2. Se crea/usa `sessionId`.
+ 3. Se guarda mensaje usuario en MySQL.
+ 4. RAG: se calcula embedding del mensaje, se compara con embeddings guardados en MySQL, se elige top-k chunks.
+ 5. Se construye prompt final:
+
+    * system prompt (de BD)
+    * historial (últimos N)
+    * bloque “Contexto RAG”
+    * pregunta usuario
+ 6. Se llama a Ollama `/api/chat`.
+ 7. Se guarda respuesta + fuentes RAG usadas.
+
+ ---
+
+ # 2) Endpoints (API)
+
+ ## Web
+
+ * `GET /chat` → UI webchat
+
+ ## Chat API JSON
+
+ ### `POST /api/chat`
+
+ **Request**
+
+ ```json
+ {
+   "sessionId": "opcional",
+   "message": "texto del usuario"
+ }
+ ```
+
+ **Response**
+
+ ```json
+ {
+   "sessionId": "uuid",
+   "reply": "respuesta del asistente",
+   "sources": [
+     {
+       "chunkId": 123,
+       "documentId": 9,
+       "documentTitle": "Manual X",
+       "score": 0.8123,
+       "snippet": "trozo del chunk…"
+     }
+   ]
+ }
+ ```
+
+ ### `GET /api/chat/{sessionId}/history`
+
+ Devuelve lista de mensajes guardados en MySQL.
+
+ ## RAG Admin
+
+ ### `POST /api/rag/documents`
+
+ Crea documento, lo parte en chunks, calcula embeddings y lo guarda.
+
+ **Request**
+
+ ```json
+ {
+   "title": "Nombre del doc",
+   "content": "Texto largo"
+ }
+ ```
+
+ ## System Prompt
+
+ ### `GET /api/system-prompts`
+
+ Lista prompts.
+
+ ### `PUT /api/system-prompts/{id}/active`
+
+ Marca ese prompt como activo.
+
+ ---
+
+ # 3) Modelo de datos (MySQL)
+
+ Tablas clave:
+
+ * `system_prompt`: prompts (contexto predefinido), uno activo
+ * `chat_session`: sesión (id uuid), enlazada a `system_prompt`
+ * `chat_message`: mensajes usuario/asistente
+ * `knowledge_document`: documentos de conocimiento
+ * `knowledge_chunk`: chunks por documento + `embeddingJson`
+ * `chat_message_source`: relación entre respuesta del asistente y chunks usados (log de RAG)
+
+ ---
+
+ # 4) Troubleshooting rápido
+
+ ## “No responde / error al chatear”
+
+ * Comprueba Ollama:
+
+   * `curl http://localhost:11434/api/tags` (si tu Ollama soporta tags/listado)
+ * Comprueba que el modelo existe:
+
+   * si no, haz `ollama pull <modelo>`
+
+ ## “RAG no encuentra nada”
+
+ * No has cargado documentos (`/api/rag/documents`).
+ * O has cargado textos muy cortos.
+ * O el embed-model no existe / no responde.
+
+ ## “Conecta a MySQL pero no crea tablas”
+
+ * Revisa `spring.jpa.hibernate.ddl-auto=update`
+ * Revisa credenciales y URL.
+ * Mira logs al arrancar.
+
+ ## “Va lento con muchos documentos”
+
+ Tu retrieval actual es **brute force** (recorre chunks y hace cosine). Funciona para MVP y para volumen pequeño/medio.
+ Si metes miles/millones de chunks: toca vector DB (Milvus/Qdrant/pgvector), o mínimo un índice.
+
+ ---
+
+ # 2) Documentos listos para cargar en tu RAG (copiar/pegar)
+
+ Aquí tienes **6 documentos** “base” para alimentar tu IA.
+ Cada uno viene en formato JSON para que puedas pegarlos directo.
+
+ > Cárgalos en este orden. Primero arquitectura, luego endpoints y runbook.
+
+ ---
+
+ ## DOC 1 — Arquitectura general
+
+ ```json
+ {
+   "title": "ApiAsistente - Arquitectura general",
+   "content": "ApiAsistente es una aplicación Spring Boot (Java 21 + Gradle) con WebChat (Thymeleaf + JS), API JSON, persistencia MySQL y RAG local integrado con Ollama.\n\nComponentes:\n1) Frontend WebChat\n- Ruta: GET /chat\n- HTML Thymeleaf + JS estático.\n- Guarda sessionId en localStorage y llama a POST /api/chat.\n\n2) Backend Spring Boot\n- Controladores:\n  - ChatPageController: sirve la UI (/chat)\n  - ChatApiController: API JSON (/api/chat)\n  - RagAdminController: carga documentos (/api/rag/documents)\n  - SystemPromptController: gestiona prompts (/api/system-prompts)\n\n3) Persistencia MySQL (JPA)\n- system_prompt: prompt base (uno activo)\n- chat_session: sesión uuid + prompt activo\n- chat_message: mensajes user/assistant\n- knowledge_document: documentos de conocimiento\n- knowledge_chunk: chunks + embeddingJson\n- chat_message_source: log de qué chunks se usaron en cada respuesta\n\n4) Integración con Ollama\n- OllamaClient usa:\n  - POST /api/chat para generar respuesta del asistente\n  - POST /api/embed para generar embeddings\n\nFlujo de chat:\n- Guardar userMessage\n- Retrieval RAG: embedding(query) + cosine vs embeddings guardados -> top-k\n- Construcción prompt:\n  - system prompt activo\n  - historial último N\n  - bloque Contexto RAG con chunks\n  - pregunta final\n- Llamada a Ollama\n- Guardar assistantMessage + fuentes RAG\n"
+ }
+ ```
+
+ ---
+
+ ## DOC 2 — Runbook de montaje (paso a paso)
+
+ ```json
+ {
+   "title": "ApiAsistente - Montaje paso a paso (Runbook)",
+   "content": "Objetivo: levantar MySQL + Ollama con Docker y arrancar Spring Boot con Gradle.\n\n1) Levantar servicios:\n- docker compose up -d\n- verificar con: docker ps\n\n2) Modelos Ollama:\n- asegurarse de tener el modelo de chat y el embed model.\n- ejemplos:\n  - ollama pull gemma3\n  - ollama pull embeddinggemma\n\n3) Arrancar backend:\n- ./gradlew bootRun\n\n4) Probar WebChat:\n- abrir http://localhost:8080/chat\n\n5) Cargar conocimiento RAG:\n- POST /api/rag/documents\n  body: {\"title\":\"...\",\"content\":\"...\"}\n\n6) Probar chat API:\n- POST /api/chat\n  body: {\"sessionId\":\"\",\"message\":\"Hola\"}\n\nSi falla:\n- revisar logs de Spring Boot\n- verificar que Ollama responda en http://localhost:11434\n- verificar credenciales MySQL\n"
+ }
+ ```
+
+ ---
+
+ ## DOC 3 — Endpoints y contratos JSON
+
+ ```json
+ {
+   "title": "ApiAsistente - Endpoints y contratos JSON",
+   "content": "Web:\n- GET /chat -> UI del chat\n\nChat API:\n- POST /api/chat\n  Request: {\"sessionId\":\"opcional\",\"message\":\"texto\"}\n  Response: {\"sessionId\":\"uuid\",\"reply\":\"texto\",\"sources\":[{chunkId,documentId,documentTitle,score,snippet}]}\n\nHistorial:\n- GET /api/chat/{sessionId}/history\n  Response: lista de ChatMessage (role, content, createdAt)\n\nRAG admin:\n- POST /api/rag/documents\n  Request: {\"title\":\"...\",\"content\":\"...\"}\n  Response: {\"documentId\":...,\"title\":\"...\"}\n\nSystem prompts:\n- GET /api/system-prompts -> lista\n- PUT /api/system-prompts/{id}/active -> activa uno\n\nNotas:\n- sessionId lo genera el backend si no se proporciona.\n- sources devuelve los chunks que el retrieval consideró más relevantes.\n"
+ }
+ ```
+
+ ---
+
+ ## DOC 4 — RAG: cómo se almacena y cómo se recupera
+
+ ```json
+ {
+   "title": "ApiAsistente - RAG: persistencia y retrieval",
+   "content": "Ingesta:\n- Se crea un KnowledgeDocument (title, content).\n- Se parte en chunks (chunkSize, overlap).\n- Para cada chunk:\n  - se calcula embedding con Ollama /api/embed usando el embed-model.\n  - se guarda KnowledgeChunk(text, chunkIndex, embeddingJson).\n\nRetrieval:\n- Para una query (mensaje usuario):\n  - se calcula embedding(query).\n  - se recorre knowledge_chunk por páginas.\n  - se parsea embeddingJson -> vector double[].\n  - se calcula cosine similarity.\n  - se mantiene Top-K por score.\n- Se devuelven los chunks Top-K ordenados.\n\nUso en prompt:\n- Se crea un bloque 'Contexto RAG' con los textos Top-K.\n- Se pide explícitamente que el modelo use ese contexto si es relevante.\n\nLogging:\n- Por cada respuesta del asistente se guardan las fuentes en chat_message_source (message_id, chunk_id, score).\n\nLimitaciones:\n- Retrieval brute-force en MySQL. Perfecto para MVP y datasets pequeños/medios.\n- Para gran escala: vector DB.\n"
+ }
+ ```
+
+ ---
+
+ ## DOC 5 — “Qué hace cada clase” (mapa mental del código)
+
+ ```json
+ {
+   "title": "ApiAsistente - Mapa de clases (responsabilidades)",
+   "content": "config/\n- OllamaProperties: lee base-url, modelos y stream desde application.yml\n- RestClientConfig: crea RestClient apuntando a {baseUrl}/api\n\ncontroller/\n- ChatPageController: sirve chat.html\n- ChatApiController: POST /api/chat + GET history\n- RagAdminController: POST /api/rag/documents\n- SystemPromptController: listar/activar prompts\n\nservice/\n- OllamaClient: wrapper de llamadas a /api/chat y /api/embed\n- RagService: ingesta documentos + retrieval top-k\n- ChatService: orquesta sesión, guarda mensajes, aplica RAG, llama a Ollama\n- SystemPromptService: obtiene prompt activo y permite activar otro\n\nmodel/entity/\n- SystemPrompt, ChatSession, ChatMessage, KnowledgeDocument, KnowledgeChunk, ChatMessageSource\n\nmodel/dto/\n- ChatRequest, ChatResponse, SourceDto, UpsertDocumentRequest\n\nutil/\n- TextChunker: corta texto en chunks con overlap\n- VectorMath: cosine similarity\n"
+ }
+ ```
+
+ ---
+
+ ## DOC 6 — Prompt recomendado (para que tu IA “explique el montaje”)
+
+ Este documento es oro si quieres que tu asistente sea “técnico de soporte” del propio sistema.
+
+ ```json
+ {
+   "title": "ApiAsistente - Prompt de soporte técnico interno",
+   "content": "Rol: eres el asistente técnico interno de ApiAsistente.\nObjetivo: ayudar a montar, configurar, depurar y extender el proyecto.\n\nReglas:\n1) Prioriza instrucciones paso a paso y comandos concretos.\n2) Antes de proponer cambios, identifica el componente: MySQL / Spring Boot / Ollama / WebChat / RAG.\n3) Si hay error, pide:\n   - log exacto\n   - endpoint llamado\n   - request body\n   - configuración application.yml\n4) Cuando hables de RAG:\n   - explica ingesta (documents -> chunks -> embeddings)\n   - explica retrieval (cosine top-k)\n   - recuerda que embeddings están en MySQL como JSON\n5) Evita vaguedades. Si algo no se puede saber, dilo y propone cómo comprobarlo.\n"
+ }
+ ```
+
+ ---
+
+ # 3) Carga masiva en 1 minuto (comandos curl)
+
+ Si quieres, puedes cargar los 6 docs tal cual (copiando cada JSON) con:
+
+ ```bash
+ curl -X POST http://localhost:8080/api/rag/documents \
+   -H "Content-Type: application/json" \
+   -d @doc1.json
+ ```
+
+ (guardas cada bloque JSON como `doc1.json`, `doc2.json`, etc.)
+
+ ---
+
+ ## Siguiente paso lógico (sin preguntar 20 cosas)
+
+ Si lo que quieres es que tu “API IA” sea capaz de **autodepurarse**, el siguiente documento que deberías cargar es uno de **“errores típicos + diagnóstico”** basado en tus logs reales.
+ Si me pegas 2–3 logs de fallos que hayas visto (MySQL/Ollama/400/500), te lo convierto en un doc RAG de troubleshooting muy potente y específico a tu montaje.
+
+

@@ -1,0 +1,16 @@
+services:
+  api:
+    image: stevefletesalfaro/apiasistente:1.2
+    container_name: apiasistente
+    ports:
+      - "8080:8080"
+    environment:
+      MYSQL_HOST: apiasistente_mysql
+      MYSQL_PORT: 3306
+      MYSQL_DB: apiasistente_db
+      MYSQL_USER: apiuser
+      MYSQL_PASSWORD: apipassword
+      OLLAMA_BASE_URL: http://ollama:11434/api
+    depends_on:
+      - apiasistente_mysql
+      - ollama
