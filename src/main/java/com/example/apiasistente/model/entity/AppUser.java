@@ -29,6 +29,21 @@ public class AppUser {
     @Column(length = 60) // BCrypt
     private String apiKeyHash;
 
+    public String getApiKeyHash() {
+        return apiKeyHash;
+    }
+
+    public void setApiKeyHash(String apiKeyHash) {
+        this.apiKeyHash = apiKeyHash;
+    }
+
+    public String getApiKeyPrefix() {
+        return apiKeyPrefix;
+    }
+
+    public void setApiKeyPrefix(String apiKeyPrefix) {
+        this.apiKeyPrefix = apiKeyPrefix;
+    }
 
     public Long getId() { return id; }
 
