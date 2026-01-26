@@ -2153,3 +2153,386 @@ Si quieres, en el siguiente paso te preparo (para pegar en tu IA) **3 “prompts
 2. Prompt “Debugger” para que tu IA te dé fixes exactos con mínimo cambio.
 3. Prompt “RAG Engineer” para que implemente memoria persistente (guardar hechos del usuario en KB).
 
+"V3"
+Perfecto. Vamos a hacerlo “pro”: **un paquete de documentos RAG bien troceados**, con **títulos claros**, **contenido listo para pegar**, y luego **pruebas por curl** (subida + consulta) para cerrar el ciclo.
+
+Abajo te dejo:
+
+1. **Estructura recomendada de docs** (títulos + qué meter dentro)
+2. **Contenido listo para pegar** (ya redactado)
+3. **Comandos curl** para: login (cookie), subir docs, subir batch, y preguntar por `/api/chat` (web) o `/api/ext/chat` (API key)
+
+---
+
+## 1) Qué documentos vamos a subir (títulos pro)
+
+Te propongo subir **8 docs** (en rag_admin puedes usar “Subir y trocear” si alguno es enorme):
+
+1. **Contexto - Arquitectura y flujo Chat + Sesiones**
+2. **Contexto - Endpoints Chat (web)**
+3. **Contexto - Endpoints External API (/api/ext)**
+4. **Contexto - Seguridad (SecurityFilterChains, CSRF, cookies, API Key)**
+5. **Contexto - Errores resueltos (CSRF 403, logout, lazy init 500, SpEL null name)**
+6. **Contexto - RAG (carga de docs, chunking, retrieval, max-history 40/50)**
+7. **Contexto - Frontend Chat (chat.html + chat.js) y funcionamiento esperado**
+8. **Contexto - RAG Admin UI (rag_admin.html + rag-admin.js)**
+
+---
+
+## 2) Contenido listo para pegar (docs)
+
+### DOC 1 — **Contexto - Arquitectura y flujo Chat + Sesiones**
+
+Pega esto como contenido:
+
+**Objetivo del sistema**
+
+* Web de chat (Thymeleaf + JS) con login form y CSRF.
+* Chat persistente con sesiones por usuario: crear/listar/activar/renombrar/borrar.
+* Chat usa Ollama + RAG: guarda mensajes y registra fuentes RAG (chunks) por respuesta.
+* API externa para que otras apps llamen al chat y suban RAG docs: `/api/ext/**` con auth por ApiKeyAuthFilter.
+
+**Entidades clave**
+
+* AppUser: usuario autenticado.
+* ChatSession: id UUID string, user, systemPrompt, title, createdAt, lastActivityAt.
+* ChatMessage: session, role(USER/ASSISTANT), content, createdAt.
+* ChatMessageSource: link a mensaje assistant + chunk + score.
+* RAG: documentos y chunks (persistencia vía RagService).
+
+**Flujo chat()**
+
+1. Resolve session (si viene sessionId y pertenece al usuario, ok; si no, usa última o crea nueva).
+2. Guarda mensaje USER.
+3. RAG retrieveTopK(userText) → sources.
+4. Construye mensajes para Ollama:
+
+   * system: systemPrompt activo
+   * history: últimos N mensajes ordenados por createdAt (maxHistory)
+   * user final: bloque “Contexto RAG + pregunta”
+5. ollama.chat(msgs) → assistantText
+6. Guarda mensaje ASSISTANT
+7. Guarda fuentes (ChatMessageSource) con score
+8. Actualiza lastActivityAt y devuelve ChatResponse(sessionId, assistantText, sources)
+
+**Notas**
+
+* maxHistory se usa para recortar el historial que se manda a Ollama.
+* Se dejó margen de consulta: findTopX (ej 50) y luego usar 40.
+
+---
+
+### DOC 2 — **Contexto - Endpoints Chat (web)**
+
+Pega esto:
+
+Base: `/api/chat`
+
+* `GET /api/chat/active`
+
+  * Devuelve sessionId activo para el usuario (último usado o crea nuevo).
+* `POST /api/chat/sessions`
+
+  * Crea una sesión nueva y devuelve sessionId.
+* `GET /api/chat/sessions`
+
+  * Lista sesiones del usuario (SessionSummaryDto).
+* `PUT /api/chat/sessions/{sessionId}/activate`
+
+  * Activa un chat (lo marca como último usado) y devuelve sessionId.
+* `PUT /api/chat/sessions/{sessionId}/title`
+
+  * Renombra sesión (body: RenameSessionRequest {title})
+* `DELETE /api/chat/sessions/{sessionId}`
+
+  * Borra sesión (cascade borra mensajes y fuentes).
+* `POST /api/chat`
+
+  * Chat normal (body: ChatRequest {sessionId?, message}) devuelve ChatResponse {sessionId, answer, sources}
+* `GET /api/chat/{sessionId}/history`
+
+  * Devuelve historial de mensajes del chat, orden asc.
+
+Requisitos seguridad web:
+
+* Autenticación por sesión (form login).
+* CSRF habilitado con cookie XSRF-TOKEN y header X-XSRF-TOKEN desde JS.
+
+---
+
+### DOC 3 — **Contexto - Endpoints External API (/api/ext)**
+
+Pega esto:
+
+Base: `/api/ext`
+
+Auth:
+
+* Stateless
+* CSRF deshabilitado
+* ApiKeyAuthFilter valida API key (o user+token según implementación).
+
+Endpoints:
+
+* `POST /api/ext/chat`
+
+  * Igual que chat normal pero para apps externas.
+  * Body: ChatRequest {sessionId?, message}
+  * Respuesta: ChatResponse con sources RAG.
+
+RAG docs:
+
+* `POST /api/ext/rag/documents`
+
+  * Body: UpsertDocumentRequest {title, content}
+  * Respuesta: {"documentId": <Long>, "title": "..."}
+* `POST /api/ext/rag/documents/batch`
+
+  * Body: [UpsertDocumentRequest...]
+  * Respuesta: lista de maps con documentId y title.
+
+Nota Java Map.of:
+
+* Para mezclar Long + String en Map.of → usar `Map<String, Object>` o castear explícito.
+* En batch, para evitar inferencia rara, construir `new HashMap<String, Object>()` por item o usar Map.<String,Object>of(...)
+
+---
+
+### DOC 4 — **Contexto - Seguridad (SecurityFilterChains, CSRF, cookies, API Key)**
+
+Pega esto:
+
+Hay dos SecurityFilterChain (orden por @Order):
+
+1. Chain externa (Order 1) para `/api/ext/**`
+
+* `securityMatcher("/api/ext/**")`
+* `csrf.disable()`
+* `sessionCreationPolicy(STATELESS)`
+* `addFilterBefore(new ApiKeyAuthFilter(...), UsernamePasswordAuthenticationFilter.class)`
+* `authorize anyRequest authenticated`
+* `cors defaults`
+
+2. Chain web (Order 2) para resto (web)
+
+* CSRF con `CookieCsrfTokenRepository.withHttpOnlyFalse()`
+* Permitir `/login`, `/register`, `/css/**`, `/js/**`, `/chat.js`, `/` (y rag-admin.js si aplica)
+* formLogin con `/login`
+* logout `/logout`
+* session normal
+
+Importante:
+
+* Si existe otro SecurityConfig duplicado, puede causar conflictos. Mantener UNA configuración consolidada.
+* Para endpoints llamados por JS de la web: enviar header `X-XSRF-TOKEN` leyendo cookie `XSRF-TOKEN`.
+
+---
+
+### DOC 5 — **Contexto - Errores resueltos**
+
+Pega esto:
+
+Errores vistos y causa raíz:
+
+1. **403 Forbidden (CSRF / permisos)**
+
+* JS hacía POST sin mandar token CSRF.
+* Fix: CookieCsrfTokenRepository con cookie XSRF-TOKEN + JS manda header X-XSRF-TOKEN.
+
+2. **LazyInitializationException al devolver history**
+
+* Error 500: `Could not write JSON: Could not initialize proxy ... - no session`
+* Causa: devolver entidades JPA (ChatMessage -> session -> user lazy) fuera de transacción, Jackson intenta serializar proxies.
+* Fix recomendado: devolver DTOs (ChatMessageDto) o usar @JsonIgnore en relaciones, o fetch join, o @Transactional(readOnly=true) y evitar serializar session/user.
+
+3. **SpEL: Property or field 'name' cannot be found on null**
+
+* Causa típica: thymeleaf usando `${user.name}` cuando `user` o atributo no existe.
+* Fix: asegurar model attributes o usar null-safe / condiciones `th:if`.
+
+4. **Mappings duplicados**
+
+* Ambiguous mapping por dos controladores mapeando mismo path.
+* Fix: dejar una sola ruta por endpoint.
+
+---
+
+### DOC 6 — **Contexto - RAG (carga de docs, chunking, retrieval, max-history 40/50)**
+
+Pega esto:
+
+RAG objetivos:
+
+* Meter mucho contexto en documentos para que el modelo pueda recuperar hechos (ej: “mi nombre es X”, “mis endpoints”, “mi arquitectura”).
+
+Claves:
+
+* Si no “recuerda” tu nombre: probablemente no está entrando en el RAG correcto o el retrieval no devuelve ese chunk. Solución: subir un doc específico “Perfil usuario” y preguntar de forma que active retrieval.
+* Trocear documentos grandes mejora recall (más precisión de chunk).
+* Ajuste de historial:
+
+  * repo query top 50 (nombre no cambia lógica, cambia límite real).
+  * luego se envían 40 a Ollama, dejando 10 margen para sorting/skip.
+
+Recomendación:
+
+* Documentos cortos (1 tema por doc) y títulos semánticos.
+* Actualizar doc si cambias endpoints/seguridad.
+
+---
+
+### DOC 7 — **Contexto - Frontend Chat (chat.html + chat.js)**
+
+Pega esto:
+
+Frontend web:
+
+* `/chat` carga página y `chat.js` inicializa:
+
+  * llama `/api/chat/active` para session actual
+  * lista sesiones `/api/chat/sessions`
+  * carga historial `/api/chat/{id}/history`
+  * enviar mensaje: POST `/api/chat` con {sessionId, message} + CSRF header
+  * crear chat: POST `/api/chat/sessions` y luego activar/cargar
+
+Detalles CSRF:
+
+* cookie `XSRF-TOKEN`
+* header `X-XSRF-TOKEN`
+
+Expectativas UI:
+
+* Sidebar con sesiones (título editable futuro)
+* Botón “Nuevo chat”
+* Click en sesión → activate + load history
+
+---
+
+### DOC 8 — **Contexto - RAG Admin UI (rag_admin.html + rag-admin.js)**
+
+Pega esto:
+
+Página: `/rag-admin` (Thymeleaf)
+
+* Inputs: title + content
+* Botón “Subir 1” → POST `/api/rag/documents` con CSRF
+* Botón “Subir y trocear” → divide por líneas hasta 6000 chars y hace batch
+* Upload archivos → POST batch
+
+Funciones JS:
+
+* getXsrf() lee cookie XSRF-TOKEN
+* postJson añade header X-XSRF-TOKEN
+* splitIntoDocs trocea por líneas y tamaño maxChars
+
+Nota:
+
+* Asegurar que el backend tiene endpoints:
+
+  * `/api/rag/documents`
+  * `/api/rag/documents/batch`
+    o cambiar el JS a `/api/ext/rag/...` si quieres usar el chain externo (pero ahí no hay sesión ni CSRF).
+
+---
+
+## 3) Curl pro para pruebas (sin adivinar)
+
+### 3.1 Login web (guardar cookie de sesión + XSRF)
+
+Esto depende de tu formLogin. Normalmente:
+
+1. Obtener cookies (incluye XSRF a veces):
+
+```bash
+curl -i -c cookies.txt http://localhost:8080/login
+```
+
+2. Hacer login (ajusta names según tu formulario: `username` y `password` suelen ser estándar):
+
+```bash
+curl -i -c cookies.txt -b cookies.txt \
+  -X POST http://localhost:8080/login \
+  -d "username=steven" \
+  -d "password=TU_PASSWORD"
+```
+
+3. Ver cookies guardadas:
+
+```bash
+cat cookies.txt
+```
+
+### 3.2 Subir doc por endpoint web (con CSRF)
+
+Necesitas mandar el header con el valor de la cookie `XSRF-TOKEN`.
+
+En bash puedes extraerlo así (macOS):
+
+```bash
+XSRF=$(grep XSRF-TOKEN cookies.txt | awk '{print $7}')
+echo $XSRF
+```
+
+Subir doc:
+
+```bash
+curl -i -b cookies.txt \
+  -H "Content-Type: application/json" \
+  -H "X-XSRF-TOKEN: $XSRF" \
+  -d '{"title":"Contexto - Arquitectura y flujo Chat + Sesiones","content":"PEGAR AQUI..."}' \
+  http://localhost:8080/api/rag/documents
+```
+
+Batch:
+
+```bash
+curl -i -b cookies.txt \
+  -H "Content-Type: application/json" \
+  -H "X-XSRF-TOKEN: $XSRF" \
+  -d '[{"title":"Doc1","content":"..."},{"title":"Doc2","content":"..."}]' \
+  http://localhost:8080/api/rag/documents/batch
+```
+
+### 3.3 Probar chat web
+
+```bash
+curl -i -b cookies.txt \
+  -H "Content-Type: application/json" \
+  -H "X-XSRF-TOKEN: $XSRF" \
+  -d '{"sessionId":"","message":"¿Qué endpoints de chat tengo y para qué sirven?"}' \
+  http://localhost:8080/api/chat
+```
+
+---
+
+## 4) Plan de iteración (como un QA)
+
+Cuando subas docs, prueba estas preguntas (una por una):
+
+1. “Enumera mis endpoints de chat web y qué hace cada uno”
+2. “¿Cuál es la diferencia entre /api/chat y /api/ext?”
+3. “¿Qué problema causaba el 500 en history y cómo se arregla?”
+4. “¿Qué hace el RAG Admin y cómo trocea documentos?”
+5. “¿Cuál es mi estrategia de seguridad (CSRF vs stateless)?”
+
+Si falla en alguna:
+
+* el doc es demasiado grande o mal troceado, o falta un doc específico.
+* lo corregimos y lo vuelves a subir.
+
+---
+
+## Importante (seguridad: tu idea del “api-session-id”)
+
+No devuelvas “sessionId” como credencial. **sessionId NO es autenticación**.
+Para apps externas: usa **API Key** (ya lo tienes) o **JWT/OAuth**.
+Si quieres “verificación por teléfono”, eso es otra capa (OTP), pero NO la uses para “dar sessionId”: úsala para emitir **token**.
+
+---
+
+Cuando termines la primera subida por rag_admin o curl, pégame:
+
+* respuesta del POST batch (o logs)
+* una respuesta de chat a una de esas preguntas
+
+y lo dejamos fino hasta que “no haya ningún error ni arreglo pendiente”.

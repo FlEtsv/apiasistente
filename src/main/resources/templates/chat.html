@@ -55,6 +55,7 @@
                     <span class="text-slate-300" sec:authorize="!isAuthenticated()">
                         Usuario: <span class="font-semibold">anon</span>
                     </span>
+
                 </p>
             </div>
         </div>
@@ -64,6 +65,10 @@
                     class="px-3 py-2 rounded-xl text-xs bg-slate-800/70 hover:bg-slate-700/70 border border-slate-700/50 transition">
                 Nuevo chat
             </button>
+            <a href="/rag-admin"
+               class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sm">
+                RAG Admin
+            </a>
 
             <!-- Logout POST + CSRF -->
             <form th:action="@{/logout}" method="post" class="inline">

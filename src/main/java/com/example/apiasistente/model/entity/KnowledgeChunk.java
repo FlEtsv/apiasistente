@@ -17,12 +17,12 @@ public class KnowledgeChunk {
     private int chunkIndex;
 
     @Lob
-    @Column(nullable = false)
+    @Column(name = "text", columnDefinition = "LONGTEXT", nullable = false)
     private String text;
 
     // Embedding como JSON (persistido en MySQL)
     @Lob
-    @Column(nullable = false)
+    @Column(name = "embedding_json", columnDefinition = "LONGTEXT", nullable = false)
     private String embeddingJson;
 
     public Long getId() { return id; }

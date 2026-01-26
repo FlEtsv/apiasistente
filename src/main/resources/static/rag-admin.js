@@ -1,19 +1,34 @@
-function getXsrf() {
+function getCsrfFromMeta() {
+  const token = document.querySelector('meta[name="_csrf"]')?.getAttribute("content");
+  const header = document.querySelector('meta[name="_csrf_header"]')?.getAttribute("content");
+  if (token && header) return { token, header };
+  return null;
+}
+
+function getXsrfFromCookie() {
   const c = document.cookie.split("; ").find(x => x.startsWith("XSRF-TOKEN="));
   if (!c) return null;
   return decodeURIComponent(c.split("=")[1]);
 }
 
 async function postJson(url, body) {
-  const xsrf = getXsrf();
+  // Preferimos meta (Thymeleaf) -> es lo más fiable
+  const meta = getCsrfFromMeta();
+
+  // Fallback cookie (si un día cambias el render o la estrategia)
+  const xsrf = meta ? null : getXsrfFromCookie();
+
+  const headers = { "Content-Type": "application/json" };
+  if (meta) headers[meta.header] = meta.token;
+  else if (xsrf) headers["X-XSRF-TOKEN"] = xsrf;
+
   const res = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(xsrf ? {"X-XSRF-TOKEN": xsrf} : {})
-    },
+    credentials: "same-origin", // CLAVE: manda cookies (JSESSIONID / XSRF-TOKEN)
+    headers,
     body: JSON.stringify(body)
   });
+
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${JSON.stringify(data)}`);
   return data;
@@ -28,7 +43,7 @@ function splitIntoDocs(title, content, maxChars = 6000) {
 
   for (const line of lines) {
     if ((chunk + "\n" + line).length > maxChars) {
-      docs.push({ title: `${title} (part ${part++})`, content: chunk.trim() });
+      if (chunk.trim()) docs.push({ title: `${title} (part ${part++})`, content: chunk.trim() });
       chunk = line;
     } else {
       chunk += (chunk ? "\n" : "") + line;
@@ -49,7 +64,7 @@ document.getElementById("btnUpload")?.addEventListener("click", async () => {
   if (!title || !content.trim()) return log("❌ Falta título o contenido.");
 
   try {
-    const out = await postJson("/api/rag/documents", {title, content});
+    const out = await postJson("/api/rag/documents", { title, content });
     log("✅ Subido: " + JSON.stringify(out));
   } catch (e) {
     log("❌ Error: " + e.message);
