@@ -96,7 +96,7 @@ public class ChatService {
         msgs.add(new OllamaClient.Message("system", prompt.getContent()));
 
         // histórico (últimos N)
-        var historyDesc = messageRepo.findTop20BySession_IdOrderByCreatedAtDesc(session.getId());
+        var historyDesc = messageRepo.findTop50BySession_IdOrderByCreatedAtDesc(session.getId());
         historyDesc.stream()
                 .sorted(Comparator.comparing(ChatMessage::getCreatedAt))
                 .skip(Math.max(0, historyDesc.size() - maxHistory))
