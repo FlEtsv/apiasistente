@@ -23,6 +23,13 @@ public class AppUser {
     @Column(name="created_at", nullable=false)
     private Instant createdAt = Instant.now();
 
+    @Column(length = 16, unique = true)
+    private String apiKeyPrefix;
+
+    @Column(length = 60) // BCrypt
+    private String apiKeyHash;
+
+
     public Long getId() { return id; }
 
     public String getUsername() { return username; }

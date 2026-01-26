@@ -1865,4 +1865,291 @@ Si me dices **qué modelos exactos quieres** (chat + embeddings) y cuánto texto
  Si lo que quieres es que tu “API IA” sea capaz de **autodepurarse**, el siguiente documento que deberías cargar es uno de **“errores típicos + diagnóstico”** basado en tus logs reales.
  Si me pegas 2–3 logs de fallos que hayas visto (MySQL/Ollama/400/500), te lo convierto en un doc RAG de troubleshooting muy potente y específico a tu montaje.
 
+V2..
+
+Aquí tienes un **“contexto completo”** (tipo *brief técnico + estado del proyecto*) para que lo pegues tal cual en tu IA (como memoria / prompt de proyecto). Está pensado para que otra IA entienda **qué hay montado, qué fallaba, qué se arregló y qué falta**.
+
+---
+
+## CONTEXTO PROYECTO — API Asistente (Spring Boot + MySQL + UI Chat + RAG + Ollama)
+
+### Objetivo
+
+Aplicación tipo “Premium Chat” con:
+
+* **Auth**: login/register con Spring Security.
+* **Chats por sesiones**: crear, activar, listar, renombrar, borrar.
+* **Mensajería**: guardar historial (user/assistant) en BD.
+* **RAG**: indexar documentos/chunks y recuperar contexto para contestar.
+* **LLM**: Ollama como backend de chat.
+* **Frontend**: `chat.html` + `chat.js` con sidebar de sesiones (desktop + drawer mobile).
+
+---
+
+## Stack técnico
+
+* **Java 21**
+* **Spring Boot 3.5.9**
+* **Spring Security + JPA/Hibernate**
+* **MySQL 8.0 (Docker)**
+* **TailwindCDN** en plantillas Thymeleaf
+* **Ollama** vía cliente HTTP (`OllamaClient`)
+* **RAG** vía `RagService` (retrieveTopK + toSourceDtos + persistencia KB)
+
+---
+
+## Docker MySQL (compose actual)
+
+```yaml
+version: '3.8'
+services:
+  db:
+    image: mysql:8.0
+    container_name: apiasistente_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: apiasistente_db
+      MYSQL_USER: apiuser
+      MYSQL_PASSWORD: apipassword
+    ports:
+      - "3306:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+volumes:
+  db_data:
+```
+
+### Borrado total de datos (cuando hay conflictos)
+
+**Opción A (rápida y limpia):**
+
+```bash
+docker compose down -v
+docker compose up -d
+```
+
+**Opción B (desde dentro del contenedor, sin borrar volumen):**
+
+```bash
+docker exec -it apiasistente_mysql mysql -uroot -proot_password -e "
+DROP DATABASE IF EXISTS apiasistente_db;
+CREATE DATABASE apiasistente_db;
+"
+```
+
+---
+
+## BD (tablas que existen)
+
+Se confirmó que existen:
+
+* `app_user`
+* `chat_session`
+* `chat_message`
+* `chat_message_source`
+* `knowledge_document`
+* `knowledge_chunk`
+* `system_prompt`
+
+---
+
+## Seguridad / sesiones
+
+* Login funciona, se autentica el usuario (DaoAuthenticationProvider “Authenticated user”).
+* Se arreglaron temas de logout (antes reventaba o redirigía raro).
+* Se arreglaron 403 por CSRF en llamadas fetch:
+  **Chat.js** debe enviar token CSRF en headers para POST/PUT/DELETE a `/api/chat/...`.
+
+---
+
+## Endpoints API (ChatApiController)
+
+Base: `/api/chat`
+
+* `GET  /api/chat/active` → retorna `{ sessionId }` (activa o crea una)
+* `POST /api/chat/sessions` → crea nueva sesión `{ sessionId }`
+* `GET  /api/chat/sessions` → lista sesiones (summary DTO)
+* `PUT  /api/chat/sessions/{sessionId}/activate` → activa sesión `{ sessionId }`
+* `PUT  /api/chat/sessions/{sessionId}/title` → renombra `{ ok:true }`
+* `DELETE /api/chat/sessions/{sessionId}` → borra `{ ok:true }`
+* `POST /api/chat` → envía mensaje (ChatRequest → ChatResponse)
+* `GET /api/chat/{sessionId}/history` → historial
+
+---
+
+## Problema crítico detectado (historial) — LazyInitialization / JSON
+
+Error real visto:
+
+* `HttpMessageNotWritableException` + `LazyInitializationException`
+* “Could not initialize proxy ... ChatSession$HibernateProxy["user"] - no session”
+* Causa: `history()` está devolviendo **entidades JPA** (`List<ChatMessage>`) y Jackson intenta serializar `message.session.user` (LAZY) fuera de transacción.
+
+### Regla de oro aplicada / necesaria
+
+✅ **No devolver Entities por REST**.
+➡️ `history()` debe devolver **DTOs** (`ChatMessageDto`) que no contengan referencias lazy.
+
+Solución recomendada (estado “pendiente de aplicar si no está ya hecho”):
+
+* `GET /history` devuelve:
+
+  * id
+  * role
+  * content
+  * createdAt
+    y nada de `session` ni `user`.
+
+---
+
+## Lógica de chat (ChatService actual — resumen)
+
+Flujo principal `chat(username, maybeSessionId, userText)`:
+
+1. Validar usuario (`requireUser`)
+2. Resolver sesión:
+
+   * si viene sessionId → validar que pertenece al usuario
+   * si no → obtener la última activa o crear una
+3. Guardar mensaje USER en `chat_message`
+4. RAG: `retrieveTopK(userText)` → sources
+5. Preparar mensajes para Ollama:
+
+   * system prompt (system)
+   * historial reciente del chat (máximo N)
+   * bloque con “Contexto RAG”
+6. `assistantText = ollama.chat(msgs)`
+7. Guardar mensaje ASSISTANT
+8. Guardar links a chunks (chat_message_source)
+9. Touch session (lastActivityAt)
+
+### Ajuste de historial para contexto (lo último que hiciste)
+
+* `rag.max-history = 40`
+* repo `findTop50BySession_IdOrderByCreatedAtDesc`
+* luego:
+
+  * orden ASC
+  * quedarse con últimos 40
+    ✅ Esto **sí cambia la lógica**, no es solo nombre:
+* ahora hay buffer: **50 traídos / 40 usados / 10 de margen**
+
+---
+
+## Frontend (chat.html)
+
+* Sidebar sesiones (desktop y móvil)
+* Botón “Nuevo chat”
+* Render de mensajes
+* Muestra usuario: `th:text="${#authentication.name}"`
+* Campo sessionId: `<p id="sid">-</p>` (lo rellena `chat.js`)
+
+Problema antiguo:
+
+* SpEL: `${#authentication.name}` reventaba cuando auth era null en ciertas pantallas.
+  Solución típica:
+* En plantillas públicas (login/register) NO usar `#authentication.name`.
+* En chat.html sí, porque es ruta protegida.
+
+---
+
+## Frontend (chat.js) — responsabilidades esperadas
+
+* Inicializar:
+
+  * pedir sesión activa `/api/chat/active`
+  * actualizar `sid`
+  * cargar sesiones `/api/chat/sessions`
+  * activar una al click (PUT activate)
+  * cargar historial `/api/chat/{sid}/history`
+* Enviar mensaje:
+
+  * POST `/api/chat` con `{ sessionId, message }`
+* CSRF:
+
+  * leer token (cookie/header/meta)
+  * mandar `X-CSRF-TOKEN` en mutaciones (POST/PUT/DELETE)
+* Gestión de errores:
+
+  * si 403 → aviso “CSRF/permisos”
+  * si 500 → mostrar payload y log simplificado
+
+---
+
+## RAG (situación actual)
+
+Síntoma:
+
+* Usuario dice “mi nombre es X”
+* Luego pregunta “¿cuál es mi nombre?”
+* El modelo responde que no lo sabe
+
+Causa más probable:
+
+* Estás usando RAG como **recuperación de documentos**, pero **no estás guardando memorias del chat** en el knowledge base.
+* El historial ayuda a corto plazo, pero si cambias de sesión o pasa el límite de `maxHistory`, se pierde.
+
+Solución típica:
+
+* Añadir “memoria” al RAG:
+
+  * Cuando el usuario dice algo tipo “mi nombre es…”, guardar eso como `KnowledgeDocument` / `KnowledgeChunk`.
+  * O crear endpoint explícito “Guardar memoria” y el usuario/tu app lo llama.
+* Luego, al preguntar “mi nombre”, `retrieveTopK()` debe devolver ese chunk.
+
+---
+
+## Errores históricos que aparecieron durante el desarrollo (y cómo se fueron resolviendo)
+
+* `Data too long for column 'content'` → column debe ser TEXT/LONGTEXT (no VARCHAR corto).
+* `Incorrect datetime value: '0000-00-00 00:00:00'` → definir columna como nullable o default correcto y no insertar “cero”.
+* 403 CSRF en `/api/chat` y `/activate` → el fetch debía incluir token.
+* Logout roto → se ajustó en SecurityConfig (logout success url / invalid session)
+* “No crea usuarios” → se comprobó insert en `app_user` y que login autentica (ya se ve “Authenticated user”).
+
+---
+
+## Estado actual (lo último confirmado)
+
+* Login/registro: ✅ funciona
+* Logout: ✅ funciona
+* Crear chat / mandar mensaje: ✅ llegó a funcionar
+* Historial: ❌ ahora falla por LazyInitialization (500 al serializar)
+* Renombrar chats: endpoint existe, falta UI en chat.js (doble click / input)
+* RAG “memoria”: ❌ no persistente (hay que guardar datos importantes al KB)
+
+---
+
+## Commit más reciente (lo que me pediste)
+
+**Mensaje propuesto:**
+`feat(chat): ampliar buffer historial a 50 y limitar contexto a 40 (margen 10)`
+
+**Contenido del commit:**
+
+* Spring Data derived query: `findTop50...Desc`
+* `rag.max-history=40`
+* lógica: traer 50 y enviar 40 al LLM
+
+---
+
+## NOTA IMPORTANTE (bandera roja en tu ChatService pegado)
+
+En el código que pegaste hay un bloque final que huele a “mezcla de versiones”:
+
+* aparece `historyDto()` usando `chatMessageRepository` (pero arriba el repo se llama `messageRepo`)
+* aparece `requireOwnedSession(sessionId)` como si devolviera `ChatSession`, pero tu `requireOwnedSession(AppUser, sessionId)` es void
+  Eso **si está en tu rama real**, debería **ni compilar**.
+  Si compila, entonces ese bloque NO está realmente en tu proyecto o lo tienes comentado.
+  👉 Recomendación: eliminarlo o reescribirlo limpio en el refactor del historial a DTO.
+
+---
+
+# FIN DEL CONTEXTO
+
+Si quieres, en el siguiente paso te preparo (para pegar en tu IA) **3 “prompts operativos”**:
+
+1. Prompt “Arquitecto” para que tu IA mantenga coherencia de estructura y endpoints.
+2. Prompt “Debugger” para que tu IA te dé fixes exactos con mínimo cambio.
+3. Prompt “RAG Engineer” para que implemente memoria persistente (guardar hechos del usuario en KB).
 

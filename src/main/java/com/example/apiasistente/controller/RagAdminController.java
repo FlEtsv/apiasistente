@@ -20,4 +20,12 @@ public class RagAdminController {
         var doc = ragService.upsertDocument(req.getTitle(), req.getContent());
         return java.util.Map.of("documentId", doc.getId(), "title", doc.getTitle());
     }
+    @PostMapping("/documents/batch")
+    public Object upsertBatch(@Valid @RequestBody java.util.List<UpsertDocumentRequest> reqs) {
+        return reqs.stream().map(req -> {
+            var doc = ragService.upsertDocument(req.getTitle(), req.getContent());
+            return java.util.Map.of("documentId", doc.getId(), "title", doc.getTitle());
+        }).toList();
+    }
+
 }
