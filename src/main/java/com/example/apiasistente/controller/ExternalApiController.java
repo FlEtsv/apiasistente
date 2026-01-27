@@ -3,6 +3,7 @@ package com.example.apiasistente.controller;
 
 import com.example.apiasistente.model.dto.ChatRequest;
 import com.example.apiasistente.model.dto.ChatResponse;
+import com.example.apiasistente.model.dto.MemoryRequest;
 import com.example.apiasistente.model.dto.UpsertDocumentRequest;
 import com.example.apiasistente.model.dto.UpsertDocumentResponse;
 import com.example.apiasistente.service.ChatService;
@@ -43,6 +44,12 @@ public class ExternalApiController {
             var doc = ragService.upsertDocument(r.getTitle(), r.getContent());
             return new UpsertDocumentResponse(doc.getId(), doc.getTitle());
         }).toList();
+    }
+
+    @PostMapping("/rag/memory")
+    public UpsertDocumentResponse storeMemory(@Valid @RequestBody MemoryRequest req, Principal principal) {
+        var doc = ragService.storeMemory(principal.getName(), req.getTitle(), req.getContent());
+        return new UpsertDocumentResponse(doc.getId(), doc.getTitle());
     }
 
 }

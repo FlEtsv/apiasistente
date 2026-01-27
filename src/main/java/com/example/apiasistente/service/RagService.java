@@ -12,7 +12,13 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.*;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.PriorityQueue;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class RagService {
@@ -30,11 +36,16 @@ public class RagService {
     @Value("${rag.chunk.overlap:150}")
     private int overlap;
 
+    @Value("${rag.cache.enabled:true}")
+    private boolean cacheEnabled;
+
     public RagService(KnowledgeDocumentRepository docRepo, KnowledgeChunkRepository chunkRepo, OllamaClient ollama) {
         this.docRepo = docRepo;
         this.chunkRepo = chunkRepo;
         this.ollama = ollama;
     }
+
+    private final Map<Long, double[]> embeddingCache = new ConcurrentHashMap<>();
 
     @Transactional
     public KnowledgeDocument upsertDocument(String title, String content) {
@@ -56,9 +67,21 @@ public class RagService {
             double[] emb = (i < embeddings.size()) ? embeddings.get(i) : new double[0];
             c.setEmbeddingJson(ollama.toJson(emb));
 
-            chunkRepo.save(c);
+            c = chunkRepo.save(c);
+            if (cacheEnabled && emb.length > 0) {
+                embeddingCache.put(c.getId(), emb);
+            }
         }
         return doc;
+    }
+
+    @Transactional
+    public KnowledgeDocument storeMemory(String username, String title, String content) {
+        String cleanTitle = (title == null) ? "" : title.trim();
+        if (cleanTitle.isBlank()) {
+            cleanTitle = "Memoria/" + username + "/" + Instant.now();
+        }
+        return upsertDocument(cleanTitle, content);
     }
 
     /**
@@ -67,24 +90,27 @@ public class RagService {
      */
     public List<ScoredChunk> retrieveTopK(String query) {
         double[] q = ollama.embedOne(query);
+        if (q.length == 0) return List.of();
 
-        PriorityQueue<ScoredChunk> heap = new PriorityQueue<>(Comparator.comparingDouble(ScoredChunk::score)); // min-heap
+        PriorityQueue<ScoredChunkId> heap = new PriorityQueue<>(Comparator.comparingDouble(ScoredChunkId::score)); // min-heap
         int page = 0;
         int size = 500;
 
         while (true) {
-            var slice = chunkRepo.findAll(PageRequest.of(page, size));
+            var slice = chunkRepo.findEmbeddingPage(PageRequest.of(page, size));
             if (slice.isEmpty()) break;
 
-            for (KnowledgeChunk c : slice.getContent()) {
-                double[] v = ollama.fromJson(c.getEmbeddingJson());
+            for (var view : slice.getContent()) {
+                double[] v = cacheEnabled
+                        ? embeddingCache.computeIfAbsent(view.getId(), key -> ollama.fromJson(view.getEmbeddingJson()))
+                        : ollama.fromJson(view.getEmbeddingJson());
                 double score = VectorMath.cosine(q, v);
 
                 if (heap.size() < topK) {
-                    heap.add(new ScoredChunk(c, score));
+                    heap.add(new ScoredChunkId(view.getId(), score));
                 } else if (score > heap.peek().score()) {
                     heap.poll();
-                    heap.add(new ScoredChunk(c, score));
+                    heap.add(new ScoredChunkId(view.getId(), score));
                 }
             }
 
@@ -92,9 +118,19 @@ public class RagService {
             page++;
         }
 
-        List<ScoredChunk> out = new ArrayList<>(heap);
-        out.sort(Comparator.comparingDouble(ScoredChunk::score).reversed());
-        return out;
+        List<ScoredChunkId> out = new ArrayList<>(heap);
+        out.sort(Comparator.comparingDouble(ScoredChunkId::score).reversed());
+        if (out.isEmpty()) return List.of();
+
+        List<Long> ids = out.stream().map(ScoredChunkId::chunkId).toList();
+        List<KnowledgeChunk> chunks = chunkRepo.findWithDocumentByIdIn(ids);
+        Map<Long, KnowledgeChunk> chunkById = chunks.stream()
+                .collect(java.util.stream.Collectors.toMap(KnowledgeChunk::getId, c -> c));
+
+        return out.stream()
+                .map(sc -> new ScoredChunk(chunkById.get(sc.chunkId()), sc.score()))
+                .filter(sc -> sc.chunk() != null)
+                .toList();
     }
 
     public List<SourceDto> toSourceDtos(List<ScoredChunk> scored) {
@@ -106,6 +142,8 @@ public class RagService {
             return new SourceDto(c.getId(), d.getId(), d.getTitle(), sc.score(), snippet);
         }).toList();
     }
+
+    private record ScoredChunkId(Long chunkId, double score) {}
 
     public record ScoredChunk(KnowledgeChunk chunk, double score) {}
 }
