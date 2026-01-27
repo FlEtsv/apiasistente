@@ -40,6 +40,8 @@ ollama:
 rag:
   top-k: 5
   max-history: 40
+  cache:
+    enabled: true
   chunk:
     size: 900
     overlap: 150
