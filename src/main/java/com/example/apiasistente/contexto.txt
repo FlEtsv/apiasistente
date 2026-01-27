@@ -2536,3 +2536,37 @@ Cuando termines la primera subida por rag_admin o curl, pégame:
 * una respuesta de chat a una de esas preguntas
 
 y lo dejamos fino hasta que “no haya ningún error ni arreglo pendiente”.
+
+6) CURL para EXT (lo que tú querías)
+Sin cookies, sin CSRF.
+6.1 Chat
+API_KEY="TU_TOKEN_EN_CLARO"
+
+curl -s http://localhost:8080/api/ext/chat \
+  -H "X-API-KEY: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"sessionId":null,"message":"Hola desde mi web"}'
+6.2 Subir doc RAG
+curl -s http://localhost:8080/api/ext/rag/documents \
+  -H "X-API-KEY: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Contexto - Endpoints","content":"...texto..."}'
+6.3 Subir batch
+curl -s http://localhost:8080/api/ext/rag/documents/batch \
+  -H "X-API-KEY: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '[{"title":"A","content":"aaa"},{"title":"B","content":"bbb"}]'
+
+
+
+9.2 Chat EXT (sin cookies, sin CSRF)
+curl -s http://localhost:8080/api/ext/chat \
+  -H "Content-Type: application/json" \
+  -H "X-API-KEY: $APIKEY" \
+  -d '{"sessionId":"","message":"Hola desde mi web externa"}'
+9.3 Subir doc EXT (queda con owner=principal)
+curl -s http://localhost:8080/api/ext/rag/documents \
+  -H "Content-Type: application/json" \
+  -H "X-API-KEY: $APIKEY" \
+  -d '{"title":"Contexto Web Externa","content":"Esto lo sube mi web personal..."}'
+✅ Eso ya cumple tu objetivo: tu web NO guarda credenciales del usuario final, solo usa TU api key.

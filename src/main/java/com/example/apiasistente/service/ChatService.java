@@ -85,7 +85,7 @@ public class ChatService {
         messageRepo.save(userMsg);
 
         // 5) RAG: recuperar chunks relevantes
-        var scored = ragService.retrieveTopK(userText);
+        var scored = ragService.retrieveTopKForOwnerOrGlobal(userText, username);
         List<SourceDto> sources = ragService.toSourceDtos(scored);
 
         // 6) Construir mensajes para Ollama

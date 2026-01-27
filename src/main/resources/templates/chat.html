@@ -69,6 +69,10 @@
                class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sm">
                 RAG Admin
             </a>
+            <button id="openApiKeys"
+                    class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sm">
+                API Keys
+            </button>
 
             <!-- Logout POST + CSRF -->
             <form th:action="@{/logout}" method="post" class="inline">
@@ -166,8 +170,101 @@
         </section>
     </div>
 </main>
+<!-- MODAL API KEYS -->
+<div id="apiKeysModal" class="fixed inset-0 z-[999] hidden">
+    <div id="apiKeysBackdrop" class="absolute inset-0 bg-black/60"></div>
+
+    <div class="absolute inset-0 flex items-center justify-center p-4">
+        <div class="glass w-full max-w-3xl rounded-2xl border border-slate-700/50 overflow-hidden">
+            <div class="flex items-center justify-between p-4 border-b border-slate-700/50">
+                <div>
+                    <h3 class="text-lg font-semibold">API Keys</h3>
+                    <p class="text-xs text-slate-400">Crea, lista y revoca claves para /api/ext/**</p>
+                </div>
+                <button id="closeApiKeys"
+                        class="px-3 py-2 rounded-xl text-xs bg-slate-800/70 hover:bg-slate-700/70 border border-slate-700/50">
+                    Cerrar
+                </button>
+            </div>
+
+            <div class="p-4 space-y-4">
+                <!-- Crear -->
+                <div class="bg-slate-900/40 border border-slate-700/40 rounded-2xl p-4">
+                    <div class="flex items-end gap-2">
+                        <div class="flex-1">
+                            <label class="text-xs text-slate-400">Etiqueta</label>
+                            <input id="apiKeyLabel"
+                                   class="mt-1 w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm outline-none"
+                                   placeholder="Ej: Web personal / Scraper / Bot Telegram"/>
+                        </div>
+                        <button id="btnCreateApiKey"
+                                class="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm">
+                            Crear
+                        </button>
+                    </div>
+
+                    <div id="apiKeyCreatedBox" class="hidden mt-3 p-3 rounded-xl bg-emerald-900/20 border border-emerald-700/40">
+                        <p class="text-xs text-emerald-300 font-semibold">✅ Clave creada (se muestra una sola vez)</p>
+                        <pre id="apiKeyCreatedValue" class="mt-2 text-[11px] text-slate-200 font-mono whitespace-pre-wrap break-all"></pre>
+                        <div class="mt-2 flex gap-2">
+                            <button id="btnCopyApiKey"
+                                    class="px-3 py-2 rounded-xl text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700">
+                                Copiar
+                            </button>
+                            <button id="btnHideApiKey"
+                                    class="px-3 py-2 rounded-xl text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700">
+                                Ocultar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Lista -->
+                <div class="bg-slate-900/40 border border-slate-700/40 rounded-2xl p-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <h4 class="font-semibold">Tus claves</h4>
+                        <button id="btnRefreshApiKeys"
+                                class="px-3 py-2 rounded-xl text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700">
+                            Refrescar
+                        </button>
+                    </div>
+
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead class="text-slate-400 text-xs">
+                            <tr class="border-b border-slate-700/40">
+                                <th class="text-left py-2">Label</th>
+                                <th class="text-left py-2">Prefix</th>
+                                <th class="text-left py-2">Created</th>
+                                <th class="text-left py-2">Last used</th>
+                                <th class="text-left py-2">Revoked</th>
+                                <th class="text-right py-2">Acción</th>
+                            </tr>
+                            </thead>
+                            <tbody id="apiKeysTbody" class="text-slate-200"></tbody>
+                        </table>
+                    </div>
+
+                    <p id="apiKeysEmpty" class="hidden mt-3 text-xs text-slate-400">No hay claves todavía.</p>
+                    <p id="apiKeysError" class="hidden mt-3 text-xs text-red-400"></p>
+                </div>
+
+                <!-- Cómo usar -->
+                <div class="bg-slate-900/30 border border-slate-700/30 rounded-2xl p-4">
+                    <p class="text-xs text-slate-400 mb-2">Uso desde curl / web externa:</p>
+                    <pre class="text-[11px] text-blue-300/80 font-mono whitespace-pre-wrap">curl -s http://localhost:8080/api/ext/chat \
+  -H "Content-Type: application/json" \
+  -H "X-API-KEY: TU_API_KEY" \
+  -d '{"sessionId":"","message":"Hola desde mi web"}'</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 
 <!-- IMPORTANTE: cache-busting para que NO uses un chat.js viejo -->
 <script src="/chat.js?v=4"></script>
+<script src="/api-keys.js?v=1"></script>
+
 </body>
 </html>

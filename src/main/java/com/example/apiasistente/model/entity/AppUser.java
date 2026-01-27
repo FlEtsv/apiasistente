@@ -28,6 +28,29 @@ public class AppUser {
 
     @Column(length = 60) // BCrypt
     private String apiKeyHash;
+    // AppUser.java
+    @Column(name = "api_key_sha256", length = 64, unique = true)
+    private String apiKeySha256;
+
+    // ejemplo: "CHAT,RAG_WRITE"
+    @Column(name = "api_scopes", length = 255)
+    private String apiScopes;
+
+    public String getApiKeySha256() {
+        return apiKeySha256;
+    }
+
+    public void setApiKeySha256(String apiKeySha256) {
+        this.apiKeySha256 = apiKeySha256;
+    }
+
+    public String getApiScopes() {
+        return apiScopes;
+    }
+
+    public void setApiScopes(String apiScopes) {
+        this.apiScopes = apiScopes;
+    }
 
     public String getApiKeyHash() {
         return apiKeyHash;

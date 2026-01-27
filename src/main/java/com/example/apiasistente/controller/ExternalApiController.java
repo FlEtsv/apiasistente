@@ -33,23 +33,25 @@ public class ExternalApiController {
     }
 
     @PostMapping("/rag/documents")
-    public UpsertDocumentResponse upsert(@Valid @RequestBody UpsertDocumentRequest req) {
-        var doc = ragService.upsertDocument(req.getTitle(), req.getContent());
+    public UpsertDocumentResponse upsert(@Valid @RequestBody UpsertDocumentRequest req, Principal principal) {
+        var doc = ragService.upsertDocumentForOwner(principal.getName(), req.getTitle(), req.getContent());
         return new UpsertDocumentResponse(doc.getId(), doc.getTitle());
     }
 
     @PostMapping("/rag/documents/batch")
-    public List<UpsertDocumentResponse> upsertBatch(@Valid @RequestBody List<UpsertDocumentRequest> reqs) {
+    public List<UpsertDocumentResponse> upsertBatch(@Valid @RequestBody List<UpsertDocumentRequest> reqs, Principal principal) {
+        String owner = principal.getName();
         return reqs.stream().map(r -> {
-            var doc = ragService.upsertDocument(r.getTitle(), r.getContent());
+            var doc = ragService.upsertDocumentForOwner(owner, r.getTitle(), r.getContent());
             return new UpsertDocumentResponse(doc.getId(), doc.getTitle());
         }).toList();
     }
+
 
     @PostMapping("/rag/memory")
     public UpsertDocumentResponse storeMemory(@Valid @RequestBody MemoryRequest req, Principal principal) {
         var doc = ragService.storeMemory(principal.getName(), req.getTitle(), req.getContent());
         return new UpsertDocumentResponse(doc.getId(), doc.getTitle());
     }
-
 }
+
