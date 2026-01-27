@@ -34,12 +34,19 @@ public class KnowledgeDocument {
     @Column(nullable = false)
     private Instant createdAt = Instant.now();
 
-    @Column(nullable = false)
-    private Instant updatedAt = Instant.now();
+    @Column(name = "updated_at")
+    private Instant updatedAt;
+
+    @PrePersist
+    public void prePersist() {
+        var now = Instant.now();
+        if (createdAt == null) createdAt = now;
+        if (updatedAt == null) updatedAt = now;
+    }
 
     @PreUpdate
-    public void onUpdate() {
-        this.updatedAt = Instant.now();
+    public void preUpdate() {
+        updatedAt = Instant.now();
     }
 
     // getters/setters

@@ -33,13 +33,30 @@ public class WebSecurityConfig {
     @Order(2)
     SecurityFilterChain webChain(HttpSecurity http) throws Exception {
 
-        http.csrf(csrf -> csrf.csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse()))
+        http
+                .csrf(csrf -> csrf.csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse()))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/login", "/register", "/css/**", "/js/**", "/images/**", "/").permitAll()
+                        // páginas públicas
+                        .requestMatchers("/login", "/register", "/error").permitAll()
+
+                        // estáticos típicos
+                        .requestMatchers("/css/**", "/js/**", "/images/**", "/favicon.ico").permitAll()
+
+                        // estáticos sueltos (TU caso real)
+                        .requestMatchers("/chat.js", "/api-keys.js", "/rag-admin.js").permitAll()
+
+                        // NO permitas "/" si ahí está el chat. Debe pedir login
                         .anyRequest().authenticated()
                 )
-                .formLogin(form -> form.loginPage("/login").permitAll())
-                .logout(l -> l.logoutUrl("/logout").logoutSuccessUrl("/login?logout").permitAll())
+                .formLogin(form -> form
+                        .loginPage("/login")
+                        .permitAll()
+                )
+                .logout(l -> l
+                        .logoutUrl("/logout")
+                        .logoutSuccessUrl("/login?logout")
+                        .permitAll()
+                )
                 .cors(Customizer.withDefaults());
 
         return http.build();
