@@ -268,8 +268,8 @@ async function renameSessionPrompt(id, currentTitle) {
   const title = next.trim();
   if (!title) return;
 
-  const res = await fetch(`/api/chat/sessions/${id}`, {
-    method: 'PATCH',
+  const res = await fetch(`/api/chat/sessions/${id}/title`, {
+    method: 'PUT',
     headers: withCsrf({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ title })
   });
