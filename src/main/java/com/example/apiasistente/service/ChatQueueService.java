@@ -74,9 +74,11 @@ public class ChatQueueService {
             while (true) {
                 QueuedChat next = queue.poll();
                 if (next == null) {
-                    queue.unmarkProcessing();
-                    cleanupIfIdle(queueKey, queue);
-                    return;
+                    if (queue.stopProcessingIfIdle()) {
+                        cleanupIfIdle(queueKey, queue);
+                        return;
+                    }
+                    continue;
                 }
 
                 applyDelay();
@@ -151,8 +153,12 @@ public class ChatQueueService {
             return true;
         }
 
-        synchronized void unmarkProcessing() {
-            processing = false;
+        synchronized boolean stopProcessingIfIdle() {
+            if (queue.isEmpty()) {
+                processing = false;
+                return true;
+            }
+            return false;
         }
 
         synchronized boolean isIdle() {
