@@ -6,7 +6,7 @@ import com.example.apiasistente.model.dto.ChatResponse;
 import com.example.apiasistente.model.dto.MemoryRequest;
 import com.example.apiasistente.model.dto.UpsertDocumentRequest;
 import com.example.apiasistente.model.dto.UpsertDocumentResponse;
-import com.example.apiasistente.service.ChatService;
+import com.example.apiasistente.service.ChatQueueService;
 import com.example.apiasistente.service.RagService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
@@ -19,17 +19,22 @@ import java.util.Map;
 @RequestMapping("/api/ext")
 public class ExternalApiController {
 
-    private final ChatService chatService;
+    private final ChatQueueService chatQueueService;
     private final RagService ragService;
 
-    public ExternalApiController(ChatService chatService, RagService ragService) {
-        this.chatService = chatService;
+    public ExternalApiController(ChatQueueService chatQueueService, RagService ragService) {
+        this.chatQueueService = chatQueueService;
         this.ragService = ragService;
     }
 
     @PostMapping("/chat")
     public ChatResponse chat(@Valid @RequestBody ChatRequest req, Principal principal) {
-        return chatService.chat(principal.getName(), req.getSessionId(), req.getMessage());
+        return chatQueueService.chatAndWait(
+                principal.getName(),
+                req.getSessionId(),
+                req.getMessage(),
+                req.getModel()
+        );
     }
 
     @PostMapping("/rag/documents")
@@ -54,4 +59,3 @@ public class ExternalApiController {
         return new UpsertDocumentResponse(doc.getId(), doc.getTitle());
     }
 }
-

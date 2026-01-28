@@ -6,6 +6,7 @@ const chatEl = document.getElementById('chat');
 const inputEl = document.getElementById('input');
 const sendBtn = document.getElementById('send');
 const sidEl = document.getElementById('sid');
+const modelSelectEl = document.getElementById('modelSelect');
 
 const sessionListEl = document.getElementById('sessionList');
 const sessionListMobileEl = document.getElementById('sessionListMobile');
@@ -22,6 +23,7 @@ const newChatBtn = document.getElementById('newChat');
 let sessionId = null;
 let sessionsCache = [];
 let isLoadingHistory = false;
+const MODEL_STORAGE_KEY = 'chat.model';
 
 function getCsrf() {
   const token = document.querySelector('meta[name="_csrf"]')?.getAttribute('content');
@@ -113,6 +115,17 @@ function showTyping() {
 
 function setSidLabel(id) {
   sidEl.textContent = id ? id.substring(0, 8) : '-';
+}
+
+function loadModelSelection() {
+  if (!modelSelectEl) return;
+  const saved = localStorage.getItem(MODEL_STORAGE_KEY);
+  if (saved) {
+    modelSelectEl.value = saved;
+  }
+  modelSelectEl.addEventListener('change', () => {
+    localStorage.setItem(MODEL_STORAGE_KEY, modelSelectEl.value);
+  });
 }
 
 async function ensureActiveSession() {
@@ -292,7 +305,11 @@ async function send() {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: withCsrf({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ sessionId, message: text })
+      body: JSON.stringify({
+        sessionId,
+        message: text,
+        model: modelSelectEl?.value || null
+      })
     });
 
     const typingEl = document.getElementById(typingId);
@@ -345,6 +362,7 @@ sessionSearchMobileEl?.addEventListener('input', () => renderSessions(sessionSea
 
 (async function init() {
   try {
+    loadModelSelection();
     await ensureActiveSession();
     await loadSessions();
     await loadHistory(sessionId);

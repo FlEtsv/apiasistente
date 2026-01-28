@@ -24,8 +24,16 @@ public class OllamaClient {
     }
 
     public String chat(List<Message> messages) {
+        return chat(messages, props.getChatModel());
+    }
+
+    /**
+     * Ejecuta el chat con el modelo indicado (si es nulo, usa el configurado).
+     */
+    public String chat(List<Message> messages, String model) {
+        String resolvedModel = (model == null || model.isBlank()) ? props.getChatModel() : model;
         ChatRequest req = new ChatRequest(
-                props.getChatModel(),
+                resolvedModel,
                 messages,
                 props.isStream() ? true : false,
                 Map.of("temperature", 0.2)
