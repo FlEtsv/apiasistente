@@ -6,6 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class OllamaProperties {
     private String baseUrl;
     private String chatModel;
+    private String fastChatModel;
     private String embedModel;
     private boolean stream;
 
@@ -14,6 +15,9 @@ public class OllamaProperties {
 
     public String getChatModel() { return chatModel; }
     public void setChatModel(String chatModel) { this.chatModel = chatModel; }
+
+    public String getFastChatModel() { return fastChatModel; }
+    public void setFastChatModel(String fastChatModel) { this.fastChatModel = fastChatModel; }
 
     public String getEmbedModel() { return embedModel; }
     public void setEmbedModel(String embedModel) { this.embedModel = embedModel; }
