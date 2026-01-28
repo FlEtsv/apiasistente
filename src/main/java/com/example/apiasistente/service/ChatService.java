@@ -14,6 +14,10 @@ import java.util.*;
 @Service
 public class ChatService {
 
+    private static final String DEFAULT_TITLE = "Nuevo chat";
+    private static final int MANUAL_TITLE_MAX_LENGTH = 120;
+    private static final int AUTO_TITLE_MAX_LENGTH = 60;
+
     private final ChatSessionRepository sessionRepo;
     private final ChatMessageRepository messageRepo;
     private final ChatMessageSourceRepository sourceRepo;
@@ -201,9 +205,7 @@ public class ChatService {
     public String activateSession(String username, String sessionId) {
         AppUser user = requireUser(username);
 
-        ChatSession s = sessionRepo.findByIdAndUser_Id(sessionId, user.getId())
-                .orElseThrow(() -> new AccessDeniedException("Sesión no encontrada o no pertenece al usuario"));
-
+        ChatSession s = requireOwnedSession(user, sessionId);
         touchSession(s);
         return s.getId();
     }
@@ -212,15 +214,8 @@ public class ChatService {
     public void renameSession(String username, String sessionId, String title) {
         AppUser user = requireUser(username);
 
-        ChatSession s = sessionRepo.findByIdAndUser_Id(sessionId, user.getId())
-                .orElseThrow(() -> new AccessDeniedException("Sesión no encontrada o no pertenece al usuario"));
-
-        // limpieza básica del título
-        String clean = (title == null) ? "" : title.trim();
-        if (clean.isEmpty()) throw new IllegalArgumentException("Título vacío");
-        if (clean.length() > 120) clean = clean.substring(0, 120);
-
-        s.setTitle(clean);
+        ChatSession s = requireOwnedSession(user, sessionId);
+        s.setTitle(normalizeManualTitle(title));
         touchSession(s);
         sessionRepo.save(s);
     }
@@ -229,9 +224,7 @@ public class ChatService {
     public void deleteSession(String username, String sessionId) {
         AppUser user = requireUser(username);
 
-        ChatSession s = sessionRepo.findByIdAndUser_Id(sessionId, user.getId())
-                .orElseThrow(() -> new AccessDeniedException("Sesión no encontrada o no pertenece al usuario"));
-
+        ChatSession s = requireOwnedSession(user, sessionId);
         // Si tu cascade REMOVE está bien, esto borra todo el chat
         sessionRepo.delete(s);
     }
@@ -286,7 +279,7 @@ public class ChatService {
         s.setId(UUID.randomUUID().toString());
         s.setUser(user);
         s.setSystemPrompt(active);
-        s.setTitle("Nuevo chat");
+        s.setTitle(DEFAULT_TITLE);
         s.setLastActivityAt(Instant.now());
 
         return sessionRepo.save(s);
@@ -305,16 +298,35 @@ public class ChatService {
      * Autotítulo: si el chat está en "Nuevo chat", lo reemplaza por el texto inicial del usuario.
      */
     private void autoTitleIfDefault(ChatSession s, String userText) {
-        if (s.getTitle() != null && !s.getTitle().equalsIgnoreCase("Nuevo chat")) return;
+        if (s.getTitle() != null && !s.getTitle().equalsIgnoreCase(DEFAULT_TITLE)) return;
 
-        String t = (userText == null ? "" : userText.trim());
+        String t = normalizeAutoTitle(userText);
         if (t.isEmpty()) return;
-
-        t = t.replaceAll("\\s+", " ");
-        if (t.length() > 60) t = t.substring(0, 60) + "…";
-
         s.setTitle(t);
         sessionRepo.save(s);
+    }
+
+    private String normalizeManualTitle(String title) {
+        String clean = (title == null) ? "" : title.trim();
+        if (clean.isEmpty()) {
+            throw new IllegalArgumentException("Título vacío");
+        }
+        if (clean.length() > MANUAL_TITLE_MAX_LENGTH) {
+            clean = clean.substring(0, MANUAL_TITLE_MAX_LENGTH);
+        }
+        return clean;
+    }
+
+    private String normalizeAutoTitle(String text) {
+        String t = (text == null ? "" : text.trim());
+        if (t.isEmpty()) {
+            return "";
+        }
+        t = t.replaceAll("\\s+", " ");
+        if (t.length() > AUTO_TITLE_MAX_LENGTH) {
+            t = t.substring(0, AUTO_TITLE_MAX_LENGTH) + "…";
+        }
+        return t;
     }
 
     /**
