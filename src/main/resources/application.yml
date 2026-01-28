@@ -36,6 +36,8 @@ ollama:
   #base-url: ${OLLAMA_BASE_URL:http://ollama:11434/api}
   # Modelo para generación de chat.
   chat-model: qwen2.5:32b
+  # Modelo rápido para chats ligeros (menor consumo).
+  fast-chat-model: qwen3.0:14b
   # Modelo para embeddings de RAG.
   embed-model: nomic-embed-text:latest
 
@@ -51,6 +53,11 @@ rag:
     # Tamaño y solapamiento de cada chunk de texto.
     size: 900
     overlap: 150
+
+chat:
+  queue:
+    # Retraso en ms para suavizar picos de tráfico por sesión.
+    delay-ms: 25
 
 
 logging:

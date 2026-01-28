@@ -5,6 +5,7 @@ import com.example.apiasistente.model.dto.ChatRequest;
 import com.example.apiasistente.model.dto.ChatResponse;
 import com.example.apiasistente.model.dto.RenameSessionRequest;
 import com.example.apiasistente.model.dto.SessionSummaryDto;
+import com.example.apiasistente.service.ChatQueueService;
 import com.example.apiasistente.service.ChatService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
@@ -18,9 +19,11 @@ import java.util.Map;
 public class ChatApiController {
 
     private final ChatService chatService;
+    private final ChatQueueService chatQueueService;
 
-    public ChatApiController(ChatService chatService) {
+    public ChatApiController(ChatService chatService, ChatQueueService chatQueueService) {
         this.chatService = chatService;
+        this.chatQueueService = chatQueueService;
     }
 
     // ---------------------------------------------------------------------
@@ -91,7 +94,12 @@ public class ChatApiController {
     // ---------------------------------------------------------------------
     @PostMapping
     public ChatResponse chat(@Valid @RequestBody ChatRequest req, Principal principal) {
-        return chatService.chat(principal.getName(), req.getSessionId(), req.getMessage());
+        return chatQueueService.chatAndWait(
+                principal.getName(),
+                req.getSessionId(),
+                req.getMessage(),
+                req.getModel()
+        );
     }
 
     // ---------------------------------------------------------------------

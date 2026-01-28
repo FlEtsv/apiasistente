@@ -25,6 +25,7 @@ public class ChatService {
     private final RagService ragService;
     private final OllamaClient ollama;
     private final AppUserRepository userRepo;
+    private final ChatModelSelector modelSelector;
 
     /**
      * Cuántos mensajes anteriores metemos en el contexto del modelo.
@@ -43,7 +44,8 @@ public class ChatService {
             SystemPromptService promptService,
             RagService ragService,
             OllamaClient ollama,
-            AppUserRepository userRepo
+            AppUserRepository userRepo,
+            ChatModelSelector modelSelector
     ) {
         this.sessionRepo = sessionRepo;
         this.messageRepo = messageRepo;
@@ -52,6 +54,7 @@ public class ChatService {
         this.ragService = ragService;
         this.ollama = ollama;
         this.userRepo = userRepo;
+        this.modelSelector = modelSelector;
     }
 
     // =========================================================================
@@ -70,6 +73,14 @@ public class ChatService {
      */
     @Transactional
     public ChatResponse chat(String username, String maybeSessionId, String userText) {
+        return chat(username, maybeSessionId, userText, null);
+    }
+
+    /**
+     * Flujo completo de chat con selección de modelo.
+     */
+    @Transactional
+    public ChatResponse chat(String username, String maybeSessionId, String userText, String requestedModel) {
 
         // 1) Usuario autenticado debe existir en BD
         AppUser user = requireUser(username);
@@ -112,8 +123,9 @@ public class ChatService {
         // bloque RAG + pregunta del usuario
         msgs.add(new OllamaClient.Message("user", buildRagBlock(userText, scored)));
 
-        // 7) Llamada al modelo
-        String assistantText = ollama.chat(msgs);
+        // 7) Llamada al modelo (resuelve modelo permitido)
+        String model = modelSelector.resolveChatModel(requestedModel);
+        String assistantText = ollama.chat(msgs, model);
 
         // 8) Guardar respuesta del asistente
         ChatMessage assistantMsg = new ChatMessage();
