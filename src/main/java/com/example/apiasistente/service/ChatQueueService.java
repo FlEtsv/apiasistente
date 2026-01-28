@@ -18,6 +18,7 @@ import java.util.concurrent.ExecutionException;
 /**
  * Cola por sesión: garantiza que los mensajes se procesen en orden de llegada
  * y que una sesión no ejecute más de un turno simultáneo.
+ fix(chat-queue): prevent race by stopping processing only when queue remains empty
  */
 @Service
 public class ChatQueueService {
@@ -74,9 +75,13 @@ public class ChatQueueService {
             while (true) {
                 QueuedChat next = queue.poll();
                 if (next == null) {
-                    queue.unmarkProcessing();
-                    cleanupIfIdle(queueKey, queue);
-                    return;
+                    // Evita condiciones de carrera: si entró algo justo después del poll,
+                    // no liberamos el procesamiento hasta confirmar que la cola sigue vacía.
+                    if (queue.stopProcessingIfIdle()) {
+                        cleanupIfIdle(queueKey, queue);
+                        return;
+                    }
+                    continue;
                 }
 
                 applyDelay();
@@ -151,8 +156,17 @@ public class ChatQueueService {
             return true;
         }
 
-        synchronized void unmarkProcessing() {
+        /**
+         * Detiene el procesamiento sólo si la cola está vacía.
+         * Devuelve true si se liberó el flag y la cola quedó vacía.
+        (fix)
+         */
+        synchronized boolean stopProcessingIfIdle() {
+            if (!queue.isEmpty()) {
+                return false;
+            }
             processing = false;
+            return true;
         }
 
         synchronized boolean isIdle() {
@@ -175,3 +189,4 @@ public class ChatQueueService {
         }
     }
 }
+fix: resolve merge conflict in ChatQueueService
