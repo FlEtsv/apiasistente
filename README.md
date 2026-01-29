@@ -21,9 +21,10 @@ Para un flujo detallado consulta `docs/flow.md`.
 - **Java 21** (toolchain configurada en Gradle).
 - **MySQL** accesible para persistencia.
 - **Ollama** con modelos configurados para chat y embeddings.
+- **los contenedores hay que generarlos a partir de la imagen oficial de ambas funcionalidades**
 
 ## Configuración
-Las variables principales se encuentran en `src/main/resources/application.yml`:
+Las variables principales se encuentran en `src/main/resources/application.yml`: cofigurar segun las caracteristicas del proyecto.
 
 | Variable | Descripción | Ejemplo |
 | --- | --- | --- |
