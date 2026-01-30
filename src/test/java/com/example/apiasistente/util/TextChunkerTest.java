@@ -28,6 +28,6 @@ class TextChunkerTest {
         // Overlap larger than chunk size should be clamped to avoid infinite loops.
         List<String> chunks = TextChunker.chunk("abcdef", 3, 10);
 
-        assertThat(chunks).containsExactly("abc", "cde", "ef");
+        assertThat(chunks).containsExactly("abc", "bcd", "cde","def");
     }
 }

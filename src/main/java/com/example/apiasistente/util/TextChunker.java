@@ -22,7 +22,7 @@ public class TextChunker {
         int start = 0;
         while (start < clean.length()) {
             int end = Math.min(clean.length(), start + chunkSize);
-            String piece = clean.substring(start, end).trim();
+            String piece = clean.substring(start, end).trim(); //eliminamos espacios y cortamos en el espacio
             if (!piece.isEmpty()) out.add(piece);
 
             if (end == clean.length()) break;

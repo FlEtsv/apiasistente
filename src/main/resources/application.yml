@@ -35,9 +35,9 @@ ollama:
   base-url: ${OLLAMA_BASE_URL:http://192.168.18.53:11434/api}
   #base-url: ${OLLAMA_BASE_URL:http://ollama:11434/api}
   # Modelo para generación de chat.
-  chat-model: qwen2.5:32b
+  chat-model: #qwen2.5:32b
   # Modelo rápido para chats ligeros (menor consumo).
-  fast-chat-model: qwen3.0:14b
+  fast-chat-model: qwen3:14b
   # Modelo para embeddings de RAG.
   embed-model: nomic-embed-text:latest
 

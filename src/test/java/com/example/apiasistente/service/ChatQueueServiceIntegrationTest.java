@@ -57,4 +57,4 @@ class ChatQueueServiceIntegrationTest {
         assertEquals("ok", response.getReply());
     }
 }
-fix: resolve merge conflict in ChatQueueService
+

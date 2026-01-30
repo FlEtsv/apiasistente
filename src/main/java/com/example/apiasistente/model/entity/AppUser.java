@@ -80,4 +80,8 @@ public class AppUser {
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
 
     public Instant getCreatedAt() { return createdAt; }
+
+    public void setId(long id) {
+        this.id = id;
+    }
 }

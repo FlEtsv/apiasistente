@@ -59,4 +59,7 @@ public class ApiKey {
 
     public Instant getRevokedAt() { return revokedAt; }
     public void setRevokedAt(Instant revokedAt) { this.revokedAt = revokedAt; }
+
+    public void setId(long l) {
+    }
 }

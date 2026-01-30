@@ -55,11 +55,11 @@ public class RagService {
     @Transactional
     public KnowledgeDocument upsertDocumentForOwner(String owner, String title, String content) {
 
-        String o = normalizeOwner(owner);
+        String o = normalizeOwner(owner); //devuelve global.owner por defecto para contexto de toda la app
         String t = normalizeTitle(title);
         String body = (content == null) ? "" : content;
 
-        // Si no hay contenido, permitimos crear doc vacío? Mejor NO.
+        // Si no hay contenido, permitimos crear doc vacío? Mejor NO,
         if (body.isBlank()) {
             throw new IllegalArgumentException("Contenido vacío");
         }
