@@ -274,6 +274,16 @@ async function createNewChat() {
   hideDrawer();
 }
 
+async function handleExternalApiKeySession(newSessionId) {
+  // Aísla el chat cuando se genera una API key externa.
+  if (newSessionId) {
+    await activateSession(newSessionId);
+    return;
+  }
+
+  await createNewChat();
+}
+
 async function renameSessionPrompt(id, currentTitle) {
   const next = prompt('Nuevo nombre del chat:', currentTitle || '');
   if (next == null) return;
@@ -351,6 +361,14 @@ inputEl?.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
 
 newChatBtn?.addEventListener('click', async () => {
   try { await createNewChat(); } catch (e) { alert(e.message); }
+});
+
+window.addEventListener('api-key-created', async (event) => {
+  try {
+    await handleExternalApiKeySession(event?.detail?.sessionId);
+  } catch (e) {
+    console.error('No se pudo crear el chat separado para API key:', e);
+  }
 });
 
 toggleSessionsBtn?.addEventListener('click', showDrawer);

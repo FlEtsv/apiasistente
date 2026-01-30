@@ -137,10 +137,12 @@ async function createApiKey() {
       body: JSON.stringify({ label })
     });
 
-    // out = { id, label, keyPrefix, apiKey }
+    // out = { id, label, keyPrefix, apiKey, sessionId }
     showCreatedKey(out.apiKey);
     document.getElementById("apiKeyLabel").value = "";
     await loadApiKeys();
+    // Notifica al chat para abrir una sesión separada para esta integración externa.
+    window.dispatchEvent(new CustomEvent("api-key-created", { detail: { sessionId: out.sessionId } }));
 
   } catch (e) {
     showError(e.message);

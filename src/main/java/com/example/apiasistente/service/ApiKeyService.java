@@ -21,12 +21,14 @@ public class ApiKeyService {
 
     private final ApiKeyRepository apiKeyRepo;
     private final AppUserRepository userRepo;
+    private final ChatService chatService;
 
     private final SecureRandom rnd = new SecureRandom();
 
-    public ApiKeyService(ApiKeyRepository apiKeyRepo, AppUserRepository userRepo) {
+    public ApiKeyService(ApiKeyRepository apiKeyRepo, AppUserRepository userRepo, ChatService chatService) {
         this.apiKeyRepo = apiKeyRepo;
         this.userRepo = userRepo;
+        this.chatService = chatService;
     }
 
     @Transactional
@@ -50,7 +52,10 @@ public class ApiKeyService {
 
         k = apiKeyRepo.save(k);
 
-        return new ApiKeyCreateResponse(k.getId(), k.getLabel(), k.getKeyPrefix(), raw);
+        // Cada API key externa debe iniciar su propio chat para aislar contexto.
+        String sessionId = chatService.newSession(username);
+
+        return new ApiKeyCreateResponse(k.getId(), k.getLabel(), k.getKeyPrefix(), raw, sessionId);
     }
 
     @Transactional(readOnly = true)
