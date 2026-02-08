@@ -9,11 +9,12 @@ import com.example.apiasistente.model.dto.UpsertDocumentResponse;
 import com.example.apiasistente.service.ChatQueueService;
 import com.example.apiasistente.service.RagService;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.security.Principal;
 import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/ext")
@@ -30,7 +31,7 @@ public class ExternalApiController {
     @PostMapping("/chat")
     public ChatResponse chat(@Valid @RequestBody ChatRequest req, Principal principal) {
         return chatQueueService.chatAndWait(
-                principal.getName(),
+                resolveUsername(principal),
                 req.getSessionId(),
                 req.getMessage(),
                 req.getModel()
@@ -39,13 +40,14 @@ public class ExternalApiController {
 
     @PostMapping("/rag/documents")
     public UpsertDocumentResponse upsert(@Valid @RequestBody UpsertDocumentRequest req, Principal principal) {
-        var doc = ragService.upsertDocumentForOwner(principal.getName(), req.getTitle(), req.getContent());
+        String owner = resolveUsername(principal);
+        var doc = ragService.upsertDocumentForOwner(owner, req.getTitle(), req.getContent());
         return new UpsertDocumentResponse(doc.getId(), doc.getTitle());
     }
 
     @PostMapping("/rag/documents/batch")
     public List<UpsertDocumentResponse> upsertBatch(@Valid @RequestBody List<UpsertDocumentRequest> reqs, Principal principal) {
-        String owner = principal.getName();
+        String owner = resolveUsername(principal);
         return reqs.stream().map(r -> {
             var doc = ragService.upsertDocumentForOwner(owner, r.getTitle(), r.getContent());
             return new UpsertDocumentResponse(doc.getId(), doc.getTitle());
@@ -55,7 +57,18 @@ public class ExternalApiController {
 
     @PostMapping("/rag/memory")
     public UpsertDocumentResponse storeMemory(@Valid @RequestBody MemoryRequest req, Principal principal) {
-        var doc = ragService.storeMemory(principal.getName(), req.getTitle(), req.getContent());
+        String owner = resolveUsername(principal);
+        var doc = ragService.storeMemory(owner, req.getTitle(), req.getContent());
         return new UpsertDocumentResponse(doc.getId(), doc.getTitle());
+    }
+
+    /**
+     * Resuelve el usuario autenticado o falla con 401 si el API key no es válido.
+     */
+    private String resolveUsername(Principal principal) {
+        if (principal == null || principal.getName() == null || principal.getName().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "API key requerida.");
+        }
+        return principal.getName();
     }
 }
