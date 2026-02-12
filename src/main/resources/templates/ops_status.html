@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="es" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title>Estado de Monitoreo</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f7fb; color: #111; }
+        h1 { margin-bottom: 8px; }
+        .meta { color: #555; margin-bottom: 16px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+        .card { background: #fff; border: 1px solid #e0e4ec; border-radius: 8px; padding: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        .label { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 0.4px; }
+        .value { font-size: 18px; margin: 6px 0; word-break: break-all; }
+        .status-up { color: #0a7a3f; font-weight: 700; }
+        .status-down { color: #b00020; font-weight: 700; }
+        .small { font-size: 12px; color: #666; }
+        .actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+        .btn { display: inline-block; padding: 6px 10px; border-radius: 6px; border: 1px solid #d2d7e0; text-decoration: none; color: #111; background: #f7f9fc; }
+        .btn:hover { background: #eef2f8; }
+        .error { color: #b00020; font-size: 12px; margin-top: 6px; }
+    </style>
+</head>
+<body>
+<h1>Estado de Monitoreo</h1>
+<div class="meta">
+    <span>Grafana: <strong id="grafana-base" th:text="${grafanaBaseUrl}">-</strong></span>
+    &nbsp;|&nbsp;
+    <span>Prometheus: <strong id="prometheus-base" th:text="${prometheusBaseUrl}">-</strong></span>
+    &nbsp;|&nbsp;
+    <span>Actualizado: <strong id="timestamp">-</strong></span>
+</div>
+
+<div class="grid">
+    <div class="card">
+        <div class="label">Grafana</div>
+        <div class="value" id="grafana-status">-</div>
+        <div class="small">Health: <span id="grafana-health-url">-</span></div>
+        <div class="small">HTTP: <span id="grafana-http">-</span> · <span id="grafana-latency">-</span> ms</div>
+        <div class="error" id="grafana-error"></div>
+        <div class="actions">
+            <a class="btn" href="/ops/grafana" target="_blank" rel="noopener">Abrir Grafana</a>
+            <a class="btn" href="/ops/grafana/config" target="_blank" rel="noopener">Config</a>
+        </div>
+    </div>
+    <div class="card">
+        <div class="label">Prometheus</div>
+        <div class="value" id="prometheus-status">-</div>
+        <div class="small">Health: <span id="prometheus-health-url">-</span></div>
+        <div class="small">HTTP: <span id="prometheus-http">-</span> · <span id="prometheus-latency">-</span> ms</div>
+        <div class="error" id="prometheus-error"></div>
+        <div class="actions">
+            <a class="btn" href="/ops/prometheus" target="_blank" rel="noopener">Abrir Prometheus</a>
+            <a class="btn" href="/ops/prometheus/config" target="_blank" rel="noopener">Config</a>
+        </div>
+    </div>
+</div>
+
+<script>
+    function setStatus(prefix, data) {
+        const statusEl = document.getElementById(prefix + '-status');
+        const httpEl = document.getElementById(prefix + '-http');
+        const latencyEl = document.getElementById(prefix + '-latency');
+        const healthUrlEl = document.getElementById(prefix + '-health-url');
+        const errorEl = document.getElementById(prefix + '-error');
+
+        if (!data) {
+            statusEl.textContent = 'Sin datos';
+            statusEl.className = 'status-down';
+            return;
+        }
+
+        statusEl.textContent = data.up ? 'OK' : 'CAIDO';
+        statusEl.className = data.up ? 'status-up' : 'status-down';
+        httpEl.textContent = data.status;
+        latencyEl.textContent = data.elapsedMs;
+        healthUrlEl.textContent = data.url;
+        errorEl.textContent = data.error || '';
+    }
+
+    async function load() {
+        try {
+            const res = await fetch('/ops/status', { credentials: 'include' });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+            document.getElementById('timestamp').textContent = new Date(data.timestamp).toLocaleTimeString();
+            setStatus('grafana', data.grafana);
+            setStatus('prometheus', data.prometheus);
+        } catch (e) {
+            document.getElementById('timestamp').textContent = 'Error: ' + e.message;
+        }
+    }
+
+    load();
+    setInterval(load, 5000);
+</script>
+</body>
+</html>

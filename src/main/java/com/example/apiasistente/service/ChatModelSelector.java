@@ -4,7 +4,7 @@ import com.example.apiasistente.config.OllamaProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * Selector de modelos de chat: permite cambiar entre el modelo principal y el rápido.
+ * Selector de modelos de chat: permite cambiar entre el modelo principal y el rapido.
  */
 @Component
 public class ChatModelSelector {
@@ -20,21 +20,32 @@ public class ChatModelSelector {
 
     /**
      * Resuelve el modelo solicitado por el cliente.
-     * - null o vacío -> modelo principal
+     * - null o vacio -> modelo principal
      * - "default" o nombre exacto -> modelo principal
-     * - "fast" o nombre exacto -> modelo rápido
+     * - "fast" o nombre exacto -> modelo rapido
      */
     public String resolveChatModel(String requested) {
         String trimmed = requested == null ? "" : requested.trim();
-        String defaultModel = properties.getChatModel();
-        String fastModel = properties.getFastChatModel();
+        String defaultModel = normalize(properties.getChatModel());
+        String fastModel = normalize(properties.getFastChatModel());
 
+        // Sin preferencia: elige principal o rapido como fallback.
         if (trimmed.isEmpty() || DEFAULT_ALIAS.equalsIgnoreCase(trimmed)) {
-            return defaultModel;
+            String resolved = firstNonBlank(defaultModel, fastModel, null);
+            if (resolved == null) {
+                throw new IllegalArgumentException("No hay modelos de chat configurados.");
+            }
+            return resolved;
         }
+        // Alias "fast": prioriza fast, cae a principal si falta.
         if (FAST_ALIAS.equalsIgnoreCase(trimmed)) {
-            return fastModel;
+            String resolved = firstNonBlank(fastModel, defaultModel, null);
+            if (resolved == null) {
+                throw new IllegalArgumentException("No hay modelos de chat configurados.");
+            }
+            return resolved;
         }
+        // Coincidencia exacta con modelos configurados
         if (defaultModel != null && defaultModel.equalsIgnoreCase(trimmed)) {
             return defaultModel;
         }
@@ -43,5 +54,21 @@ public class ChatModelSelector {
         }
 
         throw new IllegalArgumentException("Modelo no permitido: " + requested);
+    }
+
+    private static String firstNonBlank(String... values) {
+        if (values == null) return null;
+        for (String v : values) {
+            if (v != null && !v.isBlank()) {
+                return v.trim();
+            }
+        }
+        return null;
+    }
+
+    private static String normalize(String value) {
+        if (value == null) return null;
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 }

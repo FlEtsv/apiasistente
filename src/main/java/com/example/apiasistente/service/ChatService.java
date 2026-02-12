@@ -28,8 +28,8 @@ public class ChatService {
     private final ChatModelSelector modelSelector;
 
     /**
-     * Cuántos mensajes anteriores metemos en el contexto del modelo.
-     * Tú has subido esto a 40: perfecto, pero controla coste / latencia.
+     * CuÃ¡ntos mensajes anteriores metemos en el contexto del modelo.
+     * TÃº has subido esto a 40: perfecto, pero controla coste / latencia.
      *
      * En application.properties:
      * rag.max-history=40
@@ -64,7 +64,7 @@ public class ChatService {
     /**
      * Flujo completo:
      * 1) comprobar usuario
-     * 2) resolver sesión (la que viene o la última del usuario o crear)
+     * 2) resolver sesiÃ³n (la que viene o la Ãºltima del usuario o crear)
      * 3) guardar mensaje usuario
      * 4) RAG retrieve
      * 5) construir contexto para Ollama (system + history + rag)
@@ -77,7 +77,7 @@ public class ChatService {
     }
 
     /**
-     * Flujo completo de chat con selección de modelo.
+     * Flujo completo de chat con selecciÃ³n de modelo.
      */
     @Transactional
     public ChatResponse chat(String username, String maybeSessionId, String userText, String requestedModel) {
@@ -85,10 +85,10 @@ public class ChatService {
         // 1) Usuario autenticado debe existir en BD
         AppUser user = requireUser(username);
 
-        // 2) Resolver sesión (o validar que sea suya)
+        // 2) Resolver sesiÃ³n (o validar que sea suya)
         ChatSession session = resolveSession(user, maybeSessionId);
 
-        // 3) actualizar "última actividad" y título automático si procede
+        // 3) actualizar "Ãºltima actividad" y tÃ­tulo automÃ¡tico si procede
         touchSession(session);
         autoTitleIfDefault(session, userText);
 
@@ -106,11 +106,11 @@ public class ChatService {
         // 6) Construir mensajes para Ollama
         List<OllamaClient.Message> msgs = new ArrayList<>();
 
-        // prompt del sistema asociado a la sesión
+        // prompt del sistema asociado a la sesiÃ³n
         SystemPrompt prompt = session.getSystemPrompt();
         msgs.add(new OllamaClient.Message("system", prompt.getContent()));
 
-        // histórico (últimos N)
+        // histÃ³rico (Ãºltimos N)
         var historyDesc = messageRepo.findTop50BySession_IdOrderByCreatedAtDesc(session.getId());
         historyDesc.stream()
                 .sorted(Comparator.comparing(ChatMessage::getCreatedAt))
@@ -134,7 +134,7 @@ public class ChatService {
         assistantMsg.setContent(assistantText);
         assistantMsg = messageRepo.save(assistantMsg);
 
-        // 9) Log de fuentes (relación mensaje -> chunks)
+        // 9) Log de fuentes (relaciÃ³n mensaje -> chunks)
         for (var sc : scored) {
             ChatMessageSource link = new ChatMessageSource();
             link.setMessage(assistantMsg);
@@ -150,7 +150,7 @@ public class ChatService {
     }
 
     // =========================================================================
-    // HISTORIAL (FIX CRÍTICO)
+    // HISTORIAL (FIX CRÃTICO)
     // =========================================================================
 
     /**
@@ -161,7 +161,7 @@ public class ChatService {
     public List<ChatMessageDto> historyDto(String username, String sessionId) {
         AppUser user = requireUser(username);
 
-        // valida propiedad y devuelve la sesión por si la necesitas
+        // valida propiedad y devuelve la sesiÃ³n por si la necesitas
         requireOwnedSession(user, sessionId);
 
         // cargamos mensajes como entidades, pero devolvemos DTOs (sin session/user)
@@ -177,7 +177,7 @@ public class ChatService {
     }
 
     /**
-     * Si quieres mantener esto para lógica interna, ok,
+     * Si quieres mantener esto para lÃ³gica interna, ok,
      * pero NO lo expongas como JSON.
      */
     @Transactional(readOnly = true)
@@ -188,7 +188,7 @@ public class ChatService {
     }
 
     // =========================================================================
-    // SESIÓN ACTIVA / CREAR NUEVA
+    // SESIÃ“N ACTIVA / CREAR NUEVA
     // =========================================================================
 
     public String activeSessionId(String username) {
@@ -237,12 +237,12 @@ public class ChatService {
         AppUser user = requireUser(username);
 
         ChatSession s = requireOwnedSession(user, sessionId);
-        // Si tu cascade REMOVE está bien, esto borra todo el chat
+        // Si tu cascade REMOVE estÃ¡ bien, esto borra todo el chat
         sessionRepo.delete(s);
     }
 
     // =========================================================================
-    // HELPERS (seguridad + creación + títulos)
+    // HELPERS (seguridad + creaciÃ³n + tÃ­tulos)
     // =========================================================================
 
     private AppUser requireUser(String username) {
@@ -251,14 +251,14 @@ public class ChatService {
     }
 
     /**
-     * Resuelve una sesión:
+     * Resuelve una sesiÃ³n:
      * - si viene sessionId -> valida que exista y sea del usuario
-     * - si no viene -> usa la última sesión del usuario o crea una nueva
+     * - si no viene -> usa la Ãºltima sesiÃ³n del usuario o crea una nueva
      */
     private ChatSession resolveSession(AppUser user, String maybeSessionId) {
         if (maybeSessionId != null && !maybeSessionId.isBlank()) {
             ChatSession s = sessionRepo.findById(maybeSessionId)
-                    .orElseThrow(() -> new NoSuchElementException("Sesión no encontrada: " + maybeSessionId));
+                    .orElseThrow(() -> new NoSuchElementException("SesiÃ³n no encontrada: " + maybeSessionId));
 
             if (!s.getUser().getId().equals(user.getId())) {
                 throw new AccessDeniedException("No puedes acceder a sesiones de otro usuario");
@@ -271,12 +271,12 @@ public class ChatService {
     }
 
     /**
-     * Valida que la sesión exista y sea del usuario.
-     * Devuelve la sesión para que puedas reutilizarla si lo necesitas.
+     * Valida que la sesiÃ³n exista y sea del usuario.
+     * Devuelve la sesiÃ³n para que puedas reutilizarla si lo necesitas.
      */
     private ChatSession requireOwnedSession(AppUser user, String sessionId) {
         ChatSession s = sessionRepo.findById(sessionId)
-                .orElseThrow(() -> new NoSuchElementException("Sesión no encontrada: " + sessionId));
+                .orElseThrow(() -> new NoSuchElementException("SesiÃ³n no encontrada: " + sessionId));
 
         if (!s.getUser().getId().equals(user.getId())) {
             throw new AccessDeniedException("No puedes acceder a sesiones de otro usuario");
@@ -298,7 +298,7 @@ public class ChatService {
     }
 
     /**
-     * Marca sesión como “última actividad”.
+     * Marca sesiÃ³n como â€œÃºltima actividadâ€.
      * Importante para ordenar chats y para /active.
      */
     private void touchSession(ChatSession s) {
@@ -307,7 +307,7 @@ public class ChatService {
     }
 
     /**
-     * Autotítulo: si el chat está en "Nuevo chat", lo reemplaza por el texto inicial del usuario.
+     * AutotÃ­tulo: si el chat estÃ¡ en "Nuevo chat", lo reemplaza por el texto inicial del usuario.
      */
     private void autoTitleIfDefault(ChatSession s, String userText) {
         if (s.getTitle() != null && !s.getTitle().equalsIgnoreCase(DEFAULT_TITLE)) return;
@@ -321,7 +321,7 @@ public class ChatService {
     private String normalizeManualTitle(String title) {
         String clean = (title == null) ? "" : title.trim();
         if (clean.isEmpty()) {
-            throw new IllegalArgumentException("Título vacío");
+            throw new IllegalArgumentException("TÃ­tulo vacÃ­o");
         }
         if (clean.length() > MANUAL_TITLE_MAX_LENGTH) {
             clean = clean.substring(0, MANUAL_TITLE_MAX_LENGTH);
@@ -336,49 +336,52 @@ public class ChatService {
         }
         t = t.replaceAll("\\s+", " ");
         if (t.length() > AUTO_TITLE_MAX_LENGTH) {
-            t = t.substring(0, AUTO_TITLE_MAX_LENGTH) + "…";
+            t = t.substring(0, AUTO_TITLE_MAX_LENGTH) + "â€¦";
         }
         return t;
     }
 
     /**
-     * Construye el bloque final que se envía al modelo:
-     * - contexto RAG (si existe)
-     * - instrucción breve
-     * - pregunta del usuario
+     * Construye el bloque que se envia al modelo con las fuentes y reglas de citacion.
      */
     private String buildRagBlock(String userText, List<RagService.ScoredChunk> scored) {
         StringBuilder sb = new StringBuilder();
+        sb.append("Fuentes RAG (ordenadas por relevancia):\n");
 
-        if (scored == null || scored.isEmpty()) {
-            sb.append("Contexto RAG: (sin contexto RAG)\n");
-        } else {
-            sb.append("Contexto RAG (úsalo si es relevante):\n");
+        if (scored != null && !scored.isEmpty()) {
             for (int i = 0; i < scored.size(); i++) {
-                var c = scored.get(i).chunk();
-                sb.append("\n[").append(i + 1).append("] ")
-                        .append(c.getDocument().getTitle())
-                        .append(" (chunk ").append(c.getChunkIndex()).append(")\n")
-                        .append(c.getText()).append("\n");
+                var scoredChunk = scored.get(i);
+                var c = scoredChunk.chunk();
+                sb.append("\n[S").append(i + 1).append("] ")
+                        .append("doc=\"").append(c.getDocument().getTitle()).append("\" ")
+                        .append("(chunk ").append(c.getChunkIndex()).append(") ")
+                        .append("score=").append(String.format(java.util.Locale.US, "%.3f", scoredChunk.score()))
+                        .append("\n")
+                        .append(c.getText())
+                        .append("\n");
             }
+        } else {
+            sb.append("(sin contexto relevante)\n");
         }
 
         sb.append("\n---\n");
-        sb.append("Responde de forma clara y directa.\n");
+        sb.append("Instrucciones:\n");
+        sb.append("- Usa las fuentes solo si ayudan y cita como [S#].\n");
+        sb.append("- Si ninguna fuente aplica, indica que no hay datos suficientes.\n");
+        sb.append("- Responde en castellano de forma clara y breve.\n\n");
         sb.append("Pregunta del usuario: ").append(userText);
 
         return sb.toString();
     }
-
     // =========================================================================
-    // EXTRA: detalles sesión (si lo usas en frontend, está bien que sea DTO)
+    // EXTRA: detalles sesiÃ³n (si lo usas en frontend, estÃ¡ bien que sea DTO)
     // =========================================================================
 
     public SessionDetailsDto sessionDetails(String username, String sessionId) {
         AppUser user = requireUser(username);
         return sessionRepo.findDetails(user.getId(), sessionId)
                 .orElseThrow(() -> new org.springframework.security.access.AccessDeniedException(
-                        "Sesión no encontrada o no pertenece al usuario"
+                        "SesiÃ³n no encontrada o no pertenece al usuario"
                 ));
     }
 }

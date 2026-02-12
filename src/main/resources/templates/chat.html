@@ -5,275 +5,717 @@
 <head>
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>AI Assistant - Premium Chat</title>
+    <title>AI Assistant - Dashboard</title>
 
     <!-- CSRF para fetch() -->
     <meta name="_csrf" th:content="${_csrf.token}"/>
     <meta name="_csrf_header" th:content="${_csrf.headerName}"/>
 
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
 
     <style>
-        body { font-family: 'Plus Jakarta Sans', sans-serif; background: radial-gradient(circle at top right, #1e293b, #0f172a, #020617); }
-        .glass { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
-        #chat::-webkit-scrollbar { width: 6px; }
-        #chat::-webkit-scrollbar-track { background: transparent; }
-        #chat::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
-        #sessionList::-webkit-scrollbar { width: 6px; }
-        #sessionList::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
-        @keyframes messageIn { from { opacity: 0; transform: translateY(20px) scale(0.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
-        .animate-msg { animation: messageIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-        @keyframes pulse-slow { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.8; } }
-        .animate-pulse-slow { animation: pulse-slow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        :root {
+            --bg: #0b1017;
+            --bg-soft: #0f1621;
+            --panel: #121a24;
+            --panel-2: #0f1a28;
+            --border: #1e2a3a;
+            --muted: #8fa3b8;
+            --text: #e7eef7;
+            --accent: #1f7ae0;
+            --accent-2: #13c2a3;
+            --warn: #c04848;
+            --shadow: 0 12px 30px rgba(0,0,0,0.35);
+        }
+
+        * { box-sizing: border-box; }
+        .hidden { display: none !important; }
+        html, body { height: 100%; }
+        body {
+            margin: 0;
+            font-family: 'Sora', sans-serif;
+            color: var(--text);
+            background: radial-gradient(1200px 600px at 10% -10%, #152235, transparent),
+                        radial-gradient(900px 500px at 100% 0%, #1b2740, transparent),
+                        var(--bg);
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        body::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            background-image: linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+                              linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+            background-size: 36px 36px;
+            pointer-events: none;
+            opacity: 0.35;
+        }
+
+        .app {
+            display: grid;
+            grid-template-columns: 260px 1fr;
+            min-height: 100vh;
+            height: 100vh;
+        }
+
+        .sidebar {
+            position: sticky;
+            top: 0;
+            height: 100vh;
+            padding: 22px 18px;
+            background: rgba(12, 18, 26, 0.9);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            backdrop-filter: blur(12px);
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-badge {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--accent), #4da3ff);
+            border-radius: 12px;
+            display: grid;
+            place-items: center;
+            font-weight: 700;
+            box-shadow: 0 8px 20px rgba(31, 122, 224, 0.35);
+        }
+
+        .brand h1 {
+            font-size: 16px;
+            margin: 0;
+        }
+
+        .brand p {
+            margin: 2px 0 0;
+            font-size: 11px;
+            color: var(--muted);
+        }
+
+        .nav {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .nav a,
+        .nav button {
+            text-decoration: none;
+            color: var(--text);
+            background: transparent;
+            border: 1px solid transparent;
+            padding: 10px 12px;
+            border-radius: 10px;
+            font-size: 13px;
+            text-align: left;
+            cursor: pointer;
+        }
+
+        .nav a:hover,
+        .nav button:hover {
+            background: var(--panel);
+            border-color: var(--border);
+        }
+
+        .nav .active {
+            background: var(--panel);
+            border-color: var(--accent);
+            box-shadow: inset 0 0 0 1px rgba(31,122,224,0.25);
+        }
+
+        .sidebar-footer {
+            margin-top: auto;
+            padding: 12px;
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            font-size: 12px;
+            color: var(--muted);
+        }
+
+        .sidebar-footer .user {
+            color: var(--text);
+            font-weight: 600;
+        }
+
+        .sidebar-footer .sid {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 12px;
+            color: #8cc4ff;
+        }
+
+        .logout-btn {
+            margin-top: 10px;
+            width: 100%;
+            padding: 8px 10px;
+            background: #a63a3a;
+            border: none;
+            color: #fff;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        .main {
+            padding: 22px 26px 28px;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 18px;
+            flex: 0 0 auto;
+        }
+
+        .topbar-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .topbar h2 {
+            margin: 0;
+            font-size: 20px;
+        }
+
+        .topbar p {
+            margin: 4px 0 0;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 8px 12px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: var(--panel);
+            color: var(--text);
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .btn.primary {
+            background: var(--accent);
+            border-color: #1f7ae0;
+        }
+
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            background: var(--panel);
+            font-size: 11px;
+            color: var(--muted);
+        }
+
+        .pill .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #3b475a;
+        }
+
+        .workspace {
+            display: grid;
+            grid-template-columns: 280px minmax(0, 1fr) 320px;
+            gap: 16px;
+            flex: 1 1 auto;
+            min-height: 0;
+        }
+
+        .panel {
+            background: rgba(18, 26, 36, 0.86);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            box-shadow: var(--shadow);
+            overflow: hidden;
+            min-height: 0;
+        }
+
+        .panel-header {
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .panel-header h3 {
+            margin: 0;
+            font-size: 14px;
+        }
+
+        .panel-body {
+            padding: 14px 16px;
+        }
+
+        .session-search {
+            width: 100%;
+            padding: 10px 12px;
+            border-radius: 10px;
+            background: var(--bg-soft);
+            border: 1px solid var(--border);
+            color: var(--text);
+            font-size: 12px;
+        }
+
+        #sessionList, #sessionListMobile {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 12px;
+            max-height: 520px;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+
+        #sessionList::-webkit-scrollbar,
+        #sessionListMobile::-webkit-scrollbar,
+        #chat::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        #sessionList::-webkit-scrollbar-thumb,
+        #sessionListMobile::-webkit-scrollbar-thumb,
+        #chat::-webkit-scrollbar-thumb {
+            background: #2b394c;
+            border-radius: 999px;
+        }
+
+        .chat-panel {
+            display: flex;
+            flex-direction: column;
+            min-height: 620px;
+            min-height: 0;
+        }
+
+        #chat {
+            flex: 1;
+            padding: 18px;
+            overflow-y: auto;
+        }
+
+        .empty-state {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: var(--muted);
+            gap: 10px;
+        }
+
+        .composer {
+            padding: 16px;
+            border-top: 1px solid var(--border);
+            background: rgba(10, 15, 22, 0.6);
+        }
+
+        .composer-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        #input {
+            flex: 1 1 320px;
+            padding: 12px 14px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background: var(--bg-soft);
+            color: var(--text);
+            font-size: 13px;
+        }
+
+        #send {
+            padding: 10px 14px;
+            border-radius: 12px;
+            border: none;
+            background: var(--accent);
+            color: #fff;
+            cursor: pointer;
+        }
+
+        #modelSelect {
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: var(--bg-soft);
+            color: var(--text);
+            font-size: 12px;
+        }
+
+        .ops-grid {
+            display: grid;
+            gap: 12px;
+        }
+
+        .stat {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            padding: 12px;
+            border-radius: 12px;
+            background: var(--bg-soft);
+            border: 1px solid var(--border);
+            font-size: 12px;
+        }
+
+        .stat strong {
+            font-size: 14px;
+        }
+
+        .stat .sub {
+            color: var(--muted);
+            word-break: break-all;
+        }
+
+        .status-up { color: #39c07d; font-weight: 600; }
+        .status-down { color: #e07b7b; font-weight: 600; }
+
+        .link-list {
+            display: grid;
+            gap: 8px;
+        }
+
+        .link-list a,
+        .link-list button {
+            text-decoration: none;
+            color: var(--text);
+            background: var(--panel-2);
+            border: 1px solid var(--border);
+            padding: 8px 10px;
+            border-radius: 10px;
+            font-size: 12px;
+            text-align: left;
+            cursor: pointer;
+        }
+
+        .link-list a:hover,
+        .link-list button:hover { border-color: var(--accent); }
+
+        .sessions-panel { display: block; }
+
+        .drawer {
+            position: fixed;
+            inset: 0;
+            display: block;
+            z-index: 1000;
+        }
+
+        .drawer.active { display: block; }
+
+        .drawer-backdrop {
+            position: absolute;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+        }
+
+        .drawer-panel {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 300px;
+            background: var(--panel);
+            border-right: 1px solid var(--border);
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        #toggleSessions { display: none; }
+
+        @media (max-width: 1200px) {
+            .workspace { grid-template-columns: 260px minmax(0, 1fr); }
+            .ops-panel { display: none; }
+        }
+
+        @media (max-width: 980px) {
+            .app { grid-template-columns: 1fr; }
+            .sidebar { position: relative; height: auto; flex-direction: row; flex-wrap: wrap; }
+            .nav { flex-direction: row; flex-wrap: wrap; }
+            .sidebar-footer { width: 100%; }
+            .workspace { grid-template-columns: 1fr; }
+            .sessions-panel { display: none; }
+            .topbar { flex-direction: column; align-items: flex-start; }
+            #toggleSessions { display: inline-flex; }
+        }
     </style>
 </head>
-
-<body class="text-slate-200 h-screen flex flex-col overflow-hidden">
-
-<header class="glass sticky top-0 z-50 border-b border-slate-700/50">
-    <div class="max-w-6xl mx-auto px-4 md:px-6 py-4 flex flex-col md:flex-row md:justify-between md:items-center gap-4">
-        <div class="flex items-center gap-3">
-            <button id="toggleSessions"
-                    class="md:hidden px-3 py-2 rounded-xl text-xs bg-slate-800/70 hover:bg-slate-700/70 border border-slate-700/50 transition">
-                Chats
-            </button>
-
-            <div class="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/20">
-                <span class="text-xl font-bold">A</span>
-            </div>
+<body>
+<div class="app">
+    <aside class="sidebar">
+        <div class="brand">
+            <div class="brand-badge">A</div>
             <div>
-                <h1 class="font-bold text-lg leading-tight">Asistente Virtual</h1>
-                <p class="text-xs text-slate-400 flex items-center gap-2">
-                    <span class="w-2 h-2 bg-green-500 rounded-full"></span>
-                    RAG + Ollama Activo
-                    <span class="opacity-40">•</span>
-
-                    <span class="text-slate-300" sec:authorize="isAuthenticated()">
-                        Usuario: <span class="font-semibold" sec:authentication="name">user</span>
-                    </span>
-                    <span class="text-slate-300" sec:authorize="!isAuthenticated()">
-                        Usuario: <span class="font-semibold">anon</span>
-                    </span>
-
-                </p>
+                <h1>Asistente Virtual</h1>
+                <p>Panel operativo y chat</p>
             </div>
         </div>
 
-        <div class="flex flex-wrap items-center gap-3 justify-start md:justify-end">
-            <button id="newChat"
-                    class="px-3 py-2 rounded-xl text-xs bg-slate-800/70 hover:bg-slate-700/70 border border-slate-700/50 transition">
-                Nuevo chat
-            </button>
-            <a href="/rag-admin"
-               class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sm">
-                RAG Admin
-            </a>
-            <button id="openApiKeys"
-                    class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sm">
-                API Keys
-            </button>
+        <nav class="nav">
+            <a href="/chat" class="active">Chat</a>
+            <a href="/rag-admin">RAG Admin</a>
+            <button id="openApiKeys" type="button">API Keys</button>
+            <a href="/monitor">Monitor local</a>
+            <a href="/ops/status/ui" target="_blank" rel="noopener">Ops Status</a>
+            <a href="/ops/grafana" target="_blank" rel="noopener">Grafana</a>
+            <a href="/ops/prometheus" target="_blank" rel="noopener">Prometheus</a>
+        </nav>
 
-            <!-- Logout POST + CSRF -->
-            <form th:action="@{/logout}" method="post" class="inline">
+        <div class="sidebar-footer">
+            <div>Usuario:
+                <span class="user" sec:authorize="isAuthenticated()" sec:authentication="name">user</span>
+                <span class="user" sec:authorize="!isAuthenticated()">anon</span>
+            </div>
+            <div>Sesion: <span id="sid" class="sid">-</span></div>
+            <form th:action="@{/logout}" method="post">
                 <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
-                <button type="submit"
-                        class="px-3 py-2 rounded-xl text-xs bg-red-600/80 hover:bg-red-500/80 border border-red-400/20 transition">
-                    Logout
-                </button>
+                <button type="submit" class="logout-btn">Logout</button>
             </form>
-
-            <div class="text-right min-w-[90px]">
-                <span class="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Sesión</span>
-                <p id="sid" class="text-sm font-mono text-blue-400">-</p>
-            </div>
         </div>
-    </div>
-</header>
+    </aside>
 
-<main class="flex-1 max-w-6xl w-full mx-auto overflow-hidden relative px-0 md:px-4">
-    <div class="h-full flex overflow-hidden">
-
-        <aside class="hidden md:flex w-80 flex-col glass m-4 rounded-2xl overflow-hidden border border-slate-700/50">
-            <div class="p-4 border-b border-slate-700/50">
-                <p class="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Tus chats</p>
-                <input id="sessionSearch" placeholder="Buscar..."
-                       class="mt-2 w-full bg-slate-900/40 border border-slate-700/40 rounded-xl px-3 py-2 text-sm outline-none placeholder-slate-500"/>
-            </div>
-
-            <div id="sessionList" class="flex-1 overflow-y-auto p-2 space-y-2"></div>
-
-            <div class="p-3 border-t border-slate-700/50 text-[10px] text-slate-500">
-                Tip: clic para abrir · botón para renombrar
-            </div>
-        </aside>
-
-        <div id="sessionDrawer" class="md:hidden fixed inset-0 z-50 hidden">
-            <div class="absolute inset-0 bg-black/50" id="drawerBackdrop"></div>
-            <div class="absolute left-0 top-0 bottom-0 w-80 glass border-r border-slate-700/50 flex flex-col">
-                <div class="p-4 border-b border-slate-700/50 flex items-center justify-between">
-                    <p class="text-sm font-semibold">Tus chats</p>
-                    <button id="closeDrawer" class="px-3 py-2 rounded-xl text-xs bg-slate-800/70 border border-slate-700/50">Cerrar</button>
+    <main class="main">
+        <header class="topbar">
+            <div class="topbar-left">
+                <button id="toggleSessions" class="btn">Sesiones</button>
+                <div>
+                    <h2>Dashboard operativo</h2>
+                    <p>Chat, monitoreo y herramientas de datos en un solo lugar</p>
                 </div>
-                <div class="p-4 border-b border-slate-700/50">
-                    <input id="sessionSearchMobile" placeholder="Buscar..."
-                           class="w-full bg-slate-900/40 border border-slate-700/40 rounded-xl px-3 py-2 text-sm outline-none placeholder-slate-500"/>
-                </div>
-                <div id="sessionListMobile" class="flex-1 overflow-y-auto p-2 space-y-2"></div>
             </div>
-        </div>
+            <div class="actions">
+                <button id="newChat" class="btn primary">Nuevo chat</button>
+                <span class="pill"><span class="dot" id="grafana-dot"></span>Grafana</span>
+                <span class="pill"><span class="dot" id="prometheus-dot"></span>Prometheus</span>
+            </div>
+        </header>
 
-        <section class="flex-1 flex flex-col overflow-hidden">
-            <div id="chat" class="flex-1 overflow-y-auto px-4 md:px-6 py-6 space-y-6 scroll-smooth">
-                <div class="flex flex-col items-center justify-center h-full text-slate-500 opacity-50 space-y-2">
-                    <svg class="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                              d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path>
-                    </svg>
-                    <p>Inicia una conversación...</p>
+        <section class="workspace">
+            <div class="panel sessions-panel">
+                <div class="panel-header">
+                    <h3>Sesiones</h3>
+                </div>
+                <div class="panel-body">
+                    <input id="sessionSearch" class="session-search" placeholder="Buscar sesiones" />
+                    <div id="sessionList"></div>
                 </div>
             </div>
 
-            <div class="px-4 md:px-6 pb-6 pt-2 bg-gradient-to-t from-[#020617] via-[#020617] to-transparent">
-                <div class="relative group max-w-4xl mx-auto">
-                    <div class="absolute -top-10 left-0 right-0 flex justify-center opacity-0 group-focus-within:opacity-100 transition-opacity pointer-events-none">
-                        <span class="text-[10px] text-slate-500 bg-slate-900/80 px-3 py-1 rounded-full border border-slate-800">Presiona Enter para enviar</span>
+            <div class="panel chat-panel">
+                <div class="panel-header">
+                    <h3>Chat operativo</h3>
+                    <span class="pill">RAG + Ollama</span>
+                </div>
+                <div id="chat">
+                    <div class="empty-state opacity-50">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path>
+                        </svg>
+                        <div>Inicia una conversacion y analiza datos en tiempo real.</div>
                     </div>
-
-                <div class="glass p-3 rounded-2xl border-slate-700/50 focus-within:border-blue-500/50 transition-all shadow-2xl">
-                    <div class="flex flex-col md:flex-row gap-3 md:items-center">
-                        <div class="flex flex-1 items-center gap-2">
-                            <input id="input"
-                                   type="text"
-                                   placeholder="Escribe tu consulta aquí..."
-                                   class="bg-transparent border-none flex-1 py-3 px-4 focus:ring-0 text-slate-100 placeholder-slate-500 outline-none"
-                                   autocomplete="off"/>
-
-                            <button id="send" class="bg-blue-600 hover:bg-blue-500 text-white p-3 rounded-xl transition-all active:scale-95 shadow-lg shadow-blue-600/20 group">
-                                <svg class="w-5 h-5 group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
-                                </svg>
-                            </button>
-                        </div>
-
-                        <div class="flex flex-col sm:flex-row sm:items-center gap-2 w-full md:w-auto">
-                            <span class="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">Modelo</span>
-                            <select id="modelSelect"
-                                    class="bg-slate-900/60 border border-slate-700/60 rounded-xl px-3 py-2 text-sm outline-none text-slate-100 w-full sm:w-56">
-                                <option value="default">qwen2.5:32b (Calidad)</option>
-                                <option value="fast">qwen3.0:14b (Rápido)</option>
-                            </select>
-                        </div>
+                </div>
+                <div class="composer">
+                    <div class="composer-row">
+                        <input id="input" type="text" placeholder="Escribe tu consulta aqui..." autocomplete="off" />
+                        <button id="send">Enviar</button>
+                        <select id="modelSelect">
+                            <option value="default">qwen2.5:32b (Calidad)</option>
+                            <option value="fast">qwen3.0:14b (Rapido)</option>
+                        </select>
                     </div>
                 </div>
             </div>
 
-                <footer class="mt-4 max-w-4xl mx-auto">
-                    <details class="group border border-slate-800/50 rounded-lg overflow-hidden transition-all">
-                        <summary class="list-none px-3 py-1.5 cursor-pointer hover:bg-slate-800/30 flex justify-between items-center transition-colors">
-                            <span class="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Configuración RAG</span>
-                            <svg class="w-3 h-3 group-open:rotate-180 transition-transform text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7"></path></svg>
-                        </summary>
-                        <div class="p-3 bg-slate-900/30 border-t border-slate-800/50">
-                            <pre class="text-[10px] text-blue-400/70 font-mono">POST /api/rag/documents { "title": "...", "content": "..." }</pre>
+            <aside class="panel ops-panel">
+                <div class="panel-header">
+                    <h3>Monitoreo y control</h3>
+                </div>
+                <div class="panel-body ops-grid">
+                    <div class="stat">
+                        <strong>Estado Grafana</strong>
+                        <span id="grafana-status" class="status-down">Sin datos</span>
+                        <span id="grafana-url" class="sub">-</span>
+                    </div>
+                    <div class="stat">
+                        <strong>Estado Prometheus</strong>
+                        <span id="prometheus-status" class="status-down">Sin datos</span>
+                        <span id="prometheus-url" class="sub">-</span>
+                    </div>
+                    <div class="stat">
+                        <strong>Accesos directos</strong>
+                        <div class="link-list">
+                            <a href="/ops/status/ui" target="_blank" rel="noopener">Ops Status</a>
+                            <a href="/ops/grafana" target="_blank" rel="noopener">Abrir Grafana</a>
+                            <a href="/ops/prometheus" target="_blank" rel="noopener">Abrir Prometheus</a>
+                            <a href="/monitor" target="_blank" rel="noopener">Monitor local</a>
                         </div>
-                    </details>
-                </footer>
-            </div>
+                    </div>
+                    <div class="stat">
+                        <strong>Herramientas</strong>
+                        <div class="link-list">
+                            <a href="/rag-admin">RAG Admin</a>
+                            <button id="openApiKeysInline" type="button">Administrar API Keys</button>
+                        </div>
+                    </div>
+                </div>
+            </aside>
         </section>
+    </main>
+</div>
+
+<div id="sessionDrawer" class="drawer hidden">
+    <div class="drawer-backdrop" id="drawerBackdrop"></div>
+    <div class="drawer-panel">
+        <div class="panel-header">
+            <h3>Sesiones</h3>
+            <button id="closeDrawer" class="btn">Cerrar</button>
+        </div>
+        <input id="sessionSearchMobile" class="session-search" placeholder="Buscar sesiones" />
+        <div id="sessionListMobile"></div>
     </div>
-</main>
+</div>
+
 <!-- MODAL API KEYS -->
 <div id="apiKeysModal" class="fixed inset-0 z-[999] hidden">
     <div id="apiKeysBackdrop" class="absolute inset-0 bg-black/60"></div>
 
     <div class="absolute inset-0 flex items-center justify-center p-4">
-        <div class="glass w-full max-w-3xl rounded-2xl border border-slate-700/50 overflow-hidden">
-            <div class="flex items-center justify-between p-4 border-b border-slate-700/50">
+        <div class="panel" style="max-width: 900px; width: 100%;">
+            <div class="panel-header">
                 <div>
-                    <h3 class="text-lg font-semibold">API Keys</h3>
-                    <p class="text-xs text-slate-400">Crea, lista y revoca claves para /api/ext/**</p>
+                    <h3>API Keys</h3>
+                    <p class="sub">Crea, lista y revoca claves para /api/ext/**</p>
                 </div>
-                <button id="closeApiKeys"
-                        class="px-3 py-2 rounded-xl text-xs bg-slate-800/70 hover:bg-slate-700/70 border border-slate-700/50">
-                    Cerrar
-                </button>
+                <button id="closeApiKeys" class="btn">Cerrar</button>
             </div>
 
-            <div class="p-4 space-y-4">
-                <!-- Crear -->
-                <div class="bg-slate-900/40 border border-slate-700/40 rounded-2xl p-4">
-                    <div class="flex items-end gap-2">
-                        <div class="flex-1">
-                            <label class="text-xs text-slate-400">Etiqueta</label>
-                            <input id="apiKeyLabel"
-                                   class="mt-1 w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm outline-none"
-                                   placeholder="Ej: Web personal / Scraper / Bot Telegram"/>
-                        </div>
-                        <button id="btnCreateApiKey"
-                                class="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm">
-                            Crear
-                        </button>
+            <div class="panel-body ops-grid">
+                <div class="stat">
+                    <strong>Crear</strong>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <input id="apiKeyLabel" class="session-search" placeholder="Etiqueta" />
+                        <button id="btnCreateApiKey" class="btn primary">Crear</button>
                     </div>
-
-                    <div id="apiKeyCreatedBox" class="hidden mt-3 p-3 rounded-xl bg-emerald-900/20 border border-emerald-700/40">
-                        <p class="text-xs text-emerald-300 font-semibold">✅ Clave creada (se muestra una sola vez)</p>
-                        <pre id="apiKeyCreatedValue" class="mt-2 text-[11px] text-slate-200 font-mono whitespace-pre-wrap break-all"></pre>
-                        <div class="mt-2 flex gap-2">
-                            <button id="btnCopyApiKey"
-                                    class="px-3 py-2 rounded-xl text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700">
-                                Copiar
-                            </button>
-                            <button id="btnHideApiKey"
-                                    class="px-3 py-2 rounded-xl text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700">
-                                Ocultar
-                            </button>
+                    <div id="apiKeyCreatedBox" class="stat hidden" style="margin-top:10px;">
+                        <div>Clave creada (se muestra una sola vez)</div>
+                        <pre id="apiKeyCreatedValue" class="sub" style="white-space: pre-wrap; word-break: break-all;"></pre>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                            <button id="btnCopyApiKey" class="btn">Copiar</button>
+                            <button id="btnHideApiKey" class="btn">Ocultar</button>
                         </div>
                     </div>
                 </div>
 
-                <!-- Lista -->
-                <div class="bg-slate-900/40 border border-slate-700/40 rounded-2xl p-4">
-                    <div class="flex items-center justify-between mb-3">
-                        <h4 class="font-semibold">Tus claves</h4>
-                        <button id="btnRefreshApiKeys"
-                                class="px-3 py-2 rounded-xl text-xs bg-slate-800 hover:bg-slate-700 border border-slate-700">
-                            Refrescar
-                        </button>
+                <div class="stat">
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                        <strong>Tus claves</strong>
+                        <button id="btnRefreshApiKeys" class="btn">Refrescar</button>
                     </div>
-
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-sm">
-                            <thead class="text-slate-400 text-xs">
-                            <tr class="border-b border-slate-700/40">
-                                <th class="text-left py-2">Label</th>
-                                <th class="text-left py-2">Prefix</th>
-                                <th class="text-left py-2">Created</th>
-                                <th class="text-left py-2">Last used</th>
-                                <th class="text-left py-2">Revoked</th>
-                                <th class="text-right py-2">Acción</th>
+                    <div style="overflow-x:auto;">
+                        <table style="width:100%; font-size:12px;">
+                            <thead style="color: var(--muted);">
+                            <tr style="border-bottom: 1px solid var(--border);">
+                                <th style="text-align:left; padding:6px;">Label</th>
+                                <th style="text-align:left; padding:6px;">Prefix</th>
+                                <th style="text-align:left; padding:6px;">Created</th>
+                                <th style="text-align:left; padding:6px;">Last used</th>
+                                <th style="text-align:left; padding:6px;">Revoked</th>
+                                <th style="text-align:right; padding:6px;">Accion</th>
                             </tr>
                             </thead>
-                            <tbody id="apiKeysTbody" class="text-slate-200"></tbody>
+                            <tbody id="apiKeysTbody"></tbody>
                         </table>
                     </div>
 
-                    <p id="apiKeysEmpty" class="hidden mt-3 text-xs text-slate-400">No hay claves todavía.</p>
-                    <p id="apiKeysError" class="hidden mt-3 text-xs text-red-400"></p>
+                    <p id="apiKeysEmpty" class="sub hidden">No hay claves todavia.</p>
+                    <p id="apiKeysError" class="sub hidden" style="color: var(--warn);"></p>
                 </div>
 
-                <!-- Cómo usar -->
-                <div class="bg-slate-900/30 border border-slate-700/30 rounded-2xl p-4">
-                    <p class="text-xs text-slate-400 mb-2">Uso desde curl / web externa:</p>
-                    <pre class="text-[11px] text-blue-300/80 font-mono whitespace-pre-wrap">curl -s http://localhost:8080/api/ext/chat \
+                <div class="stat">
+                    <strong>Uso rapido</strong>
+                    <pre class="sub" style="white-space: pre-wrap;">curl -s http://localhost:8080/api/ext/chat \
   -H "Content-Type: application/json" \
   -H "X-API-KEY: TU_API_KEY" \
-  -d '{"sessionId":"","message":"Hola desde mi web"}'</pre>
+  -d '{"sessionId":"","message":"Hola"}'</pre>
                 </div>
             </div>
         </div>
     </div>
 </div>
+
+<script>
+    const openApiKeysInline = document.getElementById('openApiKeysInline');
+    if (openApiKeysInline) {
+        openApiKeysInline.addEventListener('click', () => {
+            const btn = document.getElementById('openApiKeys');
+            if (btn) btn.click();
+        });
+    }
+
+    async function loadOpsStatus() {
+        try {
+            const res = await fetch('/ops/status', { credentials: 'include' });
+            if (!res.ok) return;
+            const data = await res.json();
+
+            const grafanaOk = data.grafana && data.grafana.up;
+            const promOk = data.prometheus && data.prometheus.up;
+
+            const grafanaDot = document.getElementById('grafana-dot');
+            const promDot = document.getElementById('prometheus-dot');
+            if (grafanaDot) grafanaDot.style.background = grafanaOk ? '#39c07d' : '#e07b7b';
+            if (promDot) promDot.style.background = promOk ? '#39c07d' : '#e07b7b';
+
+            const gStatus = document.getElementById('grafana-status');
+            const pStatus = document.getElementById('prometheus-status');
+            const gUrl = document.getElementById('grafana-url');
+            const pUrl = document.getElementById('prometheus-url');
+            if (gStatus) {
+                gStatus.textContent = grafanaOk ? 'OK' : 'CAIDO';
+                gStatus.className = grafanaOk ? 'status-up' : 'status-down';
+            }
+            if (pStatus) {
+                pStatus.textContent = promOk ? 'OK' : 'CAIDO';
+                pStatus.className = promOk ? 'status-up' : 'status-down';
+            }
+            if (gUrl) gUrl.textContent = data.grafana ? data.grafana.baseUrl : '-';
+            if (pUrl) pUrl.textContent = data.prometheus ? data.prometheus.baseUrl : '-';
+        } catch (e) {
+            // silencioso
+        }
+    }
+
+    loadOpsStatus();
+    setInterval(loadOpsStatus, 10000);
+</script>
 
 <!-- IMPORTANTE: cache-busting para que NO uses un chat.js viejo -->
 <script src="/chat.js?v=4"></script>

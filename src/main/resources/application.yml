@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: 8082
   error:
     include-message: always
     include-binding-errors: always
@@ -32,7 +32,7 @@ spring:
 
 ollama:
   # Endpoint base del servidor Ollama (local o contenedor).
-  base-url: ${OLLAMA_BASE_URL:http://192.168.18.53:11434/api}
+  base-url: ${OLLAMA_BASE_URL:http://192.168.18.210:11434/api}
   #base-url: ${OLLAMA_BASE_URL:http://ollama:11434/api}
   # Modelo para generación de chat.
   chat-model: #qwen2.5:32b
@@ -53,6 +53,14 @@ rag:
     # Tamaño y solapamiento de cada chunk de texto.
     size: 900
     overlap: 150
+  rerank:
+    # Numero de candidatos previos al rerank con MMR.
+    candidates: 12
+    # Mezcla entre relevancia y diversidad (0-1).
+    lambda: 0.65
+  score:
+    # Puntaje minimo para aceptar un chunk en la busqueda inicial.
+    min: -1.0
 
 chat:
   queue:
@@ -61,5 +69,41 @@ chat:
 
 
 logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg [rid=%X{requestId}]%n"
   level:
     org.springframework.security: DEBUG
+
+monitoring:
+  grafana-url: ${GRAFANA_URL:http://localhost:3000}
+  prometheus-url: ${PROMETHEUS_URL:http://localhost:9090}
+  internet-check-url: ${INTERNET_CHECK_URL:https://www.gstatic.com/generate_204}
+  internet-check-timeout-ms: ${INTERNET_CHECK_TIMEOUT_MS:2000}
+  alerts:
+    enabled: ${MONITOR_ALERTS_ENABLED:true}
+    check-interval-ms: ${MONITOR_ALERTS_INTERVAL_MS:15000}
+    cooldown-ms: ${MONITOR_ALERTS_COOLDOWN_MS:300000}
+    cpu-threshold: ${MONITOR_CPU_THRESHOLD:0.90}
+    memory-threshold: ${MONITOR_MEM_THRESHOLD:0.90}
+    disk-threshold: ${MONITOR_DISK_THRESHOLD:0.90}
+    swap-threshold: ${MONITOR_SWAP_THRESHOLD:0.90}
+    telegram:
+      enabled: ${TELEGRAM_ALERTS_ENABLED:true}
+      bot-token: ${TELEGRAM_BOT_TOKEN:AAG4IwHZ9hR2iEgAaiVQ_0RBfN4jxcD0HdI}
+      chat-id: ${TELEGRAM_CHAT_ID:8506873950}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+  metrics:
+    tags:
+      application: apiasistente
+  prometheus:
+    metrics:
+      export:
+        enabled: true

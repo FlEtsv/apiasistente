@@ -2,6 +2,7 @@ package com.example.apiasistente.service;
 
 import com.example.apiasistente.config.ChatQueueProperties;
 import com.example.apiasistente.model.dto.ChatResponse;
+import com.example.apiasistente.util.RequestIdHolder;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PreDestroy;
@@ -54,7 +55,8 @@ public class ChatQueueService {
     public CompletableFuture<ChatResponse> enqueueChat(String username, String sessionId, String message, String model) {
         String queueKey = resolveQueueKey(username, sessionId);
         SessionQueue queue = sessionQueues.computeIfAbsent(queueKey, key -> new SessionQueue());
-        QueuedChat queued = new QueuedChat(username, sessionId, message, model);
+        String requestId = RequestIdHolder.ensure();
+        QueuedChat queued = new QueuedChat(username, sessionId, message, model, requestId);
 
         queue.enqueue(queued);
         startProcessingIfNeeded(queueKey, queue);
@@ -86,7 +88,7 @@ public class ChatQueueService {
 
                 applyDelay();
 
-                try {
+                try (var ignored = RequestIdHolder.use(next.requestId())) {
                     ChatResponse response = chatService.chat(
                             next.username(),
                             next.sessionId(),
@@ -96,6 +98,8 @@ public class ChatQueueService {
                     next.response().complete(response);
                 } catch (Exception ex) {
                     next.response().completeExceptionally(ex);
+                } finally {
+                    RequestIdHolder.clear();
                 }
             }
         } finally {
@@ -182,10 +186,15 @@ public class ChatQueueService {
             String sessionId,
             String message,
             String model,
+            String requestId,
             CompletableFuture<ChatResponse> response
     ) {
         QueuedChat(String username, String sessionId, String message, String model) {
-            this(username, sessionId, message, model, new CompletableFuture<>());
+            this(username, sessionId, message, model, RequestIdHolder.ensure(), new CompletableFuture<>());
+        }
+
+        QueuedChat(String username, String sessionId, String message, String model, String requestId) {
+            this(username, sessionId, message, model, requestId, new CompletableFuture<>());
         }
     }
 }

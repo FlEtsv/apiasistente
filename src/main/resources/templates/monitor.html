@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Monitor del servidor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        :root {
+            --bg: #0b1017;
+            --panel: #121a24;
+            --border: #1e2a3a;
+            --muted: #8fa3b8;
+            --text: #e7eef7;
+            --ok: #39c07d;
+            --warn: #e3b341;
+            --bad: #e07b7b;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            background: #0b1017;
+            color: var(--text);
+        }
+        .wrap { max-width: 1100px; margin: 0 auto; padding: 20px; }
+        h1 { margin: 0 0 6px; font-size: 20px; }
+        .meta { color: var(--muted); margin-bottom: 16px; font-size: 12px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+        .card {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 12px;
+        }
+        .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; }
+        .value { font-size: 20px; margin: 6px 0; }
+        .sub { font-size: 12px; color: var(--muted); }
+        .row { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); }
+        .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; }
+        .pill.ok { background: rgba(57,192,125,0.15); color: var(--ok); }
+        .pill.bad { background: rgba(224,123,123,0.15); color: var(--bad); }
+        .pill.warn { background: rgba(227,179,65,0.15); color: var(--warn); }
+        .error { color: var(--bad); margin-top: 8px; font-size: 12px; }
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <h1>Monitor del servidor</h1>
+    <div class="meta">
+        <span id="hostname">-</span> | <span id="timestamp">-</span> | Uptime: <span id="uptime">-</span> s
+    </div>
+
+    <div class="grid">
+        <div class="card">
+            <div class="label">CPU</div>
+            <div class="value" id="cpu-system">-</div>
+            <div class="row"><span>Proceso</span><span id="cpu-process">-</span></div>
+            <div class="row"><span>Load avg</span><span id="cpu-loadavg">-</span></div>
+            <div class="row"><span>CPU cores</span><span id="cpu-cores">-</span></div>
+        </div>
+
+        <div class="card">
+            <div class="label">Memoria JVM</div>
+            <div class="value" id="jvm-used">-</div>
+            <div class="row"><span>Total</span><span id="jvm-total">-</span></div>
+            <div class="row"><span>Heap</span><span id="jvm-heap">-</span></div>
+            <div class="row"><span>Non-heap</span><span id="jvm-nonheap">-</span></div>
+        </div>
+
+        <div class="card">
+            <div class="label">Memoria sistema</div>
+            <div class="value" id="sys-used">-</div>
+            <div class="row"><span>Total</span><span id="sys-total">-</span></div>
+            <div class="row"><span>Swap</span><span id="swap-used">-</span></div>
+        </div>
+
+        <div class="card">
+            <div class="label">Disco</div>
+            <div class="value" id="disk-used">-</div>
+            <div class="row"><span>Total</span><span id="disk-total">-</span></div>
+        </div>
+
+        <div class="card">
+            <div class="label">Threads</div>
+            <div class="value" id="threads-count">-</div>
+            <div class="row"><span>Peak</span><span id="threads-peak">-</span></div>
+            <div class="row"><span>Daemon</span><span id="threads-daemon">-</span></div>
+        </div>
+
+        <div class="card">
+            <div class="label">Garbage Collector</div>
+            <div class="value" id="gc-count">-</div>
+            <div class="row"><span>Tiempo total</span><span id="gc-time">-</span></div>
+        </div>
+
+        <div class="card">
+            <div class="label">Red / Internet</div>
+            <div class="value" id="net-status">-</div>
+            <div class="row"><span>Latencia</span><span id="net-latency">-</span></div>
+            <div class="row"><span>URL</span><span id="net-url">-</span></div>
+        </div>
+    </div>
+
+    <div class="error" id="error"></div>
+</div>
+
+<script>
+    function fmtPct(v) {
+        return (v * 100).toFixed(1) + '%';
+    }
+    function fmtBytes(b) {
+        if (b <= 0) return '0 B';
+        const units = ['B','KB','MB','GB','TB'];
+        const i = Math.min(units.length - 1, Math.floor(Math.log(b)/Math.log(1024)));
+        return (b / Math.pow(1024, i)).toFixed(1) + ' ' + units[i];
+    }
+    function fmtMs(v) {
+        if (v == null) return '-';
+        return v.toLocaleString('es-ES') + ' ms';
+    }
+
+    async function load() {
+        try {
+            const res = await fetch('/api/monitor/server', { credentials: 'include' });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+
+            document.getElementById('hostname').textContent = data.hostname;
+            document.getElementById('timestamp').textContent = new Date(data.timestamp).toLocaleTimeString();
+            document.getElementById('uptime').textContent = data.uptimeSeconds.toLocaleString('es-ES');
+
+            document.getElementById('cpu-system').textContent = fmtPct(data.cpu.loadSystem);
+            document.getElementById('cpu-process').textContent = fmtPct(data.cpu.loadProcess);
+            document.getElementById('cpu-loadavg').textContent = data.cpu.loadAverage.toFixed(2);
+            document.getElementById('cpu-cores').textContent = data.availableProcessors;
+
+            document.getElementById('jvm-used').textContent = fmtBytes(data.jvm.usedBytes);
+            document.getElementById('jvm-total').textContent = fmtBytes(data.jvm.totalBytes);
+            document.getElementById('jvm-heap').textContent = fmtBytes(data.jvmHeap.usedBytes) + ' / ' + fmtBytes(data.jvmHeap.totalBytes);
+            document.getElementById('jvm-nonheap').textContent = fmtBytes(data.jvmNonHeap.usedBytes) + ' / ' + fmtBytes(data.jvmNonHeap.totalBytes);
+
+            document.getElementById('sys-used').textContent = fmtBytes(data.system.usedBytes);
+            document.getElementById('sys-total').textContent = fmtBytes(data.system.totalBytes);
+            document.getElementById('swap-used').textContent = fmtBytes(data.swap.usedBytes) + ' / ' + fmtBytes(data.swap.totalBytes);
+
+            document.getElementById('disk-used').textContent = fmtBytes(data.disk.usedBytes);
+            document.getElementById('disk-total').textContent = fmtBytes(data.disk.totalBytes);
+
+            document.getElementById('threads-count').textContent = data.threads.count;
+            document.getElementById('threads-peak').textContent = data.threads.peak;
+            document.getElementById('threads-daemon').textContent = data.threads.daemon;
+
+            document.getElementById('gc-count').textContent = data.gc.totalCount;
+            document.getElementById('gc-time').textContent = fmtMs(data.gc.totalTimeMs);
+
+            document.getElementById('net-status').textContent = data.network.internetUp ? 'OK' : 'CAIDO';
+            document.getElementById('net-status').className = data.network.internetUp ? 'value pill ok' : 'value pill bad';
+            document.getElementById('net-latency').textContent = fmtMs(data.network.latencyMs);
+            document.getElementById('net-url').textContent = data.network.checkedUrl;
+
+            document.getElementById('error').textContent = '';
+        } catch (e) {
+            document.getElementById('error').textContent = 'No se pudo cargar: ' + e.message;
+        }
+    }
+
+    load();
+    setInterval(load, 5000);
+</script>
+</body>
+</html>

@@ -32,6 +32,9 @@ public class OllamaClient {
      */
     public String chat(List<Message> messages, String model) {
         String resolvedModel = (model == null || model.isBlank()) ? props.getChatModel() : model;
+        if (resolvedModel == null || resolvedModel.isBlank()) {
+            throw new IllegalStateException("No hay modelo de chat configurado (ollama.chat-model/fast-chat-model) ni se envio uno en la peticion.");
+        }
         ChatRequest req = new ChatRequest(
                 resolvedModel,
                 messages,
