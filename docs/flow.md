@@ -1,59 +1,66 @@
-# Flujo de datos y endpoints (chat + RAG + memoria)
+﻿# Flujo de datos y endpoints
 
-## 1) Flujo de datos del chat (RAG incluido)
-1. **Entrada**: tu app web o externa envía `POST /api/chat` o `POST /api/ext/chat`.
-2. **ChatService** valida usuario, resuelve sesión y guarda el mensaje del usuario.
-3. **RAG**: `RagService.retrieveTopK()` calcula embedding de la pregunta, compara con embeddings en MySQL y devuelve Top‑K.
-4. **Prompt final**: se arma con system prompt + historial + bloque “Contexto RAG”.
-5. **LLM**: se llama a Ollama (`/api/chat`) y se guarda la respuesta.
-6. **Fuentes**: se guarda el log de chunks usados y se retorna `sources` en el response.
+Este documento resume como circulan datos y requests en el sistema.
 
-## 2) Flujo de datos de ingesta RAG (documentos)
-1. **Entrada**: `POST /api/rag/documents` o `POST /api/ext/rag/documents`.
-2. **RagService.upsertDocument**:
-   - Trocea el texto en chunks.
-   - Genera embeddings con Ollama (`/api/embed`).
-   - Persiste `KnowledgeDocument` + `KnowledgeChunk` en MySQL.
+## 1) Chat con RAG
 
-## 3) Flujo de “memoria” persistente
-1. **Entrada**: `POST /api/rag/memory` o `POST /api/ext/rag/memory`.
-2. **RagService.storeMemory**:
-   - Crea un documento con título automático (`Memoria/<usuario>/<timestamp>`) o con el título indicado.
-   - Persiste como documento RAG y queda disponible para retrieval futuro.
+1. El cliente envia `POST /api/chat` (web) o `POST /api/ext/chat` (externo).
+2. El backend identifica usuario y sesion.
+3. `RagService` calcula embedding de la consulta y recupera Top-K chunks.
+4. `ChatService` construye prompt final con historial + contexto RAG.
+5. `OllamaClient` genera respuesta.
+6. Se persisten mensajes y fuentes usadas.
+7. Se retorna `ChatResponse` al cliente.
 
-## 4) Endpoints disponibles (resumen)
-### Chat (web app / sesión con login)
-- `POST /api/chat`
-- `GET /api/chat/{sessionId}/history`
-- `GET /api/chat/active`
-- `POST /api/chat/sessions`
-- `GET /api/chat/sessions`
-- `PUT /api/chat/sessions/{sessionId}/activate`
-- `PUT /api/chat/sessions/{sessionId}/title`
-- `DELETE /api/chat/sessions/{sessionId}`
+## 2) Ingesta de conocimiento RAG
 
-### Chat externo (API key, stateless)
-- `POST /api/ext/chat`
+1. El cliente envia `POST /api/rag/documents` o `POST /api/ext/rag/documents`.
+2. Se valida payload y ownership.
+3. El contenido se divide en chunks.
+4. Cada chunk genera embedding via Ollama.
+5. Se persiste documento y chunks vectorizados.
+6. Se retorna metadata de documento.
 
-### RAG (web app / sesión con login)
-- `POST /api/rag/documents`
-- `POST /api/rag/documents/batch`
-- `POST /api/rag/memory`
+## 3) Memoria persistente
 
-### RAG externo (API key, stateless)
-- `POST /api/ext/rag/documents`
-- `POST /api/ext/rag/documents/batch`
-- `POST /api/ext/rag/memory`
+1. El cliente envia `POST /api/rag/memory` o `POST /api/ext/rag/memory`.
+2. El sistema genera un documento de memoria con titulo y contenido.
+3. Se procesa igual que documento RAG (chunking + embedding + persistencia).
+4. Queda disponible para retrieval en chats posteriores.
 
-## 5) Ejemplos rápidos (externo con API key)
+## 4) Monitoreo y alertas
+
+1. Un scheduler ejecuta chequeos de salud (`MonitoringAlertService`).
+2. Se evalua CPU, memoria, disco, swap e internet.
+3. Si hay cambio de estado, se registra evento `ALERT` o `RECOVER`.
+4. Los eventos se publican en:
+   - `GET /api/monitor/alerts` (web)
+   - `GET /api/ext/monitor/alerts` (externo)
+
+## 5) Endpoints por superficie
+
+### Web (sesion)
+- Chat: `/api/chat`, `/api/chat/sessions`, `/api/chat/active`
+- RAG: `/api/rag/documents`, `/api/rag/documents/batch`, `/api/rag/memory`
+- Monitor: `/api/monitor/server`, `/api/monitor/alerts`, `/api/monitor/alerts/state`
+
+### Externa (API key)
+- Chat: `/api/ext/chat`
+- RAG: `/api/ext/rag/documents`, `/api/ext/rag/documents/batch`, `/api/ext/rag/memory`
+- Monitor: `/api/ext/monitor/server`, `/api/ext/monitor/alerts`, `/api/ext/monitor/alerts/state`
+
+## 6) Ejemplos curl (externo)
+
 ```bash
-curl -X POST http://localhost:8080/api/ext/chat \
-  -H 'Authorization: Bearer ak_<prefix>_<token>' \
-  -H 'Content-Type: application/json' \
+API_KEY="ak_xxx"
+BASE_URL="http://localhost:8080"
+
+curl -s -X POST "$BASE_URL/api/ext/chat" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
   -d '{"sessionId":"","message":"Hola"}'
 
-curl -X POST http://localhost:8080/api/ext/rag/memory \
-  -H 'Authorization: Bearer ak_<prefix>_<token>' \
-  -H 'Content-Type: application/json' \
-  -d '{"title":"Perfil usuario","content":"Mi nombre es Ana y vivo en Madrid."}'
+curl -sG "$BASE_URL/api/ext/monitor/alerts" \
+  -H "X-API-KEY: $API_KEY" \
+  --data-urlencode "limit=20"
 ```

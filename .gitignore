@@ -35,3 +35,14 @@ out/
 
 ### VS Code ###
 .vscode/
+
+### OS / logs / local secrets ###
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.swp
+hs_err_pid*
+replay_pid*
+.env
+.env.*

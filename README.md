@@ -1,63 +1,76 @@
-# API Asistente (Chat + RAG + Memoria)
+﻿# API Asistente
 
-API Asistente es un servicio Spring Boot que expone endpoints de chat con recuperación de contexto (RAG) y almacenamiento de “memoria” persistente. Integra Ollama para generación de texto y embeddings, y usa MySQL para guardar sesiones, documentos y chunks vectorizados.
+API Asistente es una aplicacion Spring Boot para chat con RAG (Retrieval Augmented Generation), memoria persistente y monitoreo operativo.
 
-## Funcionalidad principal
-- **Chat con RAG**: combina prompt del sistema, historial y contexto relevante recuperado desde MySQL.
-- **Ingesta RAG**: permite cargar documentos para generar embeddings y persistirlos como conocimiento.
-- **Memoria persistente**: guarda hechos o perfiles de usuario como documentos RAG reutilizables.
-- **Acceso web y externo**: endpoints con sesión (web app) y endpoints externos con API key.
-- **Registro controlado**: nuevos usuarios requieren un código temporal de registro.
+El proyecto expone dos superficies de API:
+- API web con login y sesion (`/api/**`)
+- API externa stateless con API key (`/api/ext/**`)
 
-## Arquitectura (alto nivel)
-1. **Entrada**: el cliente envía mensajes o documentos mediante endpoints REST.
-2. **Servicios**: el backend valida, crea sesiones y orquesta RAG.
-3. **Embeddings**: se llama a Ollama para generar embeddings (modelo configurable).
-4. **Persistencia**: se guardan documentos, chunks y sesiones en MySQL.
-5. **Respuesta**: se devuelve el texto generado y fuentes utilizadas.
+## Tabla de contenido
+- [Arquitectura](#arquitectura)
+- [Stack tecnologico](#stack-tecnologico)
+- [Requisitos](#requisitos)
+- [Configuracion](#configuracion)
+- [Ejecucion](#ejecucion)
+- [Resumen de endpoints](#resumen-de-endpoints)
+- [Monitoreo y alertas](#monitoreo-y-alertas)
+- [Calidad y CI](#calidad-y-ci)
+- [Contribuir](#contribuir)
 
-Para un flujo detallado consulta `docs/flow.md`.
+## Arquitectura
+Documentacion tecnica:
+- `docs/architecture.md`: componentes, decisiones y limites de arquitectura.
+- `docs/flow.md`: flujos de datos por endpoint.
+
+Resumen:
+1. Controllers reciben requests web o externas.
+2. Services aplican reglas de negocio (chat, RAG, monitoreo, seguridad).
+3. Repositories persisten entidades en MySQL.
+4. Ollama provee chat y embeddings.
+5. MonitoringAlertService genera eventos de salud y los publica via endpoints.
+
+## Stack tecnologico
+- Java 21
+- Spring Boot 3.5.x
+- Spring Security (sesion web + API key para `/api/ext/**`)
+- Spring Data JPA + MySQL
+- Thymeleaf + JS para la UI
+- Micrometer + Prometheus
+- Ollama para LLM y embeddings
 
 ## Requisitos
-- **Java 21** (toolchain configurada en Gradle).
-- **MySQL** accesible para persistencia.
-- **Ollama** con modelos configurados para chat y embeddings.
-- **los contenedores hay que generarlos a partir de la imagen oficial de ambas funcionalidades**
+- Java 21
+- MySQL accesible
+- Ollama accesible con modelos de chat y embeddings disponibles
 
-## Configuración
-Las variables principales se encuentran en `src/main/resources/application.yml`: cofigurar segun las caracteristicas del proyecto.
+## Configuracion
+Variables principales (definidas en `src/main/resources/application.yml`):
 
-| Variable | Descripción | Ejemplo |
+| Variable | Descripcion | Ejemplo |
 | --- | --- | --- |
-| `MYSQL_HOST` | Host de MySQL | `apiasistente_mysql` |
-| `MYSQL_PORT` | Puerto de MySQL | `3306` |
+| `MYSQL_HOST` | Host de MySQL | `localhost` |
+| `MYSQL_PORT` | Puerto MySQL | `3306` |
 | `MYSQL_DB` | Base de datos | `apiasistente_db` |
 | `MYSQL_USER` | Usuario MySQL | `apiuser` |
 | `MYSQL_PASSWORD` | Password MySQL | `apipassword` |
-| `OLLAMA_BASE_URL` | URL base de Ollama | `http://ollama:11434/api` |
+| `OLLAMA_BASE_URL` | URL base de Ollama | `http://localhost:11434/api` |
+| `MONITOR_ALERTS_ENABLED` | Habilita alertas | `true` |
+| `MONITOR_ALERTS_INTERVAL_MS` | Frecuencia de chequeo | `15000` |
+| `MONITOR_ALERTS_MAX_EVENTS` | Maximo de eventos en memoria | `200` |
 
-Otros parámetros relevantes:
-- `ollama.chat-model`: modelo para chat.
-- `ollama.embed-model`: modelo para embeddings.
-- `rag.top-k`: número de chunks devueltos por consulta.
-- `rag.chunk.size` / `rag.chunk.overlap`: tamaño y solapamiento de chunks.
-
-## Ejecución
-
-### Con Docker Compose
-> El `docker-compose.yml` usa la imagen publicada y asume un contenedor de MySQL y Ollama.
-
+## Ejecucion
+### Docker Compose
 ```bash
 docker compose up -d
 ```
 
-### Local con Gradle
+### Local (Gradle)
 ```bash
 ./gradlew bootRun
 ```
 
-## Endpoints
-### Chat (web app / sesión con login)
+## Resumen de endpoints
+### Web (sesion)
 - `POST /api/chat`
 - `GET /api/chat/{sessionId}/history`
 - `GET /api/chat/active`
@@ -67,52 +80,51 @@ docker compose up -d
 - `PUT /api/chat/sessions/{sessionId}/title`
 - `DELETE /api/chat/sessions/{sessionId}`
 - `DELETE /api/chat/sessions`
-
-### Códigos de registro (web / sesión con login)
-- `GET /api/registration-codes`
-- `POST /api/registration-codes`
-- `DELETE /api/registration-codes/{id}`
-
-### Chat externo (API key, stateless)
-- `POST /api/ext/chat`
-
-### RAG (web app / sesión con login)
 - `POST /api/rag/documents`
 - `POST /api/rag/documents/batch`
 - `POST /api/rag/memory`
+- `GET /api/monitor/server`
+- `GET /api/monitor/alerts`
+- `GET /api/monitor/alerts/state`
 
-### RAG externo (API key, stateless)
+### Externa (API key)
+- `POST /api/ext/chat`
 - `POST /api/ext/rag/documents`
 - `POST /api/ext/rag/documents/batch`
 - `POST /api/ext/rag/memory`
-
-### Monitoreo externo (API key, stateless)
 - `GET /api/ext/monitor/server`
 - `GET /api/ext/monitor/alerts`
 - `GET /api/ext/monitor/alerts/state`
 
-## Ejemplos rápidos (API externa)
-```bash
-curl -X POST http://localhost:8080/api/ext/chat \
-  -H 'Authorization: Bearer ak_<prefix>_<token>' \
-  -H 'Content-Type: application/json' \
-  -d '{"sessionId":"","message":"Hola"}'
+## Monitoreo y alertas
+- Actuator expuesto: `health`, `info`, `prometheus`.
+- Alertas de CPU, memoria, disco, swap e internet.
+- Eventos recientes en memoria (maximo configurable).
+- Endpoint externo para polling de alertas:
 
-curl -X POST http://localhost:8080/api/ext/rag/memory \
-  -H 'Authorization: Bearer ak_<prefix>_<token>' \
-  -H 'Content-Type: application/json' \
-  -d '{"title":"Perfil usuario","content":"Mi nombre es Ana y vivo en Madrid."}'
+```bash
+curl -sG "http://localhost:8080/api/ext/monitor/alerts" \
+  -H "X-API-KEY: <tu_api_key>" \
+  --data-urlencode "limit=20"
 ```
 
-## Notas de seguridad
-- Los endpoints `/api/ext/*` requieren API key en el header `Authorization`.
-- El registro de nuevos usuarios requiere un código temporal generado desde la UI (API Keys).
-- Ajusta el nivel de logging en `application.yml` para producción.
+## Calidad y CI
+Este repositorio incluye CI en GitHub Actions para:
+- Compilacion
+- Tests
+- Verificacion de wrapper Gradle
 
-## Tests
-Para ejecutar pruebas unitarias:
+Comandos locales recomendados antes de abrir PR:
 ```bash
-./gradlew test
+./gradlew clean test
+./gradlew build
 ```
 
-Si no hay Java 21 instalado localmente, Gradle fallará al resolver la toolchain.
+## Contribuir
+Consulta:
+- `CONTRIBUTING.md`
+- `CODE_OF_CONDUCT.md`
+- `SECURITY.md`
+
+## Licencia
+Este proyecto usa licencia MIT. Ver `LICENSE`.
