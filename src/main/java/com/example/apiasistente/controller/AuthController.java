@@ -22,9 +22,10 @@ public class AuthController {
     @PostMapping("/register")
     public String doRegister(@RequestParam String username,
                              @RequestParam String password,
+                             @RequestParam String code,
                              Model model) {
         try {
-            authService.register(username, password);
+            authService.register(username, password, code);
             return "redirect:/login?registered=1";
         } catch (IllegalArgumentException ex) {
             model.addAttribute("error", ex.getMessage());

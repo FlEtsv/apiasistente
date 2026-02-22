@@ -32,7 +32,7 @@ spring:
 
 ollama:
   # Endpoint base del servidor Ollama (local o contenedor).
-  base-url: ${OLLAMA_BASE_URL:http://192.168.18.210:11434/api}
+  base-url: ${OLLAMA_BASE_URL:http://192.168.1.61:11434/api}
   #base-url: ${OLLAMA_BASE_URL:http://ollama:11434/api}
   # Modelo para generación de chat.
   chat-model: #qwen2.5:32b
@@ -75,8 +75,8 @@ logging:
     org.springframework.security: DEBUG
 
 monitoring:
-  grafana-url: ${GRAFANA_URL:http://localhost:3000}
-  prometheus-url: ${PROMETHEUS_URL:http://localhost:9090}
+  grafana-url: ${GRAFANA_URL:http://192.168.1.61:3000}
+  prometheus-url: ${PROMETHEUS_URL:http://192.168.1.61:9090}
   internet-check-url: ${INTERNET_CHECK_URL:https://www.gstatic.com/generate_204}
   internet-check-timeout-ms: ${INTERNET_CHECK_TIMEOUT_MS:2000}
   alerts:
@@ -87,10 +87,7 @@ monitoring:
     memory-threshold: ${MONITOR_MEM_THRESHOLD:0.90}
     disk-threshold: ${MONITOR_DISK_THRESHOLD:0.90}
     swap-threshold: ${MONITOR_SWAP_THRESHOLD:0.90}
-    telegram:
-      enabled: ${TELEGRAM_ALERTS_ENABLED:true}
-      bot-token: ${TELEGRAM_BOT_TOKEN:AAG4IwHZ9hR2iEgAaiVQ_0RBfN4jxcD0HdI}
-      chat-id: ${TELEGRAM_CHAT_ID:8506873950}
+    max-events: ${MONITOR_ALERTS_MAX_EVENTS:200}
 
 management:
   endpoints:
@@ -107,3 +104,9 @@ management:
     metrics:
       export:
         enabled: true
+
+registration:
+  codes:
+    default-ttl-minutes: ${REGISTRATION_CODE_TTL_MINUTES:1440}
+    min-ttl-minutes: ${REGISTRATION_CODE_MIN_TTL_MINUTES:10}
+    max-ttl-minutes: ${REGISTRATION_CODE_MAX_TTL_MINUTES:10080}

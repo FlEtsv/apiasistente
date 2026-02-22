@@ -38,6 +38,16 @@
         <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
 
         <div>
+            <label class="text-xs uppercase tracking-widest text-slate-500 font-semibold">Codigo de registro</label>
+            <input name="code" autocomplete="one-time-code"
+                   class="mt-2 w-full bg-slate-900/30 border border-slate-700/50 rounded-xl px-4 py-3 outline-none focus:border-blue-500/50 font-mono text-sm"
+                   placeholder="codigo temporal" required minlength="10" />
+            <p class="mt-2 text-[11px] text-slate-500">
+                Necesitas un codigo valido generado por un usuario autorizado.
+            </p>
+        </div>
+
+        <div>
             <label class="text-xs uppercase tracking-widest text-slate-500 font-semibold">Usuario</label>
             <input name="username" autocomplete="username"
                    class="mt-2 w-full bg-slate-900/30 border border-slate-700/50 rounded-xl px-4 py-3 outline-none focus:border-blue-500/50"

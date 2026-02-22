@@ -20,10 +20,21 @@ const closeDrawerBtn = document.getElementById('closeDrawer');
 
 const newChatBtn = document.getElementById('newChat');
 
+const monitorIntervalEl = document.getElementById('monitorInterval');
+const monitorEventsEl = document.getElementById('monitorEvents');
+const monitorLastUpdateEl = document.getElementById('monitorLastUpdate');
+const monitorApplyBtn = document.getElementById('btnApplyMonitorInterval');
+
+const openApiKeysInline = document.getElementById('openApiKeysInline');
+
 let sessionId = null;
 let sessionsCache = [];
 let isLoadingHistory = false;
 const MODEL_STORAGE_KEY = 'chat.model';
+const MONITOR_INTERVAL_KEY = 'monitor.intervalMs';
+const MONITOR_MIN_SEC = 3;
+const MONITOR_MAX_SEC = 3600;
+let monitorTimer = null;
 
 function getCsrf() {
   const token = document.querySelector('meta[name="_csrf"]')?.getAttribute('content');
@@ -126,6 +137,139 @@ function loadModelSelection() {
   modelSelectEl.addEventListener('change', () => {
     localStorage.setItem(MODEL_STORAGE_KEY, modelSelectEl.value);
   });
+}
+
+function getMonitorIntervalMs() {
+  const raw = localStorage.getItem(MONITOR_INTERVAL_KEY);
+  const fallback = 10000;
+  if (!raw) return fallback;
+  const ms = parseInt(raw, 10);
+  if (!Number.isFinite(ms) || ms < MONITOR_MIN_SEC * 1000) return fallback;
+  return ms;
+}
+
+function setMonitorIntervalMs(ms) {
+  localStorage.setItem(MONITOR_INTERVAL_KEY, String(ms));
+}
+
+function syncMonitorIntervalUI() {
+  if (!monitorIntervalEl) return;
+  const ms = getMonitorIntervalMs();
+  monitorIntervalEl.value = String(Math.round(ms / 1000));
+}
+
+function renderMonitorEvents(events) {
+  if (!monitorEventsEl) return;
+  if (!Array.isArray(events) || events.length === 0) {
+    monitorEventsEl.innerHTML = `
+      <div class="event-item">
+        <div class="event-head">
+          <span>Sin eventos</span>
+          <span class="event-badge recover">OK</span>
+        </div>
+        <div class="sub">No hay alertas recientes.</div>
+      </div>
+    `;
+    return;
+  }
+
+  monitorEventsEl.innerHTML = '';
+  events.forEach(evt => {
+    const level = (evt.level || '').toUpperCase();
+    const badgeClass = level === 'ALERT' ? 'alert' : 'recover';
+    const title = evt.title || evt.key || 'Evento';
+    const ts = evt.timestamp ? new Date(evt.timestamp).toLocaleTimeString() : '-';
+    const msg = evt.message || '';
+
+    const div = document.createElement('div');
+    div.className = 'event-item';
+    div.innerHTML = `
+      <div class="event-head">
+        <span>${title}</span>
+        <span class="event-badge ${badgeClass}">${level || 'INFO'}</span>
+      </div>
+      <div class="sub">${msg}</div>
+      <div class="sub">${ts}</div>
+    `;
+    monitorEventsEl.appendChild(div);
+  });
+}
+
+async function loadMonitorEvents() {
+  if (!monitorEventsEl) return;
+  try {
+    const res = await fetch('/api/monitor/alerts?limit=8', { headers: withCsrf() });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    renderMonitorEvents(data);
+    if (monitorLastUpdateEl) {
+      monitorLastUpdateEl.textContent = new Date().toLocaleTimeString();
+    }
+  } catch (e) {
+    monitorEventsEl.innerHTML = `
+      <div class="event-item">
+        <div class="event-head">
+          <span>Error</span>
+          <span class="event-badge alert">ALERT</span>
+        </div>
+        <div class="sub">No se pudo cargar eventos: ${e.message || 'error'}</div>
+      </div>
+    `;
+  }
+}
+
+async function loadOpsStatus() {
+  try {
+    const res = await fetch('/ops/status', { credentials: 'include' });
+    if (!res.ok) return;
+    const data = await res.json();
+
+    const grafanaOk = data.grafana && data.grafana.up;
+    const promOk = data.prometheus && data.prometheus.up;
+
+    const grafanaDot = document.getElementById('grafana-dot');
+    const promDot = document.getElementById('prometheus-dot');
+    if (grafanaDot) grafanaDot.style.background = grafanaOk ? '#39c07d' : '#e07b7b';
+    if (promDot) promDot.style.background = promOk ? '#39c07d' : '#e07b7b';
+
+    const gStatus = document.getElementById('grafana-status');
+    const pStatus = document.getElementById('prometheus-status');
+    const gUrl = document.getElementById('grafana-url');
+    const pUrl = document.getElementById('prometheus-url');
+    if (gStatus) {
+      gStatus.textContent = grafanaOk ? 'OK' : 'CAIDO';
+      gStatus.className = grafanaOk ? 'status-up' : 'status-down';
+    }
+    if (pStatus) {
+      pStatus.textContent = promOk ? 'OK' : 'CAIDO';
+      pStatus.className = promOk ? 'status-up' : 'status-down';
+    }
+    if (gUrl) gUrl.textContent = data.grafana ? data.grafana.baseUrl : '-';
+    if (pUrl) pUrl.textContent = data.prometheus ? data.prometheus.baseUrl : '-';
+  } catch (e) {
+    // silencioso
+  }
+}
+
+function scheduleMonitorPolling() {
+  const ms = getMonitorIntervalMs();
+  if (monitorTimer) clearInterval(monitorTimer);
+  monitorTimer = setInterval(() => {
+    loadMonitorEvents();
+    loadOpsStatus();
+  }, ms);
+}
+
+function applyMonitorInterval() {
+  if (!monitorIntervalEl) return;
+  const sec = parseInt(monitorIntervalEl.value, 10);
+  if (!Number.isFinite(sec)) return;
+  const clamped = Math.max(MONITOR_MIN_SEC, Math.min(MONITOR_MAX_SEC, sec));
+  setMonitorIntervalMs(clamped * 1000);
+  syncMonitorIntervalUI();
+  scheduleMonitorPolling();
+  loadMonitorEvents();
+  loadOpsStatus();
 }
 
 async function ensureActiveSession() {
@@ -363,11 +507,28 @@ newChatBtn?.addEventListener('click', async () => {
   try { await createNewChat(); } catch (e) { alert(e.message); }
 });
 
+openApiKeysInline?.addEventListener('click', () => {
+  const btn = document.getElementById('openApiKeys');
+  if (btn) btn.click();
+});
+
+monitorApplyBtn?.addEventListener('click', () => applyMonitorInterval());
+monitorIntervalEl?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') applyMonitorInterval();
+});
+
 window.addEventListener('api-key-created', async (event) => {
   try {
     await handleExternalApiKeySession(event?.detail?.sessionId);
   } catch (e) {
     console.error('No se pudo crear el chat separado para API key:', e);
+  }
+});
+
+window.addEventListener('storage', (e) => {
+  if (e.key === MONITOR_INTERVAL_KEY) {
+    syncMonitorIntervalUI();
+    scheduleMonitorPolling();
   }
 });
 
@@ -381,6 +542,10 @@ sessionSearchMobileEl?.addEventListener('input', () => renderSessions(sessionSea
 (async function init() {
   try {
     loadModelSelection();
+    syncMonitorIntervalUI();
+    loadOpsStatus();
+    loadMonitorEvents();
+    scheduleMonitorPolling();
     await ensureActiveSession();
     await loadSessions();
     await loadHistory(sessionId);

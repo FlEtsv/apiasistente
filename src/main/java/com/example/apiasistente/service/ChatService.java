@@ -241,6 +241,15 @@ public class ChatService {
         sessionRepo.delete(s);
     }
 
+    @Transactional
+    public int deleteAllSessions(String username) {
+        AppUser user = requireUser(username);
+        List<ChatSession> sessions = sessionRepo.findByUser_Id(user.getId());
+        if (sessions.isEmpty()) return 0;
+        sessionRepo.deleteAll(sessions);
+        return sessions.size();
+    }
+
     // =========================================================================
     // HELPERS (seguridad + creaciÃ³n + tÃ­tulos)
     // =========================================================================

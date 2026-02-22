@@ -1,18 +1,21 @@
 package com.example.apiasistente.service;
 
+import com.example.apiasistente.model.dto.MonitoringAlertDto;
+import com.example.apiasistente.model.dto.MonitoringAlertStateDto;
 import com.example.apiasistente.model.dto.ServerStatsDto;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Service
 public class MonitoringAlertService {
 
     private final MonitorService monitorService;
-    private final TelegramNotifier notifier;
+    private final MonitoringAlertStore alertStore;
 
     private final boolean enabled;
     private final double cpuThreshold;
@@ -25,7 +28,7 @@ public class MonitoringAlertService {
 
     public MonitoringAlertService(
             MonitorService monitorService,
-            TelegramNotifier notifier,
+            MonitoringAlertStore alertStore,
             @Value("${monitoring.alerts.enabled:true}") boolean enabled,
             @Value("${monitoring.alerts.cpu-threshold:0.90}") double cpuThreshold,
             @Value("${monitoring.alerts.memory-threshold:0.90}") double memoryThreshold,
@@ -34,7 +37,7 @@ public class MonitoringAlertService {
             @Value("${monitoring.alerts.cooldown-ms:300000}") long cooldownMs
     ) {
         this.monitorService = monitorService;
-        this.notifier = notifier;
+        this.alertStore = alertStore;
         this.enabled = enabled;
         this.cpuThreshold = cpuThreshold;
         this.memoryThreshold = memoryThreshold;
@@ -61,28 +64,28 @@ public class MonitoringAlertService {
         long now = System.currentTimeMillis();
 
         next.cpuHigh = evaluate("CPU", cpu >= cpuThreshold, prev.cpuHigh, now, prev.cpuLast, () ->
-                formatAlert("CPU ALTO", stats, cpu, cpuThreshold),
-                () -> formatRecover("CPU NORMAL", stats, cpu));
+                recordAlert("CPU", "CPU ALTO", stats, cpu, cpuThreshold),
+                () -> recordRecover("CPU", "CPU NORMAL", stats, cpu));
         if (next.cpuHigh != prev.cpuHigh) next.cpuLast = now;
 
         next.memHigh = evaluate("MEM", mem >= memoryThreshold, prev.memHigh, now, prev.memLast, () ->
-                formatAlert("MEMORIA ALTA", stats, mem, memoryThreshold),
-                () -> formatRecover("MEMORIA NORMAL", stats, mem));
+                recordAlert("MEM", "MEMORIA ALTA", stats, mem, memoryThreshold),
+                () -> recordRecover("MEM", "MEMORIA NORMAL", stats, mem));
         if (next.memHigh != prev.memHigh) next.memLast = now;
 
         next.diskHigh = evaluate("DISK", disk >= diskThreshold, prev.diskHigh, now, prev.diskLast, () ->
-                formatAlert("DISCO CRITICO", stats, disk, diskThreshold),
-                () -> formatRecover("DISCO NORMAL", stats, disk));
+                recordAlert("DISK", "DISCO CRITICO", stats, disk, diskThreshold),
+                () -> recordRecover("DISK", "DISCO NORMAL", stats, disk));
         if (next.diskHigh != prev.diskHigh) next.diskLast = now;
 
         next.swapHigh = evaluate("SWAP", swap >= swapThreshold, prev.swapHigh, now, prev.swapLast, () ->
-                formatAlert("SWAP ALTA", stats, swap, swapThreshold),
-                () -> formatRecover("SWAP NORMAL", stats, swap));
+                recordAlert("SWAP", "SWAP ALTA", stats, swap, swapThreshold),
+                () -> recordRecover("SWAP", "SWAP NORMAL", stats, swap));
         if (next.swapHigh != prev.swapHigh) next.swapLast = now;
 
         next.internetDown = evaluate("NET", !internetUp, prev.internetDown, now, prev.netLast, () ->
-                formatInternetAlert(stats),
-                () -> formatInternetRecover(stats));
+                recordInternetAlert(stats),
+                () -> recordInternetRecover(stats));
         if (next.internetDown != prev.internetDown) next.netLast = now;
 
         state.set(next);
@@ -110,49 +113,69 @@ public class MonitoringAlertService {
         return now - lastSent >= cooldownMs;
     }
 
-    private void formatAlert(String title, ServerStatsDto stats, double value, double threshold) {
+    public MonitoringAlertStateDto currentState() {
+        AlertState s = state.get();
+        return new MonitoringAlertStateDto(
+                s.cpuHigh,
+                s.memHigh,
+                s.diskHigh,
+                s.swapHigh,
+                s.internetDown,
+                toInstant(s.cpuLast),
+                toInstant(s.memLast),
+                toInstant(s.diskLast),
+                toInstant(s.swapLast),
+                toInstant(s.netLast)
+        );
+    }
+
+    private void recordAlert(String key, String title, ServerStatsDto stats, double value, double threshold) {
+        Instant now = Instant.now();
         String msg = String.format(
                 "ALERTA: %s%nHost: %s%nValor: %s (umbral %.0f%%)%nHora: %s",
                 title,
                 stats.hostname(),
                 pct(value),
                 threshold * 100.0,
-                Instant.now()
+                now
         );
-        notifier.send(msg);
+        recordEvent("ALERT", key, title, msg, stats, value, threshold, null, null, now);
     }
 
-    private void formatRecover(String title, ServerStatsDto stats, double value) {
+    private void recordRecover(String key, String title, ServerStatsDto stats, double value) {
+        Instant now = Instant.now();
         String msg = String.format(
                 "RECUPERADO: %s%nHost: %s%nValor: %s%nHora: %s",
                 title,
                 stats.hostname(),
                 pct(value),
-                Instant.now()
+                now
         );
-        notifier.send(msg);
+        recordEvent("RECOVER", key, title, msg, stats, value, null, null, null, now);
     }
 
-    private void formatInternetAlert(ServerStatsDto stats) {
+    private void recordInternetAlert(ServerStatsDto stats) {
+        Instant now = Instant.now();
         String msg = String.format(
                 "ALERTA: INTERNET CAIDO%nHost: %s%nURL: %s%nLatencia: %d ms%nHora: %s",
                 stats.hostname(),
                 stats.network().checkedUrl(),
                 stats.network().latencyMs(),
-                Instant.now()
+                now
         );
-        notifier.send(msg);
+        recordEvent("ALERT", "INTERNET", "INTERNET CAIDO", msg, stats, null, null, stats.network().latencyMs(), stats.network().checkedUrl(), now);
     }
 
-    private void formatInternetRecover(ServerStatsDto stats) {
+    private void recordInternetRecover(ServerStatsDto stats) {
+        Instant now = Instant.now();
         String msg = String.format(
                 "RECUPERADO: INTERNET OK%nHost: %s%nURL: %s%nLatencia: %d ms%nHora: %s",
                 stats.hostname(),
                 stats.network().checkedUrl(),
                 stats.network().latencyMs(),
-                Instant.now()
+                now
         );
-        notifier.send(msg);
+        recordEvent("RECOVER", "INTERNET", "INTERNET OK", msg, stats, null, null, stats.network().latencyMs(), stats.network().checkedUrl(), now);
     }
 
     private double ratio(long used, long total) {
@@ -162,6 +185,38 @@ public class MonitoringAlertService {
 
     private String pct(double v) {
         return String.format(java.util.Locale.US, "%.1f%%", v * 100.0);
+    }
+
+    private Instant toInstant(long epochMs) {
+        if (epochMs <= 0) return null;
+        return Instant.ofEpochMilli(epochMs);
+    }
+
+    private void recordEvent(String level,
+                             String key,
+                             String title,
+                             String message,
+                             ServerStatsDto stats,
+                             Double value,
+                             Double threshold,
+                             Long latencyMs,
+                             String checkedUrl,
+                             Instant timestamp) {
+        String host = stats == null ? "unknown" : stats.hostname();
+        MonitoringAlertDto event = new MonitoringAlertDto(
+                UUID.randomUUID().toString(),
+                timestamp == null ? Instant.now() : timestamp,
+                level,
+                key,
+                title,
+                message,
+                host,
+                value,
+                threshold,
+                latencyMs,
+                checkedUrl
+        );
+        alertStore.record(event);
     }
 
     private static final class AlertState {

@@ -16,6 +16,8 @@ public interface ChatSessionRepository extends JpaRepository<ChatSession, String
 
     Optional<ChatSession> findByIdAndUser_Id(String id, Long userId);
 
+    List<ChatSession> findByUser_Id(Long userId);
+
     @Query("""
         select new com.example.apiasistente.model.dto.SessionSummaryDto(
             s.id,

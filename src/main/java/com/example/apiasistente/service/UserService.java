@@ -11,17 +11,21 @@ public class UserService {
 
     private final AppUserRepository repo;
     private final PasswordEncoder encoder;
+    private final RegistrationCodeService registrationCodeService;
 
-    public UserService(AppUserRepository repo, PasswordEncoder encoder) {
+    public UserService(AppUserRepository repo, PasswordEncoder encoder, RegistrationCodeService registrationCodeService) {
         this.repo = repo;
         this.encoder = encoder;
+        this.registrationCodeService = registrationCodeService;
     }
 
     @Transactional
-    public AppUser register(String username, String rawPassword) {
+    public AppUser register(String username, String rawPassword, String registrationCode) {
         repo.findByUsername(username).ifPresent(u -> {
             throw new IllegalArgumentException("El usuario ya existe");
         });
+
+        registrationCodeService.consume(registrationCode, username);
 
         AppUser u = new AppUser();
         u.setUsername(username);

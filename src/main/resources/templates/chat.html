@@ -398,6 +398,42 @@
         .status-up { color: #39c07d; font-weight: 600; }
         .status-down { color: #e07b7b; font-weight: 600; }
 
+        .event-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 220px;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+
+        .event-item {
+            background: var(--bg-soft);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 8px;
+            font-size: 11px;
+        }
+
+        .event-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            font-weight: 600;
+        }
+
+        .event-badge {
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+        }
+
+        .event-badge.alert { background: rgba(224,123,123,0.15); color: #e07b7b; }
+        .event-badge.recover { background: rgba(57,192,125,0.15); color: #39c07d; }
+
         .link-list {
             display: grid;
             gap: 8px;
@@ -465,6 +501,14 @@
             .sessions-panel { display: none; }
             .topbar { flex-direction: column; align-items: flex-start; }
             #toggleSessions { display: inline-flex; }
+        }
+
+        @media (max-width: 640px) {
+            .main { padding: 18px 16px 20px; }
+            .actions { width: 100%; justify-content: flex-start; }
+            .panel-header { flex-direction: column; align-items: flex-start; gap: 6px; }
+            .composer-row { flex-direction: column; }
+            #input, #send, #modelSelect { width: 100%; }
         }
     </style>
 </head>
@@ -570,6 +614,24 @@
                         <span id="prometheus-url" class="sub">-</span>
                     </div>
                     <div class="stat">
+                        <strong>Eventos recientes</strong>
+                        <div class="sub" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                            <span>Actualizar cada</span>
+                            <input id="monitorInterval" class="session-search" style="max-width: 90px;" placeholder="seg" />
+                            <button id="btnApplyMonitorInterval" class="btn">Aplicar</button>
+                            <span id="monitorLastUpdate" class="sub">-</span>
+                        </div>
+                        <div id="monitorEvents" class="event-list">
+                            <div class="event-item">
+                                <div class="event-head">
+                                    <span>Sin eventos</span>
+                                    <span class="event-badge recover">OK</span>
+                                </div>
+                                <div class="sub">Esperando datos del monitor...</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="stat">
                         <strong>Accesos directos</strong>
                         <div class="link-list">
                             <a href="/ops/status/ui" target="_blank" rel="noopener">Ops Status</a>
@@ -608,7 +670,7 @@
     <div id="apiKeysBackdrop" class="absolute inset-0 bg-black/60"></div>
 
     <div class="absolute inset-0 flex items-center justify-center p-4">
-        <div class="panel" style="max-width: 900px; width: 100%;">
+        <div class="panel" style="max-width: 900px; width: 100%; max-height: 90vh; overflow-y: auto;">
             <div class="panel-header">
                 <div>
                     <h3>API Keys</h3>
@@ -660,6 +722,46 @@
                 </div>
 
                 <div class="stat">
+                    <strong>Codigos de registro</strong>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <input id="regCodeLabel" class="session-search" placeholder="Etiqueta (opcional)" />
+                        <input id="regCodeTtl" class="session-search" style="max-width: 150px;" placeholder="TTL (min)" />
+                        <button id="btnCreateRegCode" class="btn primary">Crear codigo</button>
+                    </div>
+                    <div id="regCodeCreatedBox" class="stat hidden" style="margin-top:10px;">
+                        <div>Codigo creado (se muestra una sola vez)</div>
+                        <pre id="regCodeCreatedValue" class="sub" style="white-space: pre-wrap; word-break: break-all;"></pre>
+                        <div class="sub">Expira: <span id="regCodeCreatedExpiry">-</span></div>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                            <button id="btnCopyRegCode" class="btn">Copiar</button>
+                            <button id="btnHideRegCode" class="btn">Ocultar</button>
+                        </div>
+                    </div>
+
+                    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:10px;">
+                        <strong>Codigos activos</strong>
+                        <button id="btnRefreshRegCodes" class="btn">Refrescar</button>
+                    </div>
+                    <div style="overflow-x:auto;">
+                        <table style="width:100%; font-size:12px;">
+                            <thead style="color: var(--muted);">
+                            <tr style="border-bottom: 1px solid var(--border);">
+                                <th style="text-align:left; padding:6px;">Label</th>
+                                <th style="text-align:left; padding:6px;">Prefix</th>
+                                <th style="text-align:left; padding:6px;">Expires</th>
+                                <th style="text-align:left; padding:6px;">Used</th>
+                                <th style="text-align:left; padding:6px;">Revoked</th>
+                                <th style="text-align:right; padding:6px;">Accion</th>
+                            </tr>
+                            </thead>
+                            <tbody id="regCodesTbody"></tbody>
+                        </table>
+                    </div>
+                    <p id="regCodesEmpty" class="sub hidden">No hay codigos.</p>
+                    <p id="regCodesError" class="sub hidden" style="color: var(--warn);"></p>
+                </div>
+
+                <div class="stat">
                     <strong>Uso rapido</strong>
                     <pre class="sub" style="white-space: pre-wrap;">curl -s http://localhost:8080/api/ext/chat \
   -H "Content-Type: application/json" \
@@ -671,54 +773,8 @@
     </div>
 </div>
 
-<script>
-    const openApiKeysInline = document.getElementById('openApiKeysInline');
-    if (openApiKeysInline) {
-        openApiKeysInline.addEventListener('click', () => {
-            const btn = document.getElementById('openApiKeys');
-            if (btn) btn.click();
-        });
-    }
-
-    async function loadOpsStatus() {
-        try {
-            const res = await fetch('/ops/status', { credentials: 'include' });
-            if (!res.ok) return;
-            const data = await res.json();
-
-            const grafanaOk = data.grafana && data.grafana.up;
-            const promOk = data.prometheus && data.prometheus.up;
-
-            const grafanaDot = document.getElementById('grafana-dot');
-            const promDot = document.getElementById('prometheus-dot');
-            if (grafanaDot) grafanaDot.style.background = grafanaOk ? '#39c07d' : '#e07b7b';
-            if (promDot) promDot.style.background = promOk ? '#39c07d' : '#e07b7b';
-
-            const gStatus = document.getElementById('grafana-status');
-            const pStatus = document.getElementById('prometheus-status');
-            const gUrl = document.getElementById('grafana-url');
-            const pUrl = document.getElementById('prometheus-url');
-            if (gStatus) {
-                gStatus.textContent = grafanaOk ? 'OK' : 'CAIDO';
-                gStatus.className = grafanaOk ? 'status-up' : 'status-down';
-            }
-            if (pStatus) {
-                pStatus.textContent = promOk ? 'OK' : 'CAIDO';
-                pStatus.className = promOk ? 'status-up' : 'status-down';
-            }
-            if (gUrl) gUrl.textContent = data.grafana ? data.grafana.baseUrl : '-';
-            if (pUrl) pUrl.textContent = data.prometheus ? data.prometheus.baseUrl : '-';
-        } catch (e) {
-            // silencioso
-        }
-    }
-
-    loadOpsStatus();
-    setInterval(loadOpsStatus, 10000);
-</script>
-
 <!-- IMPORTANTE: cache-busting para que NO uses un chat.js viejo -->
-<script src="/chat.js?v=4"></script>
+<script src="/chat.js?v=5"></script>
 <script src="/api-keys.js?v=1"></script>
 
 </body>

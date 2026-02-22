@@ -7,6 +7,7 @@ API Asistente es un servicio Spring Boot que expone endpoints de chat con recupe
 - **Ingesta RAG**: permite cargar documentos para generar embeddings y persistirlos como conocimiento.
 - **Memoria persistente**: guarda hechos o perfiles de usuario como documentos RAG reutilizables.
 - **Acceso web y externo**: endpoints con sesión (web app) y endpoints externos con API key.
+- **Registro controlado**: nuevos usuarios requieren un código temporal de registro.
 
 ## Arquitectura (alto nivel)
 1. **Entrada**: el cliente envía mensajes o documentos mediante endpoints REST.
@@ -65,6 +66,12 @@ docker compose up -d
 - `PUT /api/chat/sessions/{sessionId}/activate`
 - `PUT /api/chat/sessions/{sessionId}/title`
 - `DELETE /api/chat/sessions/{sessionId}`
+- `DELETE /api/chat/sessions`
+
+### Códigos de registro (web / sesión con login)
+- `GET /api/registration-codes`
+- `POST /api/registration-codes`
+- `DELETE /api/registration-codes/{id}`
 
 ### Chat externo (API key, stateless)
 - `POST /api/ext/chat`
@@ -78,6 +85,11 @@ docker compose up -d
 - `POST /api/ext/rag/documents`
 - `POST /api/ext/rag/documents/batch`
 - `POST /api/ext/rag/memory`
+
+### Monitoreo externo (API key, stateless)
+- `GET /api/ext/monitor/server`
+- `GET /api/ext/monitor/alerts`
+- `GET /api/ext/monitor/alerts/state`
 
 ## Ejemplos rápidos (API externa)
 ```bash
@@ -94,6 +106,7 @@ curl -X POST http://localhost:8080/api/ext/rag/memory \
 
 ## Notas de seguridad
 - Los endpoints `/api/ext/*` requieren API key en el header `Authorization`.
+- El registro de nuevos usuarios requiere un código temporal generado desde la UI (API Keys).
 - Ajusta el nivel de logging en `application.yml` para producción.
 
 ## Tests

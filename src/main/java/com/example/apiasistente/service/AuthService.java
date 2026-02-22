@@ -11,14 +11,16 @@ public class AuthService {
 
     private final AppUserRepository repo;
     private final PasswordEncoder encoder;
+    private final RegistrationCodeService registrationCodeService;
 
-    public AuthService(AppUserRepository repo, PasswordEncoder encoder) {
+    public AuthService(AppUserRepository repo, PasswordEncoder encoder, RegistrationCodeService registrationCodeService) {
         this.repo = repo;
         this.encoder = encoder;
+        this.registrationCodeService = registrationCodeService;
     }
 
     @Transactional
-    public void register(String username, String rawPassword) {
+    public void register(String username, String rawPassword, String registrationCode) {
         String u = username == null ? "" : username.trim();
 
         if (u.length() < 3) throw new IllegalArgumentException("Usuario demasiado corto (mín 3).");
@@ -27,6 +29,8 @@ public class AuthService {
 
         if (repo.existsByUsername(u))
             throw new IllegalArgumentException("Ese usuario ya existe.");
+
+        registrationCodeService.consume(registrationCode, u);
 
         AppUser user = new AppUser();
         user.setUsername(u);

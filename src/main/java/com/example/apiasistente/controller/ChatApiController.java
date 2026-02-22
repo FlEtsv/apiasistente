@@ -89,6 +89,15 @@ public class ChatApiController {
     }
 
     // ---------------------------------------------------------------------
+    // BORRAR TODOS LOS CHATS DEL USUARIO
+    // ---------------------------------------------------------------------
+    @DeleteMapping("/sessions")
+    public Map<String, String> deleteAll(Principal principal) {
+        int deleted = chatService.deleteAllSessions(principal.getName());
+        return Map.of("deleted", String.valueOf(deleted));
+    }
+
+    // ---------------------------------------------------------------------
     // CHAT NORMAL
     // Envía mensaje y devuelve respuesta + fuentes RAG.
     // ---------------------------------------------------------------------

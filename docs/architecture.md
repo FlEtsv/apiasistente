@@ -17,7 +17,7 @@ flowchart LR
   SRV --> MON[Monitoreo / Alertas]
 
   JPA --> DB[(MySQL)]
-  MON --> TG[Telegram Bot API]
+  MON --> STORE[Alert Store]
 
   subgraph Seguridad
     SEC[Spring Security + ApiKeyAuthFilter]
@@ -124,7 +124,9 @@ sequenceDiagram
   participant MonitorController
   participant MonitorService
   participant MonitoringAlertService
-  participant TelegramNotifier
+  participant MonitoringAlertStore
+  participant ExternalMonitoringController
+  participant ExternalService
 
   UI->>MonitorController: GET /api/monitor/server
   MonitorController->>MonitorService: snapshot()
@@ -132,8 +134,12 @@ sequenceDiagram
   MonitorController-->>UI: JSON
 
   MonitoringAlertService->>MonitorService: snapshot() (cada N segundos)
-  MonitoringAlertService->>TelegramNotifier: send(alerta)
-  TelegramNotifier-->>MonitoringAlertService: ok
+  MonitoringAlertService->>MonitoringAlertStore: record(alerta)
+
+  ExternalService->>ExternalMonitoringController: GET /api/ext/monitor/alerts
+  ExternalMonitoringController->>MonitoringAlertStore: recent()
+  MonitoringAlertStore-->>ExternalMonitoringController: lista de alertas
+  ExternalMonitoringController-->>ExternalService: JSON
 ```
 
 ## Flujo Ops Status (Grafana/Prometheus)
@@ -157,4 +163,5 @@ sequenceDiagram
 2. Los endpoints `/api/ext/**` requieren API key y retornan 401 si falta o es invalida.
 3. Los DTOs evitan exponer entidades JPA al frontend.
 4. El monitoreo actual detecta CPU, memoria, disco y caidas de internet.
-5. Las alertas por Telegram requieren `TELEGRAM_BOT_TOKEN` y `TELEGRAM_CHAT_ID`.
+5. El monitoreo externo usa `/api/ext/monitor/**` con API key y expone alertas recientes + estado.
+6. El registro de nuevos usuarios requiere un codigo temporal generado desde la UI.

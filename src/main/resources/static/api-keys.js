@@ -66,6 +66,36 @@ function hideCreatedKey() {
   box.classList.add("hidden");
 }
 
+function showRegCode(value, expiresAt) {
+  const box = document.getElementById("regCodeCreatedBox");
+  const pre = document.getElementById("regCodeCreatedValue");
+  const exp = document.getElementById("regCodeCreatedExpiry");
+  pre.textContent = value;
+  exp.textContent = expiresAt ? fmtDate(expiresAt) : "-";
+  box.classList.remove("hidden");
+}
+
+function hideRegCode() {
+  const box = document.getElementById("regCodeCreatedBox");
+  const pre = document.getElementById("regCodeCreatedValue");
+  const exp = document.getElementById("regCodeCreatedExpiry");
+  pre.textContent = "";
+  exp.textContent = "";
+  box.classList.add("hidden");
+}
+
+function showRegError(msg) {
+  const el = document.getElementById("regCodesError");
+  el.textContent = msg;
+  el.classList.remove("hidden");
+}
+
+function clearRegError() {
+  const el = document.getElementById("regCodesError");
+  el.textContent = "";
+  el.classList.add("hidden");
+}
+
 async function loadApiKeys() {
   clearError();
   const tbody = document.getElementById("apiKeysTbody");
@@ -120,6 +150,61 @@ async function loadApiKeys() {
   }
 }
 
+async function loadRegCodes() {
+  clearRegError();
+  const tbody = document.getElementById("regCodesTbody");
+  const empty = document.getElementById("regCodesEmpty");
+  tbody.innerHTML = "";
+  empty.classList.add("hidden");
+
+  try {
+    const codes = await apiFetch("/api/registration-codes", { method: "GET" });
+
+    if (!codes || codes.length === 0) {
+      empty.classList.remove("hidden");
+      return;
+    }
+
+    for (const c of codes) {
+      const tr = document.createElement("tr");
+      tr.className = "border-b border-slate-700/20";
+
+      const used = c.usedAt ? `${fmtDate(c.usedAt)}${c.usedBy ? " · " + c.usedBy : ""}` : "-";
+      const revoked = c.revokedAt ? "✓" : "-";
+      const canRevoke = !c.revokedAt && !c.usedAt;
+
+      tr.innerHTML = `
+        <td class="py-2 pr-2">${escapeHtml(c.label || "-")}</td>
+        <td class="py-2 pr-2 font-mono text-xs text-blue-300/80">${escapeHtml(c.codePrefix || "-")}</td>
+        <td class="py-2 pr-2 text-xs text-slate-400">${escapeHtml(fmtDate(c.expiresAt))}</td>
+        <td class="py-2 pr-2 text-xs text-slate-400">${escapeHtml(used)}</td>
+        <td class="py-2 pr-2">${revoked}</td>
+        <td class="py-2 text-right">
+          ${canRevoke ? `<button data-id="${c.id}" class="revokeReg px-3 py-1.5 rounded-xl text-xs bg-red-600/80 hover:bg-red-500/80 border border-red-400/20">Revocar</button>` : ""}
+        </td>
+      `;
+
+      tbody.appendChild(tr);
+    }
+
+    document.querySelectorAll(".revokeReg").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const id = btn.getAttribute("data-id");
+        if (!confirm("¿Revocar este codigo?")) return;
+
+        try {
+          await apiFetch(`/api/registration-codes/${id}`, { method: "DELETE" });
+          await loadRegCodes();
+        } catch (e) {
+          showRegError(e.message);
+        }
+      });
+    });
+  } catch (e) {
+    showRegError(e.message);
+  }
+}
+
 async function createApiKey() {
   clearError();
   hideCreatedKey();
@@ -149,6 +234,30 @@ async function createApiKey() {
   }
 }
 
+async function createRegCode() {
+  clearRegError();
+  hideRegCode();
+
+  const label = document.getElementById("regCodeLabel")?.value?.trim();
+  const ttlRaw = document.getElementById("regCodeTtl")?.value?.trim();
+  const ttlMinutes = ttlRaw ? parseInt(ttlRaw, 10) : null;
+
+  try {
+    const out = await apiFetch("/api/registration-codes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label, ttlMinutes })
+    });
+
+    showRegCode(out.code, out.expiresAt);
+    document.getElementById("regCodeLabel").value = "";
+    document.getElementById("regCodeTtl").value = "";
+    await loadRegCodes();
+  } catch (e) {
+    showRegError(e.message);
+  }
+}
+
 function escapeHtml(s) {
   return String(s ?? "")
     .replaceAll("&", "&amp;")
@@ -162,12 +271,16 @@ function escapeHtml(s) {
 document.getElementById("openApiKeys")?.addEventListener("click", async () => {
   openModal();
   await loadApiKeys();
+  await loadRegCodes();
 });
 
 document.getElementById("closeApiKeys")?.addEventListener("click", () => closeModal());
 document.getElementById("apiKeysBackdrop")?.addEventListener("click", () => closeModal());
 document.getElementById("btnRefreshApiKeys")?.addEventListener("click", async () => loadApiKeys());
 document.getElementById("btnCreateApiKey")?.addEventListener("click", async () => createApiKey());
+
+document.getElementById("btnCreateRegCode")?.addEventListener("click", async () => createRegCode());
+document.getElementById("btnRefreshRegCodes")?.addEventListener("click", async () => loadRegCodes());
 
 document.getElementById("btnCopyApiKey")?.addEventListener("click", async () => {
   const v = document.getElementById("apiKeyCreatedValue")?.textContent || "";
@@ -176,3 +289,11 @@ document.getElementById("btnCopyApiKey")?.addEventListener("click", async () => 
 });
 
 document.getElementById("btnHideApiKey")?.addEventListener("click", () => hideCreatedKey());
+
+document.getElementById("btnCopyRegCode")?.addEventListener("click", async () => {
+  const v = document.getElementById("regCodeCreatedValue")?.textContent || "";
+  if (!v) return;
+  await navigator.clipboard.writeText(v);
+});
+
+document.getElementById("btnHideRegCode")?.addEventListener("click", () => hideRegCode());
