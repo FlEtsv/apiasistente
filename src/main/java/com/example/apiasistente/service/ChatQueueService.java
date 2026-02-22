@@ -39,8 +39,19 @@ public class ChatQueueService {
      * Encola el mensaje y devuelve la respuesta cuando el turno termina.
      */
     public ChatResponse chatAndWait(String username, String sessionId, String message, String model) {
+        return chatAndWait(username, sessionId, message, model, null);
+    }
+
+    /**
+     * Variante para integraciones externas con aislamiento por usuario final.
+     */
+    public ChatResponse chatAndWait(String username,
+                                    String sessionId,
+                                    String message,
+                                    String model,
+                                    String externalUserId) {
         try {
-            return enqueueChat(username, sessionId, message, model).get();
+            return enqueueChat(username, sessionId, message, model, externalUserId).get();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("La cola de chat fue interrumpida.", e);
@@ -53,10 +64,18 @@ public class ChatQueueService {
      * Encola el mensaje y devuelve un future para esperar el resultado.
      */
     public CompletableFuture<ChatResponse> enqueueChat(String username, String sessionId, String message, String model) {
-        String queueKey = resolveQueueKey(username, sessionId);
+        return enqueueChat(username, sessionId, message, model, null);
+    }
+
+    public CompletableFuture<ChatResponse> enqueueChat(String username,
+                                                       String sessionId,
+                                                       String message,
+                                                       String model,
+                                                       String externalUserId) {
+        String queueKey = resolveQueueKey(username, sessionId, externalUserId);
         SessionQueue queue = sessionQueues.computeIfAbsent(queueKey, key -> new SessionQueue());
         String requestId = RequestIdHolder.ensure();
-        QueuedChat queued = new QueuedChat(username, sessionId, message, model, requestId);
+        QueuedChat queued = new QueuedChat(username, sessionId, message, model, externalUserId, requestId);
 
         queue.enqueue(queued);
         startProcessingIfNeeded(queueKey, queue);
@@ -93,7 +112,8 @@ public class ChatQueueService {
                             next.username(),
                             next.sessionId(),
                             next.message(),
-                            next.model()
+                            next.model(),
+                            next.externalUserId()
                     );
                     next.response().complete(response);
                 } catch (Exception ex) {
@@ -125,9 +145,13 @@ public class ChatQueueService {
         }
     }
 
-    private String resolveQueueKey(String username, String sessionId) {
+    private String resolveQueueKey(String username, String sessionId, String externalUserId) {
         if (sessionId != null && !sessionId.isBlank()) {
             return sessionId;
+        }
+        if (externalUserId != null && !externalUserId.isBlank()) {
+            return "new-session::" + Objects.requireNonNull(username, "username requerido")
+                    + "::ext::" + externalUserId.trim();
         }
         return "new-session::" + Objects.requireNonNull(username, "username requerido");
     }
@@ -186,15 +210,20 @@ public class ChatQueueService {
             String sessionId,
             String message,
             String model,
+            String externalUserId,
             String requestId,
             CompletableFuture<ChatResponse> response
     ) {
         QueuedChat(String username, String sessionId, String message, String model) {
-            this(username, sessionId, message, model, RequestIdHolder.ensure(), new CompletableFuture<>());
+            this(username, sessionId, message, model, null, RequestIdHolder.ensure(), new CompletableFuture<>());
         }
 
         QueuedChat(String username, String sessionId, String message, String model, String requestId) {
-            this(username, sessionId, message, model, requestId, new CompletableFuture<>());
+            this(username, sessionId, message, model, null, requestId, new CompletableFuture<>());
+        }
+
+        QueuedChat(String username, String sessionId, String message, String model, String externalUserId, String requestId) {
+            this(username, sessionId, message, model, externalUserId, requestId, new CompletableFuture<>());
         }
     }
 }

@@ -33,6 +33,12 @@ public class ApiKey {
     @Column(name = "revoked_at")
     private Instant revokedAt;
 
+    /**
+     * Si true, esta clave puede usar mode special + externalUserId en /api/ext/chat.
+     */
+    @Column(name = "special_mode_enabled", nullable = false)
+    private boolean specialModeEnabled = false;
+
     public boolean isRevoked() {
         return revokedAt != null;
     }
@@ -59,6 +65,9 @@ public class ApiKey {
 
     public Instant getRevokedAt() { return revokedAt; }
     public void setRevokedAt(Instant revokedAt) { this.revokedAt = revokedAt; }
+
+    public boolean isSpecialModeEnabled() { return specialModeEnabled; }
+    public void setSpecialModeEnabled(boolean specialModeEnabled) { this.specialModeEnabled = specialModeEnabled; }
 
     public void setId(long l) {
     }

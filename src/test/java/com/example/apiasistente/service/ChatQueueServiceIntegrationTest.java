@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.when;
 
 /**
- * Test de integración ligero con contexto Spring para validar wiring básico.
+ * Test de integracion ligero con contexto Spring para validar wiring basico.
  */
 @ExtendWith(SpringExtension.class)
 @ContextConfiguration(classes = {
@@ -50,11 +50,10 @@ class ChatQueueServiceIntegrationTest {
 
     @Test
     void enqueuesWithSpringContext() throws Exception {
-        when(chatService.chat("user", "sid", "hola", "fast"))
+        when(chatService.chat("user", "sid", "hola", "fast", null))
                 .thenReturn(new ChatResponse("sid", "ok", List.of()));
 
         var response = queueService.enqueueChat("user", "sid", "hola", "fast").get(2, TimeUnit.SECONDS);
         assertEquals("ok", response.getReply());
     }
 }
-

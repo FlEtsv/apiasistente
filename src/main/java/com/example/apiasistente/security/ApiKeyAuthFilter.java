@@ -15,6 +15,10 @@ import java.util.List;
 
 public class ApiKeyAuthFilter extends OncePerRequestFilter {
 
+    public static final String ATTR_API_KEY_ID = "ext.apiKeyId";
+    public static final String ATTR_SPECIAL_KEY = "ext.specialModeEnabled";
+    public static final String ATTR_API_KEY_LABEL = "ext.apiKeyLabel";
+
     private final ApiKeyService apiKeyService;
 
     public ApiKeyAuthFilter(ApiKeyService apiKeyService) {
@@ -35,14 +39,17 @@ public class ApiKeyAuthFilter extends OncePerRequestFilter {
         }
 
         if (token != null && !token.isBlank() && SecurityContextHolder.getContext().getAuthentication() == null) {
-            String username = apiKeyService.authenticateAndGetUsername(token);
-            if (username != null) {
+            ApiKeyService.ApiKeyAuthResult authResult = apiKeyService.authenticate(token);
+            if (authResult != null && authResult.username() != null) {
                 var auth = new UsernamePasswordAuthenticationToken(
-                        username,
+                        authResult.username(),
                         null,
                         List.of(new SimpleGrantedAuthority("ROLE_EXT"))
                 );
                 SecurityContextHolder.getContext().setAuthentication(auth);
+                req.setAttribute(ATTR_API_KEY_ID, authResult.apiKeyId());
+                req.setAttribute(ATTR_SPECIAL_KEY, authResult.specialModeEnabled());
+                req.setAttribute(ATTR_API_KEY_LABEL, authResult.label());
             }
         }
 

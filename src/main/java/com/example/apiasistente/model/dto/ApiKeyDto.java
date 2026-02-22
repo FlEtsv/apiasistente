@@ -6,6 +6,7 @@ public record ApiKeyDto(
         Long id,
         String label,
         String keyPrefix,
+        boolean specialModeEnabled,
         Instant createdAt,
         Instant lastUsedAt,
         Instant revokedAt

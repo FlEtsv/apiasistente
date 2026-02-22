@@ -28,8 +28,8 @@ public class ChatService {
     private final ChatModelSelector modelSelector;
 
     /**
-     * CuÃ¡ntos mensajes anteriores metemos en el contexto del modelo.
-     * TÃº has subido esto a 40: perfecto, pero controla coste / latencia.
+     * CuÃƒÂ¡ntos mensajes anteriores metemos en el contexto del modelo.
+     * TÃƒÂº has subido esto a 40: perfecto, pero controla coste / latencia.
      *
      * En application.properties:
      * rag.max-history=40
@@ -64,7 +64,7 @@ public class ChatService {
     /**
      * Flujo completo:
      * 1) comprobar usuario
-     * 2) resolver sesiÃ³n (la que viene o la Ãºltima del usuario o crear)
+     * 2) resolver sesiÃƒÂ³n (la que viene o la ÃƒÂºltima del usuario o crear)
      * 3) guardar mensaje usuario
      * 4) RAG retrieve
      * 5) construir contexto para Ollama (system + history + rag)
@@ -73,11 +73,11 @@ public class ChatService {
      */
     @Transactional
     public ChatResponse chat(String username, String maybeSessionId, String userText) {
-        return chat(username, maybeSessionId, userText, null);
+        return chat(username, maybeSessionId, userText, null, null);
     }
 
     /**
-     * Flujo completo de chat con selecciÃ³n de modelo.
+     * Flujo completo de chat con selecciÃƒÂ³n de modelo.
      */
     @Transactional
     public ChatResponse chat(String username, String maybeSessionId, String userText, String requestedModel) {
@@ -85,10 +85,10 @@ public class ChatService {
         // 1) Usuario autenticado debe existir en BD
         AppUser user = requireUser(username);
 
-        // 2) Resolver sesiÃ³n (o validar que sea suya)
+        // 2) Resolver sesiÃƒÂ³n (o validar que sea suya)
         ChatSession session = resolveSession(user, maybeSessionId);
 
-        // 3) actualizar "Ãºltima actividad" y tÃ­tulo automÃ¡tico si procede
+        // 3) actualizar "ÃƒÂºltima actividad" y tÃƒÂ­tulo automÃƒÂ¡tico si procede
         touchSession(session);
         autoTitleIfDefault(session, userText);
 
@@ -106,11 +106,11 @@ public class ChatService {
         // 6) Construir mensajes para Ollama
         List<OllamaClient.Message> msgs = new ArrayList<>();
 
-        // prompt del sistema asociado a la sesiÃ³n
+        // prompt del sistema asociado a la sesiÃƒÂ³n
         SystemPrompt prompt = session.getSystemPrompt();
         msgs.add(new OllamaClient.Message("system", prompt.getContent()));
 
-        // histÃ³rico (Ãºltimos N)
+        // histÃƒÂ³rico (ÃƒÂºltimos N)
         var historyDesc = messageRepo.findTop50BySession_IdOrderByCreatedAtDesc(session.getId());
         historyDesc.stream()
                 .sorted(Comparator.comparing(ChatMessage::getCreatedAt))
@@ -134,7 +134,7 @@ public class ChatService {
         assistantMsg.setContent(assistantText);
         assistantMsg = messageRepo.save(assistantMsg);
 
-        // 9) Log de fuentes (relaciÃ³n mensaje -> chunks)
+        // 9) Log de fuentes (relaciÃƒÂ³n mensaje -> chunks)
         for (var sc : scored) {
             ChatMessageSource link = new ChatMessageSource();
             link.setMessage(assistantMsg);
@@ -149,8 +149,71 @@ public class ChatService {
         return new ChatResponse(session.getId(), assistantText, sources);
     }
 
+    /**
+     * Variante para API externa con aislamiento por usuario final.
+     */
+    @Transactional
+    public ChatResponse chat(String username,
+                             String maybeSessionId,
+                             String userText,
+                             String requestedModel,
+                             String externalUserId) {
+
+        String normalizedExternalUserId = normalizeExternalUserId(externalUserId);
+
+        AppUser user = requireUser(username);
+        ChatSession session = resolveSession(user, maybeSessionId, normalizedExternalUserId);
+
+        touchSession(session);
+        autoTitleIfDefault(session, userText);
+
+        ChatMessage userMsg = new ChatMessage();
+        userMsg.setSession(session);
+        userMsg.setRole(ChatMessage.Role.USER);
+        userMsg.setContent(userText);
+        messageRepo.save(userMsg);
+
+        var scored = ragService.retrieveTopKForOwnerOrGlobal(userText, username);
+        List<SourceDto> sources = ragService.toSourceDtos(scored);
+
+        List<OllamaClient.Message> msgs = new ArrayList<>();
+        SystemPrompt prompt = session.getSystemPrompt();
+        msgs.add(new OllamaClient.Message("system", prompt.getContent()));
+
+        var historyDesc = messageRepo.findTop50BySession_IdOrderByCreatedAtDesc(session.getId());
+        historyDesc.stream()
+                .sorted(Comparator.comparing(ChatMessage::getCreatedAt))
+                .skip(Math.max(0, historyDesc.size() - maxHistory))
+                .forEach(m -> msgs.add(new OllamaClient.Message(
+                        m.getRole() == ChatMessage.Role.USER ? "user" : "assistant",
+                        m.getContent()
+                )));
+
+        msgs.add(new OllamaClient.Message("user", buildRagBlock(userText, scored)));
+
+        String model = modelSelector.resolveChatModel(requestedModel);
+        String assistantText = ollama.chat(msgs, model);
+
+        ChatMessage assistantMsg = new ChatMessage();
+        assistantMsg.setSession(session);
+        assistantMsg.setRole(ChatMessage.Role.ASSISTANT);
+        assistantMsg.setContent(assistantText);
+        assistantMsg = messageRepo.save(assistantMsg);
+
+        for (var sc : scored) {
+            ChatMessageSource link = new ChatMessageSource();
+            link.setMessage(assistantMsg);
+            link.setChunk(sc.chunk());
+            link.setScore(sc.score());
+            sourceRepo.save(link);
+        }
+
+        touchSession(session);
+        return new ChatResponse(session.getId(), assistantText, sources);
+    }
+
     // =========================================================================
-    // HISTORIAL (FIX CRÃTICO)
+    // HISTORIAL (FIX CRÃƒÂTICO)
     // =========================================================================
 
     /**
@@ -161,7 +224,7 @@ public class ChatService {
     public List<ChatMessageDto> historyDto(String username, String sessionId) {
         AppUser user = requireUser(username);
 
-        // valida propiedad y devuelve la sesiÃ³n por si la necesitas
+        // valida propiedad y devuelve la sesiÃƒÂ³n por si la necesitas
         requireOwnedSession(user, sessionId);
 
         // cargamos mensajes como entidades, pero devolvemos DTOs (sin session/user)
@@ -177,7 +240,7 @@ public class ChatService {
     }
 
     /**
-     * Si quieres mantener esto para lÃ³gica interna, ok,
+     * Si quieres mantener esto para lÃƒÂ³gica interna, ok,
      * pero NO lo expongas como JSON.
      */
     @Transactional(readOnly = true)
@@ -188,12 +251,12 @@ public class ChatService {
     }
 
     // =========================================================================
-    // SESIÃ“N ACTIVA / CREAR NUEVA
+    // SESIÃƒâ€œN ACTIVA / CREAR NUEVA
     // =========================================================================
 
     public String activeSessionId(String username) {
         AppUser user = requireUser(username);
-        return sessionRepo.findFirstByUser_IdOrderByLastActivityAtDesc(user.getId())
+        return sessionRepo.findFirstByUser_IdAndExternalUserIdIsNullOrderByLastActivityAtDesc(user.getId())
                 .map(ChatSession::getId)
                 .orElseGet(() -> createSession(user).getId());
     }
@@ -237,7 +300,7 @@ public class ChatService {
         AppUser user = requireUser(username);
 
         ChatSession s = requireOwnedSession(user, sessionId);
-        // Si tu cascade REMOVE estÃ¡ bien, esto borra todo el chat
+        // Si tu cascade REMOVE estÃƒÂ¡ bien, esto borra todo el chat
         sessionRepo.delete(s);
     }
 
@@ -251,7 +314,7 @@ public class ChatService {
     }
 
     // =========================================================================
-    // HELPERS (seguridad + creaciÃ³n + tÃ­tulos)
+    // HELPERS (seguridad + creaciÃƒÂ³n + tÃƒÂ­tulos)
     // =========================================================================
 
     private AppUser requireUser(String username) {
@@ -260,40 +323,61 @@ public class ChatService {
     }
 
     /**
-     * Resuelve una sesiÃ³n:
+     * Resuelve una sesiÃƒÂ³n:
      * - si viene sessionId -> valida que exista y sea del usuario
-     * - si no viene -> usa la Ãºltima sesiÃ³n del usuario o crea una nueva
+     * - si no viene -> usa la ÃƒÂºltima sesiÃƒÂ³n del usuario o crea una nueva
      */
     private ChatSession resolveSession(AppUser user, String maybeSessionId) {
+        return resolveSession(user, maybeSessionId, null);
+    }
+
+    private ChatSession resolveSession(AppUser user, String maybeSessionId, String externalUserId) {
         if (maybeSessionId != null && !maybeSessionId.isBlank()) {
             ChatSession s = sessionRepo.findById(maybeSessionId)
-                    .orElseThrow(() -> new NoSuchElementException("SesiÃ³n no encontrada: " + maybeSessionId));
+                    .orElseThrow(() -> new NoSuchElementException("Sesion no encontrada: " + maybeSessionId));
 
             if (!s.getUser().getId().equals(user.getId())) {
                 throw new AccessDeniedException("No puedes acceder a sesiones de otro usuario");
             }
+
+            if (hasText(externalUserId)) {
+                if (!externalUserId.equals(s.getExternalUserId())) {
+                    throw new AccessDeniedException("La sesion no corresponde al usuario externo solicitado.");
+                }
+            } else if (hasText(s.getExternalUserId())) {
+                throw new AccessDeniedException("La sesion pertenece a un usuario externo aislado y requiere modo especial.");
+            }
+
             return s;
         }
 
-        return sessionRepo.findFirstByUser_IdOrderByLastActivityAtDesc(user.getId())
-                .orElseGet(() -> createSession(user));
+        if (hasText(externalUserId)) {
+            return sessionRepo.findFirstByUser_IdAndExternalUserIdOrderByLastActivityAtDesc(user.getId(), externalUserId)
+                    .orElseGet(() -> createSession(user, externalUserId));
+        }
+
+        return sessionRepo.findFirstByUser_IdAndExternalUserIdIsNullOrderByLastActivityAtDesc(user.getId())
+                .orElseGet(() -> createSession(user, null));
     }
 
-    /**
-     * Valida que la sesiÃ³n exista y sea del usuario.
-     * Devuelve la sesiÃ³n para que puedas reutilizarla si lo necesitas.
-     */
     private ChatSession requireOwnedSession(AppUser user, String sessionId) {
         ChatSession s = sessionRepo.findById(sessionId)
-                .orElseThrow(() -> new NoSuchElementException("SesiÃ³n no encontrada: " + sessionId));
+                .orElseThrow(() -> new NoSuchElementException("SesiÃƒÂ³n no encontrada: " + sessionId));
 
         if (!s.getUser().getId().equals(user.getId())) {
             throw new AccessDeniedException("No puedes acceder a sesiones de otro usuario");
+        }
+        if (hasText(s.getExternalUserId())) {
+            throw new AccessDeniedException("La sesion pertenece a un usuario externo aislado y no esta disponible en modo generico.");
         }
         return s;
     }
 
     private ChatSession createSession(AppUser user) {
+        return createSession(user, null);
+    }
+
+    private ChatSession createSession(AppUser user, String externalUserId) {
         SystemPrompt active = promptService.activePromptOrThrow();
 
         ChatSession s = new ChatSession();
@@ -302,12 +386,13 @@ public class ChatService {
         s.setSystemPrompt(active);
         s.setTitle(DEFAULT_TITLE);
         s.setLastActivityAt(Instant.now());
+        s.setExternalUserId(externalUserId);
 
         return sessionRepo.save(s);
     }
 
     /**
-     * Marca sesiÃ³n como â€œÃºltima actividadâ€.
+     * Marca sesiÃƒÂ³n como Ã¢â‚¬Å“ÃƒÂºltima actividadÃ¢â‚¬Â.
      * Importante para ordenar chats y para /active.
      */
     private void touchSession(ChatSession s) {
@@ -316,7 +401,7 @@ public class ChatService {
     }
 
     /**
-     * AutotÃ­tulo: si el chat estÃ¡ en "Nuevo chat", lo reemplaza por el texto inicial del usuario.
+     * AutotÃƒÂ­tulo: si el chat estÃƒÂ¡ en "Nuevo chat", lo reemplaza por el texto inicial del usuario.
      */
     private void autoTitleIfDefault(ChatSession s, String userText) {
         if (s.getTitle() != null && !s.getTitle().equalsIgnoreCase(DEFAULT_TITLE)) return;
@@ -330,7 +415,7 @@ public class ChatService {
     private String normalizeManualTitle(String title) {
         String clean = (title == null) ? "" : title.trim();
         if (clean.isEmpty()) {
-            throw new IllegalArgumentException("TÃ­tulo vacÃ­o");
+            throw new IllegalArgumentException("TÃƒÂ­tulo vacÃƒÂ­o");
         }
         if (clean.length() > MANUAL_TITLE_MAX_LENGTH) {
             clean = clean.substring(0, MANUAL_TITLE_MAX_LENGTH);
@@ -345,9 +430,22 @@ public class ChatService {
         }
         t = t.replaceAll("\\s+", " ");
         if (t.length() > AUTO_TITLE_MAX_LENGTH) {
-            t = t.substring(0, AUTO_TITLE_MAX_LENGTH) + "â€¦";
+            t = t.substring(0, AUTO_TITLE_MAX_LENGTH) + "Ã¢â‚¬Â¦";
         }
         return t;
+    }
+
+    private String normalizeExternalUserId(String raw) {
+        if (!hasText(raw)) return null;
+        String clean = raw.trim();
+        if (clean.length() > 160) {
+            clean = clean.substring(0, 160);
+        }
+        return clean;
+    }
+
+    private boolean hasText(String s) {
+        return s != null && !s.isBlank();
     }
 
     /**
@@ -383,14 +481,15 @@ public class ChatService {
         return sb.toString();
     }
     // =========================================================================
-    // EXTRA: detalles sesiÃ³n (si lo usas en frontend, estÃ¡ bien que sea DTO)
+    // EXTRA: detalles sesiÃƒÂ³n (si lo usas en frontend, estÃƒÂ¡ bien que sea DTO)
     // =========================================================================
 
     public SessionDetailsDto sessionDetails(String username, String sessionId) {
         AppUser user = requireUser(username);
         return sessionRepo.findDetails(user.getId(), sessionId)
                 .orElseThrow(() -> new org.springframework.security.access.AccessDeniedException(
-                        "SesiÃ³n no encontrada o no pertenece al usuario"
+                        "SesiÃƒÂ³n no encontrada o no pertenece al usuario"
                 ));
     }
 }
+

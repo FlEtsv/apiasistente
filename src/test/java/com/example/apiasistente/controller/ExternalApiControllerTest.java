@@ -14,6 +14,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -43,9 +44,9 @@ class ExternalApiControllerTest {
     }
 
     @Test
-    void chatDelegatesToQueue() throws Exception {
+    void chatDelegatesToQueueInGenericMode() throws Exception {
         ChatResponse response = new ChatResponse("sid-1", "hola", List.of());
-        when(chatQueueService.chatAndWait(eq("ext-user"), eq("sid-1"), eq("Hola"), eq("fast")))
+        when(chatQueueService.chatAndWait(eq("ext-user"), eq("sid-1"), eq("Hola"), eq("fast"), isNull()))
                 .thenReturn(response);
 
         mockMvc.perform(post("/api/ext/chat")
@@ -57,5 +58,16 @@ class ExternalApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.sessionId").value("sid-1"))
                 .andExpect(jsonPath("$.reply").value("hola"));
+    }
+
+    @Test
+    void chatRejectsSpecialModeWithoutSpecialKey() throws Exception {
+        mockMvc.perform(post("/api/ext/chat")
+                        .principal(() -> "ext-user")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"message":"Hola","model":"fast","specialMode":true,"externalUserId":"cli-42"}
+                                """))
+                .andExpect(status().isForbidden());
     }
 }

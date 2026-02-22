@@ -30,6 +30,13 @@ public class ChatSession {
     @Column(nullable = false)
     private Instant lastActivityAt = Instant.now();
 
+    /**
+     * Namespace opcional para aislar conversaciones de usuarios finales en integraciones externas.
+     * Null = sesion generica (web y API externa sin modo especial).
+     */
+    @Column(name = "external_user_id", length = 160)
+    private String externalUserId;
+
     @OneToMany(mappedBy = "session", cascade = CascadeType.REMOVE, orphanRemoval = true)
     private List<ChatMessage> messages = new ArrayList<>();
 
@@ -49,6 +56,9 @@ public class ChatSession {
 
     public Instant getLastActivityAt() { return lastActivityAt; }
     public void setLastActivityAt(Instant lastActivityAt) { this.lastActivityAt = lastActivityAt; }
+
+    public String getExternalUserId() { return externalUserId; }
+    public void setExternalUserId(String externalUserId) { this.externalUserId = externalUserId; }
 
     public List<ChatMessage> getMessages() { return messages; }
 }

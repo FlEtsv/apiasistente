@@ -13,6 +13,18 @@ public class ChatRequest {
      */
     private String model;
 
+    /**
+     * Activa el modo aislado por usuario externo.
+     * Solo permitido para API keys especiales.
+     */
+    private boolean specialMode;
+
+    /**
+     * Identificador de usuario final en la app externa (ej: cliente, accountId, userId).
+     * Se usa como namespace de sesion cuando specialMode = true.
+     */
+    private String externalUserId;
+
     public String getSessionId() { return sessionId; }
     public void setSessionId(String sessionId) { this.sessionId = sessionId; }
 
@@ -21,4 +33,10 @@ public class ChatRequest {
 
     public String getModel() { return model; }
     public void setModel(String model) { this.model = model; }
+
+    public boolean isSpecialMode() { return specialMode; }
+    public void setSpecialMode(boolean specialMode) { this.specialMode = specialMode; }
+
+    public String getExternalUserId() { return externalUserId; }
+    public void setExternalUserId(String externalUserId) { this.externalUserId = externalUserId; }
 }

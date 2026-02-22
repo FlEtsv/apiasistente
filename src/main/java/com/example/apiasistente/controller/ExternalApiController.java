@@ -6,8 +6,10 @@ import com.example.apiasistente.model.dto.ChatResponse;
 import com.example.apiasistente.model.dto.MemoryRequest;
 import com.example.apiasistente.model.dto.UpsertDocumentRequest;
 import com.example.apiasistente.model.dto.UpsertDocumentResponse;
+import com.example.apiasistente.security.ApiKeyAuthFilter;
 import com.example.apiasistente.service.ChatQueueService;
 import com.example.apiasistente.service.RagService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -29,12 +31,43 @@ public class ExternalApiController {
     }
 
     @PostMapping("/chat")
-    public ChatResponse chat(@Valid @RequestBody ChatRequest req, Principal principal) {
+    public ChatResponse chat(@Valid @RequestBody ChatRequest req,
+                             Principal principal,
+                             HttpServletRequest request) {
+        String username = resolveUsername(principal);
+        boolean specialKey = Boolean.TRUE.equals(request.getAttribute(ApiKeyAuthFilter.ATTR_SPECIAL_KEY));
+        Long apiKeyId = (Long) request.getAttribute(ApiKeyAuthFilter.ATTR_API_KEY_ID);
+
+        String externalUserId = normalizeExternalUserId(req.getExternalUserId());
+        boolean specialModeRequested = req.isSpecialMode() || hasText(externalUserId);
+
+        if (specialModeRequested) {
+            if (!specialKey) {
+                throw new ResponseStatusException(
+                        HttpStatus.FORBIDDEN,
+                        "Esta API key no tiene modo especial habilitado para aislamiento por usuario externo."
+                );
+            }
+            if (!hasText(externalUserId)) {
+                throw new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST,
+                        "externalUserId es obligatorio cuando specialMode=true."
+                );
+            }
+            if (apiKeyId == null) {
+                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Contexto de API key no disponible.");
+            }
+            externalUserId = scopedExternalUser(apiKeyId, externalUserId);
+        } else {
+            externalUserId = null;
+        }
+
         return chatQueueService.chatAndWait(
-                resolveUsername(principal),
+                username,
                 req.getSessionId(),
                 req.getMessage(),
-                req.getModel()
+                req.getModel(),
+                externalUserId
         );
     }
 
@@ -70,5 +103,22 @@ public class ExternalApiController {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "API key requerida.");
         }
         return principal.getName();
+    }
+
+    private String normalizeExternalUserId(String raw) {
+        if (!hasText(raw)) return null;
+        String clean = raw.trim();
+        if (clean.length() > 120) {
+            clean = clean.substring(0, 120);
+        }
+        return clean;
+    }
+
+    private String scopedExternalUser(Long apiKeyId, String externalUserId) {
+        return "key:" + apiKeyId + "|user:" + externalUserId;
+    }
+
+    private boolean hasText(String s) {
+        return s != null && !s.isBlank();
     }
 }

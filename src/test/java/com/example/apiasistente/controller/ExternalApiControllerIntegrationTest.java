@@ -15,6 +15,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -47,10 +48,12 @@ class ExternalApiControllerIntegrationTest {
     }
 
     @Test
-    void chatAcceptsValidApiKey() throws Exception {
-        when(apiKeyService.authenticateAndGetUsername(eq("valid-token"))).thenReturn("ext-user");
+    void chatAcceptsValidGenericApiKey() throws Exception {
+        when(apiKeyService.authenticate(eq("valid-token")))
+                .thenReturn(new ApiKeyService.ApiKeyAuthResult(11L, "ext-user", "finanzas-generic", false));
+
         ChatResponse response = new ChatResponse("sid-3", "hola", List.of());
-        when(chatQueueService.chatAndWait(eq("ext-user"), eq("sid-3"), eq("Hola"), eq("fast")))
+        when(chatQueueService.chatAndWait(eq("ext-user"), eq("sid-3"), eq("Hola"), eq("fast"), isNull()))
                 .thenReturn(response);
 
         mockMvc.perform(post("/api/ext/chat")
@@ -62,5 +65,44 @@ class ExternalApiControllerIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.sessionId").value("sid-3"))
                 .andExpect(jsonPath("$.reply").value("hola"));
+    }
+
+    @Test
+    void chatRejectsSpecialModeWhenApiKeyIsNotSpecial() throws Exception {
+        when(apiKeyService.authenticate(eq("generic-token")))
+                .thenReturn(new ApiKeyService.ApiKeyAuthResult(12L, "ext-user", "finanzas-generic", false));
+
+        mockMvc.perform(post("/api/ext/chat")
+                        .header("X-API-KEY", "generic-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"message":"Hola","model":"fast","specialMode":true,"externalUserId":"cli-1"}
+                                """))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void chatUsesScopedExternalUserWithSpecialApiKey() throws Exception {
+        when(apiKeyService.authenticate(eq("special-token")))
+                .thenReturn(new ApiKeyService.ApiKeyAuthResult(99L, "ext-user", "finanzas-special", true));
+
+        ChatResponse response = new ChatResponse("sid-special", "hola especial", List.of());
+        when(chatQueueService.chatAndWait(
+                eq("ext-user"),
+                isNull(),
+                eq("Hola"),
+                eq("fast"),
+                eq("key:99|user:cliente-7")
+        )).thenReturn(response);
+
+        mockMvc.perform(post("/api/ext/chat")
+                        .header("X-API-KEY", "special-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"message":"Hola","model":"fast","specialMode":true,"externalUserId":"cliente-7"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sessionId").value("sid-special"))
+                .andExpect(jsonPath("$.reply").value("hola especial"));
     }
 }

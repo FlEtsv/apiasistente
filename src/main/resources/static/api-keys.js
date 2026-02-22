@@ -120,6 +120,7 @@ async function loadApiKeys() {
       tr.innerHTML = `
         <td class="py-2 pr-2">${escapeHtml(k.label)}</td>
         <td class="py-2 pr-2 font-mono text-xs text-blue-300/80">${escapeHtml(k.keyPrefix)}</td>
+        <td class="py-2 pr-2 text-xs">${k.specialModeEnabled ? "Especial" : "Generica"}</td>
         <td class="py-2 pr-2 text-xs text-slate-400">${escapeHtml(fmtDate(k.createdAt))}</td>
         <td class="py-2 pr-2 text-xs text-slate-400">${escapeHtml(fmtDate(k.lastUsedAt))}</td>
         <td class="py-2 pr-2">${revoked}</td>
@@ -210,6 +211,7 @@ async function createApiKey() {
   hideCreatedKey();
 
   const label = document.getElementById("apiKeyLabel")?.value?.trim();
+  const specialModeEnabled = !!document.getElementById("apiKeySpecialMode")?.checked;
   if (!label) {
     showError("Falta la etiqueta (label).");
     return;
@@ -219,12 +221,14 @@ async function createApiKey() {
     const out = await apiFetch("/api/api-keys", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ label })
+      body: JSON.stringify({ label, specialModeEnabled })
     });
 
     // out = { id, label, keyPrefix, apiKey, sessionId }
     showCreatedKey(out.apiKey);
     document.getElementById("apiKeyLabel").value = "";
+    const specialCheckbox = document.getElementById("apiKeySpecialMode");
+    if (specialCheckbox) specialCheckbox.checked = false;
     await loadApiKeys();
     // Notifica al chat para abrir una sesión separada para esta integración externa.
     window.dispatchEvent(new CustomEvent("api-key-created", { detail: { sessionId: out.sessionId } }));

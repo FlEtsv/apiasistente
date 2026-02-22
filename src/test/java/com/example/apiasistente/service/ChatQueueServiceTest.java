@@ -39,9 +39,9 @@ class ChatQueueServiceTest {
 
     @Test
     void processesMessagesInOrderPerSession() throws Exception {
-        when(chatService.chat("user", "sid", "primero", "default"))
+        when(chatService.chat("user", "sid", "primero", "default", null))
                 .thenReturn(new ChatResponse("sid", "ok-1", List.of()));
-        when(chatService.chat("user", "sid", "segundo", "default"))
+        when(chatService.chat("user", "sid", "segundo", "default", null))
                 .thenReturn(new ChatResponse("sid", "ok-2", List.of()));
 
         var first = queueService.enqueueChat("user", "sid", "primero", "default");
@@ -51,7 +51,7 @@ class ChatQueueServiceTest {
         assertEquals("ok-2", second.get(2, TimeUnit.SECONDS).getReply());
 
         InOrder order = inOrder(chatService);
-        order.verify(chatService).chat("user", "sid", "primero", "default");
-        order.verify(chatService).chat("user", "sid", "segundo", "default");
+        order.verify(chatService).chat("user", "sid", "primero", "default", null);
+        order.verify(chatService).chat("user", "sid", "segundo", "default", null);
     }
 }

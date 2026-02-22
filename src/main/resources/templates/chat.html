@@ -704,6 +704,10 @@
                         <input id="apiKeyLabel" class="session-search" placeholder="Etiqueta" />
                         <button id="btnCreateApiKey" class="btn primary">Crear</button>
                     </div>
+                    <label class="sub" style="display:flex; align-items:center; gap:8px; margin-top:8px;">
+                        <input id="apiKeySpecialMode" type="checkbox" />
+                        Clave especial (habilita specialMode + externalUserId en /api/ext/chat)
+                    </label>
                     <div id="apiKeyCreatedBox" class="stat hidden" style="margin-top:10px;">
                         <div>Clave creada (se muestra una sola vez)</div>
                         <pre id="apiKeyCreatedValue" class="sub" style="white-space: pre-wrap; word-break: break-all;"></pre>
@@ -725,6 +729,7 @@
                             <tr style="border-bottom: 1px solid var(--border);">
                                 <th style="text-align:left; padding:6px;">Label</th>
                                 <th style="text-align:left; padding:6px;">Prefix</th>
+                                <th style="text-align:left; padding:6px;">Tipo</th>
                                 <th style="text-align:left; padding:6px;">Created</th>
                                 <th style="text-align:left; padding:6px;">Last used</th>
                                 <th style="text-align:left; padding:6px;">Revoked</th>

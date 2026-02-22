@@ -33,6 +33,11 @@ public class ApiKeyService {
 
     @Transactional
     public ApiKeyCreateResponse createForUser(String username, String label) {
+        return createForUser(username, label, false);
+    }
+
+    @Transactional
+    public ApiKeyCreateResponse createForUser(String username, String label, boolean specialModeEnabled) {
         AppUser user = userRepo.findByUsername(username)
                 .orElseThrow(() -> new IllegalStateException("Usuario no existe: " + username));
 
@@ -49,13 +54,21 @@ public class ApiKeyService {
         k.setLabel(cleanLabel);
         k.setKeyPrefix(prefix);
         k.setKeyHash(hash);
+        k.setSpecialModeEnabled(specialModeEnabled);
 
         k = apiKeyRepo.save(k);
 
         // Cada API key externa debe iniciar su propio chat para aislar contexto.
         String sessionId = chatService.newSession(username);
 
-        return new ApiKeyCreateResponse(k.getId(), k.getLabel(), k.getKeyPrefix(), raw, sessionId);
+        return new ApiKeyCreateResponse(
+                k.getId(),
+                k.getLabel(),
+                k.getKeyPrefix(),
+                k.isSpecialModeEnabled(),
+                raw,
+                sessionId
+        );
     }
 
     @Transactional(readOnly = true)
@@ -69,6 +82,7 @@ public class ApiKeyService {
                         k.getId(),
                         k.getLabel(),
                         k.getKeyPrefix(),
+                        k.isSpecialModeEnabled(),
                         k.getCreatedAt(),
                         k.getLastUsedAt(),
                         k.getRevokedAt()
@@ -97,6 +111,12 @@ public class ApiKeyService {
     // Usado por el filtro de /api/ext/**
     @Transactional
     public String authenticateAndGetUsername(String rawToken) {
+        ApiKeyAuthResult auth = authenticate(rawToken);
+        return auth == null ? null : auth.username();
+    }
+
+    @Transactional
+    public ApiKeyAuthResult authenticate(String rawToken) {
         if (rawToken == null || rawToken.isBlank()) return null;
 
         String hash = sha256Hex(rawToken.trim());
@@ -108,8 +128,20 @@ public class ApiKeyService {
         k.setLastUsedAt(Instant.now());
         apiKeyRepo.save(k);
 
-        return k.getUser().getUsername();
+        return new ApiKeyAuthResult(
+                k.getId(),
+                k.getUser().getUsername(),
+                k.getLabel(),
+                k.isSpecialModeEnabled()
+        );
     }
+
+    public record ApiKeyAuthResult(
+            Long apiKeyId,
+            String username,
+            String label,
+            boolean specialModeEnabled
+    ) {}
 
     private String generateRawToken() {
         byte[] buf = new byte[32];

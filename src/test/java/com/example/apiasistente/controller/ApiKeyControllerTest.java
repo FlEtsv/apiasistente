@@ -33,11 +33,12 @@ class ApiKeyControllerTest {
                 10L,
                 "ERP",
                 "prefix-1",
+                true,
                 "raw-key",
                 "session-1"
         );
 
-        when(apiKeyService.createForUser(eq("user"), eq("ERP"))).thenReturn(response);
+        when(apiKeyService.createForUser(eq("user"), eq("ERP"), eq(false))).thenReturn(response);
 
         mockMvc.perform(post("/api/api-keys")
                         .principal(() -> "user")
@@ -47,6 +48,7 @@ class ApiKeyControllerTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.sessionId").value("session-1"))
+                .andExpect(jsonPath("$.specialModeEnabled").value(true))
                 .andExpect(jsonPath("$.apiKey").value("raw-key"));
     }
 }

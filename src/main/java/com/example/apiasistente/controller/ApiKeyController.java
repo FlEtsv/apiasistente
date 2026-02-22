@@ -26,7 +26,7 @@ public class ApiKeyController {
 
     @PostMapping
     public ApiKeyCreateResponse create(@Valid @RequestBody ApiKeyCreateRequest req, Principal principal) {
-        return apiKeyService.createForUser(principal.getName(), req.getLabel());
+        return apiKeyService.createForUser(principal.getName(), req.getLabel(), req.isSpecialModeEnabled());
     }
 
     @DeleteMapping("/{id}")

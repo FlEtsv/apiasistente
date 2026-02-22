@@ -14,6 +14,10 @@ public interface ChatSessionRepository extends JpaRepository<ChatSession, String
 
     Optional<ChatSession> findFirstByUser_IdOrderByLastActivityAtDesc(Long userId);
 
+    Optional<ChatSession> findFirstByUser_IdAndExternalUserIdOrderByLastActivityAtDesc(Long userId, String externalUserId);
+
+    Optional<ChatSession> findFirstByUser_IdAndExternalUserIdIsNullOrderByLastActivityAtDesc(Long userId);
+
     Optional<ChatSession> findByIdAndUser_Id(String id, Long userId);
 
     List<ChatSession> findByUser_Id(Long userId);
@@ -31,6 +35,7 @@ public interface ChatSessionRepository extends JpaRepository<ChatSession, String
         left join com.example.apiasistente.model.entity.ChatMessage m
             on m.session = s
         where s.user.id = :userId
+          and s.externalUserId is null
         group by s.id, s.title, s.createdAt, s.lastActivityAt
         order by s.lastActivityAt desc
     """)
@@ -48,7 +53,7 @@ public interface ChatSessionRepository extends JpaRepository<ChatSession, String
         from ChatSession s
         left join com.example.apiasistente.model.entity.ChatMessage m
             on m.session = s
-        where s.user.id = :userId and s.id = :sessionId
+        where s.user.id = :userId and s.id = :sessionId and s.externalUserId is null
         group by s.id, s.title, s.createdAt, s.lastActivityAt
     """)
     Optional<SessionDetailsDto> findDetails(@Param("userId") Long userId, @Param("sessionId") String sessionId);

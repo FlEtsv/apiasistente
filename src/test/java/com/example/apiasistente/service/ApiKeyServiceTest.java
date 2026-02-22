@@ -38,11 +38,12 @@ class ApiKeyServiceTest {
             return saved;
         });
 
-        ApiKeyCreateResponse response = service.createForUser("ana", "Integración CRM");
+        ApiKeyCreateResponse response = service.createForUser("ana", "Integracion CRM", true);
 
         assertNotNull(response.apiKey());
         assertNotNull(response.keyPrefix());
-        assertEquals("Integración CRM", response.label());
+        assertEquals("Integracion CRM", response.label());
+        assertEquals(true, response.specialModeEnabled());
         assertEquals("session-123", response.sessionId());
         verify(chatService).newSession("ana");
     }
