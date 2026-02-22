@@ -72,6 +72,8 @@
             flex-direction: column;
             gap: 16px;
             backdrop-filter: blur(12px);
+            overflow-y: auto;
+            overflow-x: hidden;
         }
 
         .brand {
@@ -296,13 +298,17 @@
 
         #sessionList::-webkit-scrollbar,
         #sessionListMobile::-webkit-scrollbar,
-        #chat::-webkit-scrollbar {
+        #chat::-webkit-scrollbar,
+        .ops-panel .panel-body::-webkit-scrollbar,
+        .sidebar::-webkit-scrollbar {
             width: 6px;
         }
 
         #sessionList::-webkit-scrollbar-thumb,
         #sessionListMobile::-webkit-scrollbar-thumb,
-        #chat::-webkit-scrollbar-thumb {
+        #chat::-webkit-scrollbar-thumb,
+        .ops-panel .panel-body::-webkit-scrollbar-thumb,
+        .sidebar::-webkit-scrollbar-thumb {
             background: #2b394c;
             border-radius: 999px;
         }
@@ -373,6 +379,18 @@
         .ops-grid {
             display: grid;
             gap: 12px;
+        }
+
+        .ops-panel {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .ops-panel .panel-body {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: auto;
         }
 
         .stat {
