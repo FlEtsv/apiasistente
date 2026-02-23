@@ -1,5 +1,6 @@
 package com.example.apiasistente.service;
 
+import com.example.apiasistente.model.dto.RagContextStatsDto;
 import com.example.apiasistente.model.dto.SourceDto;
 import com.example.apiasistente.model.entity.KnowledgeChunk;
 import com.example.apiasistente.model.entity.KnowledgeDocument;
@@ -146,6 +147,36 @@ public class RagService {
             return retrieveTopKForOwners(query, List.of(GLOBAL_OWNER));
         }
         return retrieveTopKForOwners(query, List.of(GLOBAL_OWNER, o));
+    }
+
+    public RagContextStatsDto contextStatsForOwnerOrGlobal(String owner) {
+        String normalizedOwner = normalizeOwner(owner);
+        List<String> owners = normalizeOwners(List.of(normalizedOwner));
+
+        long totalDocuments = docRepo.countByOwnerIn(owners);
+        long totalChunks = chunkRepo.countByDocument_OwnerIn(owners);
+
+        long globalDocuments = docRepo.countByOwner(GLOBAL_OWNER);
+        long globalChunks = chunkRepo.countByDocument_Owner(GLOBAL_OWNER);
+
+        long ownerDocuments = GLOBAL_OWNER.equals(normalizedOwner) ? 0 : docRepo.countByOwner(normalizedOwner);
+        long ownerChunks = GLOBAL_OWNER.equals(normalizedOwner) ? 0 : chunkRepo.countByDocument_Owner(normalizedOwner);
+
+        Instant lastUpdatedAt = docRepo.findLastUpdateAtByOwners(owners);
+
+        return new RagContextStatsDto(
+                normalizedOwner,
+                totalDocuments,
+                totalChunks,
+                globalDocuments,
+                globalChunks,
+                ownerDocuments,
+                ownerChunks,
+                lastUpdatedAt,
+                topK,
+                chunkSize,
+                overlap
+        );
     }
 
     /**

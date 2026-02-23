@@ -40,4 +40,8 @@ public interface KnowledgeChunkRepository extends JpaRepository<KnowledgeChunk, 
     // NUEVO: sacar ids antes de borrar para limpiar cache
     @Query("select c.id from KnowledgeChunk c where c.document.id = :docId")
     List<Long> findIdsByDocumentId(@Param("docId") Long docId);
+
+    long countByDocument_Owner(String owner);
+
+    long countByDocument_OwnerIn(List<String> owners);
 }

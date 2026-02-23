@@ -1,6 +1,7 @@
 package com.example.apiasistente.controller;
 
 import com.example.apiasistente.model.dto.MemoryRequest;
+import com.example.apiasistente.model.dto.RagContextStatsDto;
 import com.example.apiasistente.model.dto.UpsertDocumentRequest;
 import com.example.apiasistente.model.dto.UpsertDocumentResponse;
 import com.example.apiasistente.service.RagService;
@@ -34,6 +35,12 @@ public class RagApiController {
                     return new UpsertDocumentResponse(doc.getId(), doc.getTitle());
                 })
                 .toList();
+    }
+
+    @GetMapping("/stats")
+    public RagContextStatsDto stats(Principal principal) {
+        String owner = (principal != null && principal.getName() != null) ? principal.getName() : RagService.GLOBAL_OWNER;
+        return ragService.contextStatsForOwnerOrGlobal(owner);
     }
 
     @PostMapping("/memory")

@@ -1,5 +1,5 @@
 /**
- * chat.js - sesiones (lista + activar + renombrar) + historial + CSRF
+ * chat.js - sesiones (lista + activar + renombrar + eliminar) + historial + CSRF
  */
 
 const chatEl = document.getElementById('chat');
@@ -24,6 +24,14 @@ const monitorIntervalEl = document.getElementById('monitorInterval');
 const monitorEventsEl = document.getElementById('monitorEvents');
 const monitorLastUpdateEl = document.getElementById('monitorLastUpdate');
 const monitorApplyBtn = document.getElementById('btnApplyMonitorInterval');
+const ragContextPillEl = document.getElementById('ragContextPill');
+const ragTotalContextEl = document.getElementById('ragTotalContext');
+const ragGlobalContextEl = document.getElementById('ragGlobalContext');
+const ragOwnerContextEl = document.getElementById('ragOwnerContext');
+const ragTopKEl = document.getElementById('ragTopK');
+const ragChunkConfigEl = document.getElementById('ragChunkConfig');
+const ragLastUpdatedEl = document.getElementById('ragLastUpdated');
+const ragRefreshBtn = document.getElementById('btnRefreshRagContext');
 
 const openApiKeysInline = document.getElementById('openApiKeysInline');
 
@@ -158,6 +166,49 @@ function syncMonitorIntervalUI() {
   monitorIntervalEl.value = String(Math.round(ms / 1000));
 }
 
+function formatDateTime(value) {
+  if (!value) return '-';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '-';
+  return d.toLocaleString();
+}
+
+function setRagContextLoading() {
+  if (ragContextPillEl) ragContextPillEl.textContent = 'Contexto RAG: cargando...';
+  if (ragTotalContextEl) ragTotalContextEl.textContent = '-';
+  if (ragGlobalContextEl) ragGlobalContextEl.textContent = '-';
+  if (ragOwnerContextEl) ragOwnerContextEl.textContent = '-';
+  if (ragTopKEl) ragTopKEl.textContent = '-';
+  if (ragChunkConfigEl) ragChunkConfigEl.textContent = '-';
+  if (ragLastUpdatedEl) ragLastUpdatedEl.textContent = '-';
+}
+
+function renderRagContextStats(data) {
+  const total = `${data.totalDocuments || 0} docs / ${data.totalChunks || 0} chunks`;
+  const global = `${data.globalDocuments || 0} docs / ${data.globalChunks || 0} chunks`;
+  const owner = `${data.ownerDocuments || 0} docs / ${data.ownerChunks || 0} chunks`;
+  const chunkCfg = `${data.chunkSize || '-'} (+${data.chunkOverlap || '-'})`;
+
+  if (ragContextPillEl) ragContextPillEl.textContent = `Contexto RAG: ${total}`;
+  if (ragTotalContextEl) ragTotalContextEl.textContent = total;
+  if (ragGlobalContextEl) ragGlobalContextEl.textContent = global;
+  if (ragOwnerContextEl) ragOwnerContextEl.textContent = owner;
+  if (ragTopKEl) ragTopKEl.textContent = String(data.topK ?? '-');
+  if (ragChunkConfigEl) ragChunkConfigEl.textContent = chunkCfg;
+  if (ragLastUpdatedEl) ragLastUpdatedEl.textContent = formatDateTime(data.lastUpdatedAt);
+}
+
+function renderRagContextError(message) {
+  const text = message || 'No disponible';
+  if (ragContextPillEl) ragContextPillEl.textContent = `Contexto RAG: ${text}`;
+  if (ragTotalContextEl) ragTotalContextEl.textContent = text;
+  if (ragGlobalContextEl) ragGlobalContextEl.textContent = text;
+  if (ragOwnerContextEl) ragOwnerContextEl.textContent = text;
+  if (ragTopKEl) ragTopKEl.textContent = text;
+  if (ragChunkConfigEl) ragChunkConfigEl.textContent = text;
+  if (ragLastUpdatedEl) ragLastUpdatedEl.textContent = text;
+}
+
 function renderMonitorEvents(events) {
   if (!monitorEventsEl) return;
   if (!Array.isArray(events) || events.length === 0) {
@@ -251,12 +302,25 @@ async function loadOpsStatus() {
   }
 }
 
+async function loadRagContextStats() {
+  if (!ragContextPillEl && !ragTotalContextEl) return;
+  try {
+    const res = await fetch('/api/rag/stats', { headers: withCsrf() });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    renderRagContextStats(data || {});
+  } catch (e) {
+    renderRagContextError('error');
+  }
+}
+
 function scheduleMonitorPolling() {
   const ms = getMonitorIntervalMs();
   if (monitorTimer) clearInterval(monitorTimer);
   monitorTimer = setInterval(() => {
     loadMonitorEvents();
     loadOpsStatus();
+    loadRagContextStats();
   }, ms);
 }
 
@@ -270,6 +334,7 @@ function applyMonitorInterval() {
   scheduleMonitorPolling();
   loadMonitorEvents();
   loadOpsStatus();
+  loadRagContextStats();
 }
 
 async function ensureActiveSession() {
@@ -339,7 +404,10 @@ function renderSessions(filter = '') {
             <div class="text-sm font-semibold truncate">${title}</div>
             <div class="text-[10px] text-slate-500 truncate">${s.id.substring(0, 8)} · ${subtitle}</div>
           </div>
-          <button class="rename px-2 py-1 text-[10px] rounded-lg border border-slate-700/50 hover:border-blue-500/40">Renombrar</button>
+          <div class="flex items-center gap-1 shrink-0">
+            <button class="rename px-2 py-1 text-[10px] rounded-lg border border-slate-700/50 hover:border-blue-500/40">Renombrar</button>
+            <button class="delete px-2 py-1 text-[10px] rounded-lg border border-red-700/50 text-red-300 hover:border-red-500/60">Eliminar</button>
+          </div>
         </div>
       `;
 
@@ -353,6 +421,15 @@ function renderSessions(filter = '') {
       item.querySelector('.rename').addEventListener('click', async (e) => {
         e.stopPropagation();
         await renameSessionPrompt(s.id, title);
+      });
+
+      item.querySelector('.delete').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        try {
+          await deleteSessionPrompt(s.id, title);
+        } catch (err) {
+          alert(err.message || 'No se pudo eliminar el chat');
+        }
       });
 
       item.addEventListener('dblclick', async (e) => {
@@ -445,6 +522,37 @@ async function renameSessionPrompt(id, currentTitle) {
   await loadSessions();
 }
 
+async function ensureSessionAfterDelete(deletedId) {
+  const deletedWasActive = deletedId === sessionId;
+
+  await loadSessions();
+  if (!deletedWasActive) return;
+
+  if (sessionsCache.length > 0) {
+    await activateSession(sessionsCache[0].id);
+    return;
+  }
+
+  await ensureActiveSession();
+  await loadSessions();
+  await loadHistory(sessionId);
+}
+
+async function deleteSessionPrompt(id, currentTitle) {
+  const label = (currentTitle || '').trim() || 'este chat';
+  const ok = confirm(`Eliminar "${label}"? Esta accion no se puede deshacer.`);
+  if (!ok) return;
+
+  const res = await fetch(`/api/chat/sessions/${id}`, {
+    method: 'DELETE',
+    headers: withCsrf({ 'Content-Type': 'application/json' })
+  });
+  if (!res.ok) throw new Error(await res.text());
+
+  await ensureSessionAfterDelete(id);
+  hideDrawer();
+}
+
 async function send() {
   const text = inputEl.value.trim();
   if (!text) return;
@@ -513,6 +621,7 @@ openApiKeysInline?.addEventListener('click', () => {
 });
 
 monitorApplyBtn?.addEventListener('click', () => applyMonitorInterval());
+ragRefreshBtn?.addEventListener('click', () => loadRagContextStats());
 monitorIntervalEl?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') applyMonitorInterval();
 });
@@ -545,6 +654,8 @@ sessionSearchMobileEl?.addEventListener('input', () => renderSessions(sessionSea
     syncMonitorIntervalUI();
     loadOpsStatus();
     loadMonitorEvents();
+    setRagContextLoading();
+    loadRagContextStats();
     scheduleMonitorPolling();
     await ensureActiveSession();
     await loadSessions();
@@ -554,3 +665,4 @@ sessionSearchMobileEl?.addEventListener('input', () => renderSessions(sessionSea
     addMsg('assistant', '⚠️ No se pudo inicializar el chat: ' + (e.message || 'error'));
   }
 })();
+
