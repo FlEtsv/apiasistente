@@ -2570,3 +2570,91 @@ curl -s http://localhost:8080/api/ext/rag/documents \
   -H "X-API-KEY: $APIKEY" \
   -d '{"title":"Contexto Web Externa","content":"Esto lo sube mi web personal..."}'
 ✅ Eso ya cumple tu objetivo: tu web NO guarda credenciales del usuario final, solo usa TU api key.
+Con curl, para integración externa usa /api/ext/monitor/alerts con API key.
+API_KEY="ak_xxx"
+BASE_URL="http://localhost:8080"
+
+curl -sG "$BASE_URL/api/ext/monitor/alerts" \
+  -H "X-API-KEY: $API_KEY" \
+  --data-urlencode "limit=20"
+Con filtro por fecha (since en ISO-8601):
+curl -sG "$BASE_URL/api/ext/monitor/alerts" \
+  -H "Authorization: Bearer $API_KEY" \
+  --data-urlencode "since=2026-02-22T21:00:00Z" \
+  --data-urlencode "limit=50"
+Y para ver estado actual de alertas:
+curl -s "$BASE_URL/api/ext/monitor/alerts/state" \
+  -H "X-API-KEY: $API_KEY"
+Si quieres, te doy un script de polling incremental (guardando el último timestamp).
+Cómo funciona
+1.
+Creas una API key marcándola como especial (specialModeEnabled=true) en src/main/java/com/example/apiasistente/controller/ApiKeyController.java:29.
+2.
+El filtro de API key autentica y adjunta contexto de la clave (apiKeyId, specialModeEnabled) en src/main/java/com/example/apiasistente/security/ApiKeyAuthFilter.java:18.
+3.
+En POST /api/ext/chat, si mandas specialMode=true o externalUserId, el backend exige que la key sea especial; si no, responde 403 en src/main/java/com/example/apiasistente/controller/ExternalApiController.java:42.
+4.
+El externalUserId se “namespacia” por clave: key:{apiKeyId}|user:{externalUserId} para evitar mezcla entre apps/keys (src/main/java/com/example/apiasistente/controller/ExternalApiController.java:117).
+5.
+Las sesiones quedan aisladas por external_user_id en DB (src/main/java/com/example/apiasistente/model/entity/ChatSession.java:37) y la resolución bloquea cruces entre modo genérico y especial (src/main/java/com/example/apiasistente/service/ChatService.java:334).
+6.
+La cola también separa por usuario externo en claves nuevas (src/main/java/com/example/apiasistente/service/ChatQueueService.java:148).
+Diagrama
+[Tu app externa]
+   |
+   | POST /api/ext/chat + X-API-KEY
+   | body: specialMode + externalUserId (opcional)
+   v
+[ApiKeyAuthFilter]
+   - valida key
+   - carga apiKeyId + specialModeEnabled
+   |
+   v
+[ExternalApiController]
+   - si specialMode solicitado y key no especial -> 403
+   - si specialMode=true sin externalUserId -> 400
+   - scopedExternalUser = key:{apiKeyId}|user:{externalUserId}
+   |
+   v
+[ChatQueueService]
+   - cola por sessionId o por (usuario + externalUserId scoped)
+   |
+   v
+[ChatService]
+   - crea/recupera sesión aislada por external_user_id
+   - evita acceso cruzado con modo genérico
+   |
+   v
+[Respuesta]
+   { sessionId, reply, sources }
+Ejemplo curl para tu otra app (puerto actual: 8082)
+BASE_URL="http://localhost:8082"
+API_KEY="TU_API_KEY_ESPECIAL"
+END_USER_ID="cliente-42"
+
+# 1) Primer mensaje del usuario externo (sin sessionId)
+curl -s "$BASE_URL/api/ext/chat" \
+  -H "Content-Type: application/json" \
+  -H "X-API-KEY: $API_KEY" \
+  -d "{
+    \"message\":\"Hola, revisa mi portafolio\",
+    \"model\":\"fast\",
+    \"specialMode\": true,
+    \"externalUserId\": \"$END_USER_ID\"
+  }"
+Respuesta esperada:
+{"sessionId":"...","reply":"...","sources":[...]}
+# 2) Siguientes turnos del MISMO usuario externo (reusar sessionId)
+SESSION_ID="la_sessionId_recibida"
+
+curl -s "$BASE_URL/api/ext/chat" \
+  -H "Content-Type: application/json" \
+  -H "X-API-KEY: $API_KEY" \
+  -d "{
+    \"sessionId\":\"$SESSION_ID\",
+    \"message\":\"Ahora dame detalle por broker\",
+    \"model\":\"fast\",
+    \"specialMode\": true,
+    \"externalUserId\": \"$END_USER_ID\"
+  }"
+Si usas una key genérica con specialMode=true, devuelve 403 (comportamiento requerido).

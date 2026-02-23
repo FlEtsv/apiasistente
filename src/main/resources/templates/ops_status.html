@@ -5,21 +5,29 @@
     <title>Estado de Monitoreo</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        body { font-family: Arial, sans-serif; margin: 0; background: #f5f7fb; color: #111; }
-        .wrap { max-width: 1100px; margin: 0 auto; padding: 16px 14px 24px; }
+        * { box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; margin: 0; background: #f5f7fb; color: #111; min-height: 100vh; min-height: 100dvh; overflow-x: hidden; }
+        .wrap { max-width: 1100px; margin: 0 auto; padding: clamp(12px, 2vw, 20px) clamp(12px, 2vw, 16px) 24px; }
         h1 { margin-bottom: 8px; }
-        .meta { color: #555; margin-bottom: 16px; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
-        .card { background: #fff; border: 1px solid #e0e4ec; border-radius: 8px; padding: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        .meta { color: #555; margin-bottom: 16px; display: flex; flex-wrap: wrap; gap: 10px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+        .card { background: #fff; border: 1px solid #e0e4ec; border-radius: 8px; padding: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); min-width: 0; }
         .label { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 0.4px; }
-        .value { font-size: 18px; margin: 6px 0; word-break: break-all; }
+        .value { font-size: 18px; margin: 6px 0; word-break: break-word; }
         .status-up { color: #0a7a3f; font-weight: 700; }
         .status-down { color: #b00020; font-weight: 700; }
-        .small { font-size: 12px; color: #666; }
+        .small { font-size: 12px; color: #666; word-break: break-word; }
         .actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
-        .btn { display: inline-block; padding: 6px 10px; border-radius: 6px; border: 1px solid #d2d7e0; text-decoration: none; color: #111; background: #f7f9fc; }
+        .btn { display: inline-block; padding: 6px 10px; border-radius: 6px; border: 1px solid #d2d7e0; text-decoration: none; color: #111; background: #f7f9fc; white-space: nowrap; }
         .btn:hover { background: #eef2f8; }
         .error { color: #b00020; font-size: 12px; margin-top: 6px; }
+
+        @media (max-width: 640px) {
+            h1 { font-size: 22px; line-height: 1.2; }
+            .value { font-size: 16px; }
+            .actions { flex-direction: column; align-items: stretch; }
+            .btn { text-align: center; width: 100%; }
+        }
     </style>
 </head>
 <body>
@@ -27,9 +35,7 @@
 <h1>Estado de Monitoreo</h1>
 <div class="meta">
     <span>Grafana: <strong id="grafana-base" th:text="${grafanaBaseUrl}">-</strong></span>
-    &nbsp;|&nbsp;
     <span>Prometheus: <strong id="prometheus-base" th:text="${prometheusBaseUrl}">-</strong></span>
-    &nbsp;|&nbsp;
     <span>Actualizado: <strong id="timestamp">-</strong></span>
 </div>
 

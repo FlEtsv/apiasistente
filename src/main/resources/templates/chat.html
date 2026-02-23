@@ -24,14 +24,15 @@
             --muted: #8fa3b8;
             --text: #e7eef7;
             --accent: #1f7ae0;
-            --accent-2: #13c2a3;
             --warn: #c04848;
             --shadow: 0 12px 30px rgba(0,0,0,0.35);
         }
 
         * { box-sizing: border-box; }
         .hidden { display: none !important; }
-        html, body { height: 100%; }
+        html, body { min-height: 100%; }
+        a, button, input, select { font: inherit; }
+        button, input, select { max-width: 100%; }
         body {
             margin: 0;
             font-family: 'Sora', sans-serif;
@@ -40,7 +41,8 @@
                         radial-gradient(900px 500px at 100% 0%, #1b2740, transparent),
                         var(--bg);
             min-height: 100vh;
-            overflow: hidden;
+            min-height: 100dvh;
+            overflow-x: hidden;
         }
 
         body::before {
@@ -56,16 +58,17 @@
 
         .app {
             display: grid;
-            grid-template-columns: 260px 1fr;
+            grid-template-columns: clamp(220px, 22vw, 280px) minmax(0, 1fr);
             min-height: 100vh;
-            height: 100vh;
+            min-height: 100dvh;
         }
 
         .sidebar {
             position: sticky;
             top: 0;
-            height: 100vh;
-            padding: 22px 18px;
+            align-self: start;
+            max-height: 100dvh;
+            padding: 20px 16px;
             background: rgba(12, 18, 26, 0.9);
             border-right: 1px solid var(--border);
             display: flex;
@@ -74,12 +77,14 @@
             backdrop-filter: blur(12px);
             overflow-y: auto;
             overflow-x: hidden;
+            min-width: 0;
         }
 
         .brand {
             display: flex;
             align-items: center;
             gap: 12px;
+            min-width: 0;
         }
 
         .brand-badge {
@@ -91,6 +96,7 @@
             place-items: center;
             font-weight: 700;
             box-shadow: 0 8px 20px rgba(31, 122, 224, 0.35);
+            flex: 0 0 auto;
         }
 
         .brand h1 {
@@ -108,6 +114,7 @@
             display: flex;
             flex-direction: column;
             gap: 6px;
+            min-width: 0;
         }
 
         .nav a,
@@ -121,6 +128,8 @@
             font-size: 13px;
             text-align: left;
             cursor: pointer;
+            min-width: 0;
+            white-space: nowrap;
         }
 
         .nav a:hover,
@@ -143,6 +152,7 @@
             border-radius: 12px;
             font-size: 12px;
             color: var(--muted);
+            min-width: 0;
         }
 
         .sidebar-footer .user {
@@ -154,6 +164,7 @@
             font-family: 'IBM Plex Mono', monospace;
             font-size: 12px;
             color: #8cc4ff;
+            word-break: break-all;
         }
 
         .logout-btn {
@@ -168,8 +179,10 @@
         }
 
         .main {
-            padding: 22px 26px 28px;
-            height: 100vh;
+            min-width: 0;
+            padding: clamp(14px, 2vw, 26px);
+            min-height: 100vh;
+            min-height: 100dvh;
             display: flex;
             flex-direction: column;
             overflow: hidden;
@@ -180,19 +193,22 @@
             align-items: center;
             justify-content: space-between;
             gap: 16px;
-            margin-bottom: 18px;
+            margin-bottom: 14px;
             flex: 0 0 auto;
+            min-width: 0;
         }
 
         .topbar-left {
             display: flex;
             align-items: center;
             gap: 12px;
+            min-width: 0;
         }
 
         .topbar h2 {
             margin: 0;
-            font-size: 20px;
+            font-size: clamp(18px, 1.9vw, 22px);
+            line-height: 1.2;
         }
 
         .topbar p {
@@ -206,6 +222,7 @@
             align-items: center;
             gap: 10px;
             flex-wrap: wrap;
+            justify-content: flex-end;
         }
 
         .btn {
@@ -216,11 +233,13 @@
             color: var(--text);
             cursor: pointer;
             font-size: 12px;
+            white-space: nowrap;
         }
 
         .btn.primary {
             background: var(--accent);
-            border-color: #1f7ae0;
+            border-color: var(--accent);
+            color: #fff;
         }
 
         .pill {
@@ -233,6 +252,8 @@
             background: var(--panel);
             font-size: 11px;
             color: var(--muted);
+            max-width: 100%;
+            min-width: 0;
         }
 
         .pill .dot {
@@ -240,14 +261,20 @@
             height: 8px;
             border-radius: 50%;
             background: #3b475a;
+            flex: 0 0 auto;
         }
 
         .workspace {
             display: grid;
-            grid-template-columns: 280px minmax(0, 1fr) 320px;
+            grid-template-columns: minmax(220px, 280px) minmax(0, 1fr) minmax(260px, 320px);
             gap: 16px;
             flex: 1 1 auto;
             min-height: 0;
+            min-width: 0;
+        }
+
+        .workspace > * {
+            min-width: 0;
         }
 
         .panel {
@@ -255,8 +282,10 @@
             border: 1px solid var(--border);
             border-radius: 16px;
             box-shadow: var(--shadow);
-            overflow: hidden;
             min-height: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
         }
 
         .panel-header {
@@ -265,6 +294,8 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
+            gap: 8px;
+            min-width: 0;
         }
 
         .panel-header h3 {
@@ -274,6 +305,7 @@
 
         .panel-body {
             padding: 14px 16px;
+            min-height: 0;
         }
 
         .session-search {
@@ -286,28 +318,43 @@
             font-size: 12px;
         }
 
+        .sessions-panel .panel-body {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
         #sessionList, #sessionListMobile {
             display: flex;
             flex-direction: column;
             gap: 8px;
             margin-top: 12px;
-            max-height: 520px;
+            min-height: 0;
             overflow-y: auto;
             padding-right: 4px;
+        }
+
+        #sessionList {
+            flex: 1 1 auto;
         }
 
         #sessionList::-webkit-scrollbar,
         #sessionListMobile::-webkit-scrollbar,
         #chat::-webkit-scrollbar,
         .ops-panel .panel-body::-webkit-scrollbar,
+        .event-list::-webkit-scrollbar,
+        .table-scroll::-webkit-scrollbar,
         .sidebar::-webkit-scrollbar {
             width: 6px;
+            height: 6px;
         }
 
         #sessionList::-webkit-scrollbar-thumb,
         #sessionListMobile::-webkit-scrollbar-thumb,
         #chat::-webkit-scrollbar-thumb,
         .ops-panel .panel-body::-webkit-scrollbar-thumb,
+        .event-list::-webkit-scrollbar-thumb,
+        .table-scroll::-webkit-scrollbar-thumb,
         .sidebar::-webkit-scrollbar-thumb {
             background: #2b394c;
             border-radius: 999px;
@@ -316,12 +363,12 @@
         .chat-panel {
             display: flex;
             flex-direction: column;
-            min-height: 620px;
             min-height: 0;
         }
 
         #chat {
-            flex: 1;
+            flex: 1 1 auto;
+            min-height: 0;
             padding: 18px;
             overflow-y: auto;
         }
@@ -334,6 +381,8 @@
             justify-content: center;
             color: var(--muted);
             gap: 10px;
+            text-align: center;
+            padding: 0 10px;
         }
 
         .composer {
@@ -343,13 +392,15 @@
         }
 
         .composer-row {
-            display: flex;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto auto;
             gap: 10px;
-            flex-wrap: wrap;
+            align-items: center;
         }
 
         #input {
-            flex: 1 1 320px;
+            min-width: 0;
+            width: 100%;
             padding: 12px 14px;
             border-radius: 12px;
             border: 1px solid var(--border);
@@ -365,9 +416,11 @@
             background: var(--accent);
             color: #fff;
             cursor: pointer;
+            white-space: nowrap;
         }
 
         #modelSelect {
+            min-width: 160px;
             padding: 10px 12px;
             border-radius: 10px;
             border: 1px solid var(--border);
@@ -402,15 +455,16 @@
             background: var(--bg-soft);
             border: 1px solid var(--border);
             font-size: 12px;
+            min-width: 0;
         }
 
         .stat strong {
             font-size: 14px;
         }
 
-        .stat .sub {
+        .sub {
             color: var(--muted);
-            word-break: break-all;
+            word-break: break-word;
         }
 
         .status-up { color: #39c07d; font-weight: 600; }
@@ -431,6 +485,7 @@
             border-radius: 10px;
             padding: 8px;
             font-size: 11px;
+            min-width: 0;
         }
 
         .event-head {
@@ -447,6 +502,7 @@
             font-size: 10px;
             text-transform: uppercase;
             letter-spacing: 0.4px;
+            white-space: nowrap;
         }
 
         .event-badge.alert { background: rgba(224,123,123,0.15); color: #e07b7b; }
@@ -468,6 +524,7 @@
             font-size: 12px;
             text-align: left;
             cursor: pointer;
+            min-width: 0;
         }
 
         .link-list a:hover,
@@ -478,11 +535,11 @@
         .drawer {
             position: fixed;
             inset: 0;
-            display: block;
             z-index: 1000;
+            display: none;
         }
 
-        .drawer.active { display: block; }
+        .drawer:not(.hidden) { display: block; }
 
         .drawer-backdrop {
             position: absolute;
@@ -494,7 +551,7 @@
             position: absolute;
             top: 0;
             bottom: 0;
-            width: 300px;
+            width: min(88vw, 320px);
             background: var(--panel);
             border-right: 1px solid var(--border);
             padding: 16px;
@@ -503,30 +560,115 @@
             gap: 12px;
         }
 
+        .table-scroll {
+            width: 100%;
+            overflow-x: auto;
+        }
+
+        .table-scroll table {
+            width: 100%;
+            min-width: 700px;
+            border-collapse: collapse;
+        }
+
+        .modal-card {
+            width: min(100%, 900px);
+            max-height: min(92dvh, 92vh);
+            overflow-y: auto;
+        }
+
+        .glass {
+            background: rgba(15, 26, 40, 0.72);
+            backdrop-filter: blur(8px);
+        }
+
+        @keyframes msg-in {
+            from {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .animate-msg {
+            animation: msg-in 0.22s ease-out;
+        }
+
+        @keyframes pulse-slow {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.65; }
+        }
+
+        .animate-pulse-slow {
+            animation: pulse-slow 1.4s ease-in-out infinite;
+        }
+
         #toggleSessions { display: none; }
 
+        @media (max-width: 1300px) {
+            .workspace {
+                grid-template-columns: minmax(220px, 260px) minmax(0, 1fr) minmax(240px, 300px);
+            }
+        }
+
         @media (max-width: 1200px) {
-            .workspace { grid-template-columns: 260px minmax(0, 1fr); }
+            .workspace { grid-template-columns: minmax(220px, 260px) minmax(0, 1fr); }
             .ops-panel { display: none; }
         }
 
         @media (max-width: 980px) {
             .app { grid-template-columns: 1fr; }
-            .sidebar { position: relative; height: auto; flex-direction: row; flex-wrap: wrap; }
-            .nav { flex-direction: row; flex-wrap: wrap; }
+            .sidebar {
+                position: relative;
+                top: auto;
+                max-height: none;
+                border-right: 0;
+                border-bottom: 1px solid var(--border);
+                gap: 12px;
+            }
+            .nav {
+                flex-direction: row;
+                flex-wrap: wrap;
+                overflow-x: auto;
+                padding-bottom: 2px;
+            }
+            .nav a,
+            .nav button {
+                width: auto;
+                flex: 0 0 auto;
+            }
             .sidebar-footer { width: 100%; }
+            .main { min-height: 0; }
             .workspace { grid-template-columns: 1fr; }
             .sessions-panel { display: none; }
             .topbar { flex-direction: column; align-items: flex-start; }
+            .actions { width: 100%; justify-content: flex-start; }
             #toggleSessions { display: inline-flex; }
         }
 
+        @media (max-width: 760px) {
+            .composer-row { grid-template-columns: 1fr; }
+            #send, #modelSelect { width: 100%; }
+            #modelSelect { min-width: 0; }
+            .panel-header { flex-direction: column; align-items: flex-start; }
+        }
+
         @media (max-width: 640px) {
-            .main { padding: 18px 16px 20px; }
-            .actions { width: 100%; justify-content: flex-start; }
-            .panel-header { flex-direction: column; align-items: flex-start; gap: 6px; }
-            .composer-row { flex-direction: column; }
-            #input, #send, #modelSelect { width: 100%; }
+            body::before { opacity: 0.2; }
+            .sidebar { padding: 14px; }
+            .main { padding: 14px 12px 16px; }
+            .topbar p { font-size: 11px; }
+            .btn, .pill { font-size: 11px; }
+            .panel-header,
+            .panel-body,
+            .composer {
+                padding-left: 12px;
+                padding-right: 12px;
+            }
+            #chat { padding: 12px; }
         }
     </style>
 </head>
@@ -702,7 +844,7 @@
     <div id="apiKeysBackdrop" class="absolute inset-0 bg-black/60"></div>
 
     <div class="absolute inset-0 flex items-center justify-center p-4">
-        <div class="panel" style="max-width: 900px; width: 100%; max-height: 90vh; overflow-y: auto;">
+        <div class="panel modal-card">
             <div class="panel-header">
                 <div>
                     <h3>API Keys</h3>
@@ -737,7 +879,7 @@
                         <strong>Tus claves</strong>
                         <button id="btnRefreshApiKeys" class="btn">Refrescar</button>
                     </div>
-                    <div style="overflow-x:auto;">
+                    <div class="table-scroll">
                         <table style="width:100%; font-size:12px;">
                             <thead style="color: var(--muted);">
                             <tr style="border-bottom: 1px solid var(--border);">
@@ -779,7 +921,7 @@
                         <strong>Codigos activos</strong>
                         <button id="btnRefreshRegCodes" class="btn">Refrescar</button>
                     </div>
-                    <div style="overflow-x:auto;">
+                    <div class="table-scroll">
                         <table style="width:100%; font-size:12px;">
                             <thead style="color: var(--muted);">
                             <tr style="border-bottom: 1px solid var(--border);">

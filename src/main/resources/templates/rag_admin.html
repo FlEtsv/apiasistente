@@ -11,35 +11,35 @@
 
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="min-h-screen bg-slate-950 text-slate-100">
+<body class="min-h-screen min-h-[100dvh] bg-slate-950 text-slate-100 overflow-x-hidden">
 
-<div class="max-w-5xl mx-auto p-6 space-y-6">
+<div class="max-w-5xl mx-auto p-4 sm:p-6 space-y-6">
     <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 class="text-2xl font-bold">RAG Admin</h1>
+        <h1 class="text-xl sm:text-2xl font-bold">RAG Admin</h1>
         <a class="text-sm text-blue-400 hover:underline" href="/chat">Volver a chat</a>
     </div>
 
     <div class="bg-slate-900/50 border border-slate-700/50 rounded-2xl p-4 space-y-3">
         <h2 class="font-semibold">Subir documento</h2>
         <input id="title" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2"
-               placeholder="Título (ej: Contexto - Endpoints)"/>
+               placeholder="Titulo (ej: Contexto - Endpoints)"/>
         <textarea id="content" rows="10"
                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 font-mono text-xs"
-                  placeholder="Pega aquí el contenido... (SANITIZA passwords)"></textarea>
+                  placeholder="Pega aqui el contenido... (SANITIZA passwords)"></textarea>
 
-        <div class="flex flex-wrap gap-2">
+        <div class="flex flex-col sm:flex-row flex-wrap gap-2">
             <button id="btnUpload"
-                    class="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500">
+                    class="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 w-full sm:w-auto">
                 Subir 1
             </button>
             <button id="btnUploadSplit"
-                    class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700">
-                Subir y trocear (automático)
+                    class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 w-full sm:w-auto">
+                Subir y trocear (automatico)
             </button>
         </div>
 
         <p class="text-xs text-slate-400">
-            “Trocear” divide el texto en varios docs (mejor recuperación RAG).
+            "Trocear" divide el texto en varios docs (mejor recuperacion RAG).
         </p>
     </div>
 
@@ -48,10 +48,10 @@
         <input id="files" type="file" multiple accept=".txt,.md,.json"
                class="block w-full text-sm text-slate-300"/>
         <button id="btnUploadFiles"
-                class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500">
+                class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 w-full sm:w-auto">
             Subir archivos como docs
         </button>
-        <div id="log" class="text-xs text-slate-300 font-mono whitespace-pre-wrap"></div>
+        <div id="log" class="text-xs text-slate-300 font-mono whitespace-pre-wrap break-words"></div>
     </div>
 </div>
 

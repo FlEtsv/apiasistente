@@ -75,9 +75,9 @@ function addMsg(who, text, sources = []) {
   const div = document.createElement('div');
   const isUser = who === 'user';
 
-  const baseClasses = "max-w-[85%] md:max-w-[75%] px-5 py-3 rounded-2xl shadow-xl text-sm leading-relaxed transition-all";
-  const userClasses = "bg-blue-600 text-white rounded-tr-none ml-12";
-  const aiClasses = "glass text-slate-100 rounded-tl-none mr-12 border border-slate-700/50";
+  const baseClasses = "max-w-[92%] sm:max-w-[85%] lg:max-w-[75%] px-5 py-3 rounded-2xl shadow-xl text-sm leading-relaxed transition-all";
+  const userClasses = "bg-blue-600 text-white rounded-tr-none ml-3 sm:ml-12";
+  const aiClasses = "glass text-slate-100 rounded-tl-none mr-3 sm:mr-12 border border-slate-700/50";
   div.className = `${baseClasses} ${isUser ? userClasses : aiClasses}`;
 
   const content = document.createElement('div');
@@ -118,7 +118,7 @@ function showTyping() {
   const id = 'typing-' + Date.now();
   const html = `
     <div id="${id}" class="flex justify-start animate-msg mb-6 animate-pulse-slow">
-      <div class="glass px-5 py-4 rounded-2xl rounded-tl-none mr-12 border border-slate-700/50">
+      <div class="glass px-5 py-4 rounded-2xl rounded-tl-none mr-3 sm:mr-12 border border-slate-700/50">
         <div class="flex gap-1.5">
           <div class="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
           <div class="w-2 h-2 bg-blue-500 rounded-full animate-bounce [animation-delay:-0.3s]"></div>

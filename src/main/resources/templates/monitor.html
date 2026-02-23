@@ -15,26 +15,31 @@
             --warn: #e3b341;
             --bad: #e07b7b;
         }
+        * { box-sizing: border-box; }
         body {
             font-family: Arial, sans-serif;
             margin: 0;
             background: #0b1017;
             color: var(--text);
+            min-height: 100vh;
+            min-height: 100dvh;
+            overflow-x: hidden;
         }
-        .wrap { max-width: 1100px; margin: 0 auto; padding: 20px; }
+        .wrap { max-width: 1100px; margin: 0 auto; padding: clamp(12px, 2.2vw, 20px); }
         h1 { margin: 0 0 6px; font-size: 20px; }
-        .meta { color: var(--muted); margin-bottom: 16px; font-size: 12px; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+        .meta { color: var(--muted); margin-bottom: 16px; font-size: 12px; display: flex; gap: 10px; flex-wrap: wrap; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
         .card {
             background: var(--panel);
             border: 1px solid var(--border);
             border-radius: 10px;
             padding: 12px;
+            min-width: 0;
         }
         .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; }
-        .value { font-size: 20px; margin: 6px 0; }
-        .sub { font-size: 12px; color: var(--muted); }
-        .row { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); }
+        .value { font-size: 20px; margin: 6px 0; word-break: break-word; }
+        .sub { font-size: 12px; color: var(--muted); word-break: break-word; }
+        .row { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
         .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; }
         .pill.ok { background: rgba(57,192,125,0.15); color: var(--ok); }
         .pill.bad { background: rgba(224,123,123,0.15); color: var(--bad); }
@@ -42,20 +47,31 @@
         .error { color: var(--bad); margin-top: 8px; font-size: 12px; }
         .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
         .input { padding: 6px 8px; border-radius: 8px; background: #0f1621; border: 1px solid var(--border); color: var(--text); font-size: 12px; }
-        .btn { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); cursor: pointer; font-size: 12px; }
+        .input { width: min(140px, 100%); }
+        .btn { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); cursor: pointer; font-size: 12px; white-space: nowrap; }
         .event-list { display: flex; flex-direction: column; gap: 8px; max-height: 220px; overflow-y: auto; }
-        .event-item { background: #0f1621; border: 1px solid var(--border); border-radius: 10px; padding: 8px; font-size: 11px; }
-        .event-head { display: flex; justify-content: space-between; gap: 6px; font-weight: 600; }
-        .event-badge { padding: 2px 8px; border-radius: 999px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; }
+        .event-item { background: #0f1621; border: 1px solid var(--border); border-radius: 10px; padding: 8px; font-size: 11px; min-width: 0; }
+        .event-head { display: flex; justify-content: space-between; gap: 6px; font-weight: 600; flex-wrap: wrap; }
+        .event-badge { padding: 2px 8px; border-radius: 999px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; white-space: nowrap; }
         .event-badge.alert { background: rgba(224,123,123,0.15); color: var(--bad); }
         .event-badge.recover { background: rgba(57,192,125,0.15); color: var(--ok); }
+
+        @media (max-width: 640px) {
+            h1 { font-size: 18px; }
+            .controls { align-items: stretch; }
+            .input, .btn { width: 100%; }
+            .sub { font-size: 11px; }
+            .value { font-size: 18px; }
+        }
     </style>
 </head>
 <body>
 <div class="wrap">
     <h1>Monitor del servidor</h1>
     <div class="meta">
-        <span id="hostname">-</span> | <span id="timestamp">-</span> | Uptime: <span id="uptime">-</span> s
+        <span id="hostname">-</span>
+        <span id="timestamp">-</span>
+        <span>Uptime: <span id="uptime">-</span> s</span>
     </div>
 
     <div class="controls">
