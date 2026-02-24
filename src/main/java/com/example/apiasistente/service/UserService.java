@@ -25,11 +25,13 @@ public class UserService {
             throw new IllegalArgumentException("El usuario ya existe");
         });
 
-        registrationCodeService.consume(registrationCode, username);
+        RegistrationCodeService.ConsumedRegistrationCode consumedCode =
+                registrationCodeService.consume(registrationCode, username);
 
         AppUser u = new AppUser();
         u.setUsername(username);
         u.setPasswordHash(encoder.encode(rawPassword));
+        u.setGrantedPermissions(consumedCode.grantedPermissionsCsv());
         return repo.save(u);
     }
 }

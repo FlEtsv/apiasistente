@@ -48,7 +48,7 @@ class ExternalApiControllerTest {
     @Test
     void chatDelegatesToQueueInGenericMode() throws Exception {
         ChatResponse response = new ChatResponse("sid-1", "hola", List.of());
-        when(chatQueueService.chatAndWait(eq("ext-user"), eq("sid-1"), eq("Hola"), eq("fast"), isNull()))
+        when(chatQueueService.chatAndWait(eq("ext-user"), eq("sid-1"), eq("Hola"), eq("fast"), isNull(), isNull()))
                 .thenReturn(response);
 
         mockMvc.perform(post("/api/ext/chat")

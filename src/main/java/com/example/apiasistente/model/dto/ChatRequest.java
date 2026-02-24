@@ -2,6 +2,8 @@ package com.example.apiasistente.model.dto;
 
 import jakarta.validation.constraints.NotBlank;
 
+import java.util.List;
+
 public class ChatRequest {
     private String sessionId;
 
@@ -9,7 +11,7 @@ public class ChatRequest {
     private String message;
 
     /**
-     * Modelo solicitado por el cliente: "default", "fast" o nombre exacto del modelo.
+     * Modelo solicitado por el cliente: "default", "fast", "visual" o nombre exacto permitido.
      */
     private String model;
 
@@ -25,6 +27,11 @@ public class ChatRequest {
      */
     private String externalUserId;
 
+    /**
+     * Adjuntos de imagen/camara/documento para modo visual.
+     */
+    private List<ChatMediaInput> media;
+
     public String getSessionId() { return sessionId; }
     public void setSessionId(String sessionId) { this.sessionId = sessionId; }
 
@@ -39,4 +46,7 @@ public class ChatRequest {
 
     public String getExternalUserId() { return externalUserId; }
     public void setExternalUserId(String externalUserId) { this.externalUserId = externalUserId; }
+
+    public List<ChatMediaInput> getMedia() { return media; }
+    public void setMedia(List<ChatMediaInput> media) { this.media = media; }
 }

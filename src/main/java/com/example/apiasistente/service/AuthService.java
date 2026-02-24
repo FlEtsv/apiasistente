@@ -30,12 +30,14 @@ public class AuthService {
         if (repo.existsByUsername(u))
             throw new IllegalArgumentException("Ese usuario ya existe.");
 
-        registrationCodeService.consume(registrationCode, u);
+        RegistrationCodeService.ConsumedRegistrationCode consumedCode =
+                registrationCodeService.consume(registrationCode, u);
 
         AppUser user = new AppUser();
         user.setUsername(u);
         user.setPasswordHash(encoder.encode(rawPassword));
         user.setEnabled(true);
+        user.setGrantedPermissions(consumedCode.grantedPermissionsCsv());
 
         repo.save(user); // <- CLAVE: aquí se inserta en MySQL
     }

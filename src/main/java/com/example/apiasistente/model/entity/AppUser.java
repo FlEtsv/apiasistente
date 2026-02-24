@@ -36,6 +36,10 @@ public class AppUser {
     @Column(name = "api_scopes", length = 255)
     private String apiScopes;
 
+    // Permisos de producto/vistas (ej: CHAT,RAG,MONITOR,API_KEYS).
+    @Column(name = "granted_permissions", length = 255)
+    private String grantedPermissions;
+
     public String getApiKeySha256() {
         return apiKeySha256;
     }
@@ -50,6 +54,14 @@ public class AppUser {
 
     public void setApiScopes(String apiScopes) {
         this.apiScopes = apiScopes;
+    }
+
+    public String getGrantedPermissions() {
+        return grantedPermissions;
+    }
+
+    public void setGrantedPermissions(String grantedPermissions) {
+        this.grantedPermissions = grantedPermissions;
     }
 
     public String getApiKeyHash() {

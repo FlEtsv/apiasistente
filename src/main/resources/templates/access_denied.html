@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="es" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Acceso no autorizado</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
+<div class="w-full max-w-lg rounded-2xl border border-slate-700/60 bg-slate-900/70 p-6 space-y-4">
+    <h1 class="text-xl font-semibold">Acceso no autorizado</h1>
+    <p class="text-slate-300 text-sm">
+        Tu cuenta se creo sin vistas habilitadas para este panel.
+        Contacta al administrador para actualizar tus permisos.
+    </p>
+    <div class="flex gap-3 flex-wrap">
+        <a href="/login" class="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm">Volver a login</a>
+    </div>
+</div>
+</body>
+</html>

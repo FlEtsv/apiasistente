@@ -27,7 +27,7 @@ public class RegistrationCodeController {
 
     @PostMapping
     public RegistrationCodeCreateResponse create(@RequestBody RegistrationCodeCreateRequest req, Principal principal) {
-        return service.createForUser(principal.getName(), req.getLabel(), req.getTtlMinutes());
+        return service.createForUser(principal.getName(), req.getLabel(), req.getTtlMinutes(), req.getPermissions());
     }
 
     @DeleteMapping("/{id}")

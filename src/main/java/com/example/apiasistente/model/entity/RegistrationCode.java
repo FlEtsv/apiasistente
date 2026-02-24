@@ -39,6 +39,10 @@ public class RegistrationCode {
     @Column(name = "revoked_at")
     private Instant revokedAt;
 
+    // Permisos que heredara el usuario creado con este codigo.
+    @Column(name = "granted_permissions", length = 255)
+    private String grantedPermissions;
+
     public boolean isUsed() {
         return usedAt != null;
     }
@@ -74,4 +78,7 @@ public class RegistrationCode {
 
     public Instant getRevokedAt() { return revokedAt; }
     public void setRevokedAt(Instant revokedAt) { this.revokedAt = revokedAt; }
+
+    public String getGrantedPermissions() { return grantedPermissions; }
+    public void setGrantedPermissions(String grantedPermissions) { this.grantedPermissions = grantedPermissions; }
 }

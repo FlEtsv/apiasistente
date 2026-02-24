@@ -66,12 +66,26 @@ function hideCreatedKey() {
   box.classList.add("hidden");
 }
 
-function showRegCode(value, expiresAt) {
+function formatPermissions(list) {
+  const values = Array.isArray(list) ? list : [];
+  if (!values.length) return "-";
+  const labels = {
+    CHAT: "Chat",
+    RAG: "RAG",
+    MONITOR: "Monitor",
+    API_KEYS: "API Keys"
+  };
+  return values.map(v => labels[v] || v).join(", ");
+}
+
+function showRegCode(value, expiresAt, permissions) {
   const box = document.getElementById("regCodeCreatedBox");
   const pre = document.getElementById("regCodeCreatedValue");
   const exp = document.getElementById("regCodeCreatedExpiry");
+  const perms = document.getElementById("regCodeCreatedPermissions");
   pre.textContent = value;
   exp.textContent = expiresAt ? fmtDate(expiresAt) : "-";
+  if (perms) perms.textContent = formatPermissions(permissions);
   box.classList.remove("hidden");
 }
 
@@ -79,8 +93,10 @@ function hideRegCode() {
   const box = document.getElementById("regCodeCreatedBox");
   const pre = document.getElementById("regCodeCreatedValue");
   const exp = document.getElementById("regCodeCreatedExpiry");
+  const perms = document.getElementById("regCodeCreatedPermissions");
   pre.textContent = "";
   exp.textContent = "";
+  if (perms) perms.textContent = "";
   box.classList.add("hidden");
 }
 
@@ -173,10 +189,12 @@ async function loadRegCodes() {
       const used = c.usedAt ? `${fmtDate(c.usedAt)}${c.usedBy ? " · " + c.usedBy : ""}` : "-";
       const revoked = c.revokedAt ? "✓" : "-";
       const canRevoke = !c.revokedAt && !c.usedAt;
+      const permissions = formatPermissions(c.permissions);
 
       tr.innerHTML = `
         <td class="py-2 pr-2">${escapeHtml(c.label || "-")}</td>
         <td class="py-2 pr-2 font-mono text-xs text-blue-300/80">${escapeHtml(c.codePrefix || "-")}</td>
+        <td class="py-2 pr-2 text-xs">${escapeHtml(permissions)}</td>
         <td class="py-2 pr-2 text-xs text-slate-400">${escapeHtml(fmtDate(c.expiresAt))}</td>
         <td class="py-2 pr-2 text-xs text-slate-400">${escapeHtml(used)}</td>
         <td class="py-2 pr-2">${revoked}</td>
@@ -238,6 +256,32 @@ async function createApiKey() {
   }
 }
 
+function getRegPermissions() {
+  const map = [
+    ["regPermChat", "CHAT"],
+    ["regPermRag", "RAG"],
+    ["regPermMonitor", "MONITOR"],
+    ["regPermApiKeys", "API_KEYS"]
+  ];
+  const values = [];
+  map.forEach(([id, code]) => {
+    const input = document.getElementById(id);
+    if (input && input.checked) {
+      values.push(code);
+    }
+  });
+  return values;
+}
+
+function resetRegPermissions() {
+  const ids = ["regPermChat", "regPermRag", "regPermMonitor", "regPermApiKeys"];
+  ids.forEach(id => {
+    const input = document.getElementById(id);
+    if (!input) return;
+    input.checked = id === "regPermChat";
+  });
+}
+
 async function createRegCode() {
   clearRegError();
   hideRegCode();
@@ -245,17 +289,24 @@ async function createRegCode() {
   const label = document.getElementById("regCodeLabel")?.value?.trim();
   const ttlRaw = document.getElementById("regCodeTtl")?.value?.trim();
   const ttlMinutes = ttlRaw ? parseInt(ttlRaw, 10) : null;
+  const permissions = getRegPermissions();
+
+  if (!permissions.length) {
+    showRegError("Selecciona al menos un permiso para el nuevo usuario.");
+    return;
+  }
 
   try {
     const out = await apiFetch("/api/registration-codes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ label, ttlMinutes })
+      body: JSON.stringify({ label, ttlMinutes, permissions })
     });
 
-    showRegCode(out.code, out.expiresAt);
+    showRegCode(out.code, out.expiresAt, out.permissions);
     document.getElementById("regCodeLabel").value = "";
     document.getElementById("regCodeTtl").value = "";
+    resetRegPermissions();
     await loadRegCodes();
   } catch (e) {
     showRegError(e.message);
@@ -274,6 +325,7 @@ function escapeHtml(s) {
 // Wire UI
 document.getElementById("openApiKeys")?.addEventListener("click", async () => {
   openModal();
+  resetRegPermissions();
   await loadApiKeys();
   await loadRegCodes();
 });

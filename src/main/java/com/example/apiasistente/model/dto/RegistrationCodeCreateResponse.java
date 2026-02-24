@@ -8,5 +8,6 @@ public record RegistrationCodeCreateResponse(
         String codePrefix,
         String code,
         Instant createdAt,
-        Instant expiresAt
+        Instant expiresAt,
+        java.util.List<String> permissions
 ) {}

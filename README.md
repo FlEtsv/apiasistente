@@ -54,6 +54,7 @@ Variables principales (definidas en `src/main/resources/application.yml`):
 | `MYSQL_USER` | Usuario MySQL | `apiuser` |
 | `MYSQL_PASSWORD` | Password MySQL | `apipassword` |
 | `OLLAMA_BASE_URL` | URL base de Ollama | `http://localhost:11434/api` |
+| `OLLAMA_RESPONSE_GUARD_MODEL` | Mini-modelo para depurar respuestas | `qwen2.5:3b` |
 | `MONITOR_ALERTS_ENABLED` | Habilita alertas | `true` |
 | `MONITOR_ALERTS_INTERVAL_MS` | Frecuencia de chequeo | `15000` |
 | `MONITOR_ALERTS_MAX_EVENTS` | Maximo de eventos en memoria | `200` |
@@ -111,6 +112,30 @@ curl -sG "http://localhost:8080/api/ext/monitor/alerts" \
   -H "X-API-KEY: <tu_api_key>" \
   --data-urlencode "limit=20"
 ```
+
+## Chat visual (Qwen-VL)
+- Configura `ollama.visual-model` (por defecto `qwen-vl:latest`).
+- En la UI (`/chat`) ahora puedes adjuntar imagen/camara/documento.
+- El flujo es:
+  1. Modelo visual analiza adjuntos y genera contexto intermedio.
+  2. Ese contexto se combina con RAG.
+  3. Modelo grande de chat responde al usuario.
+- En requests JSON puedes enviar `media` (lista) con:
+  - `name`
+  - `mimeType`
+  - `base64` (imagen/pdf/binario)
+  - `text` (documento de texto)
+
+## Depurador de respuestas (mini-modelo)
+- Configura `ollama.response-guard-model` (env: `OLLAMA_RESPONSE_GUARD_MODEL`).
+- `chat.response-guard.enabled=true` activa una segunda pasada corta para quitar relleno.
+- `chat.response-guard.strict-mode=true` aplica depuracion mas agresiva (modo estricto).
+- Si la respuesta original trae citas `[S#]` o codigo, se preservan; si la depuracion degrada, se mantiene la salida original.
+
+## Permisos por codigo de registro
+- Cada codigo de registro puede llevar permisos por checklist (`CHAT`, `RAG`, `MONITOR`, `API_KEYS`).
+- El usuario nuevo hereda solo esos permisos al registrarse.
+- Los usuarios existentes sin permisos persistidos mantienen acceso completo por compatibilidad.
 
 ## Calidad y CI
 Este repositorio incluye CI en GitHub Actions para:

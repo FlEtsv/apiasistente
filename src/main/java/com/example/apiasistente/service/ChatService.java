@@ -1,23 +1,58 @@
 package com.example.apiasistente.service;
 
-import com.example.apiasistente.model.dto.*;
-import com.example.apiasistente.model.entity.*;
-import com.example.apiasistente.repository.*;
+import com.example.apiasistente.model.dto.ChatMediaInput;
+import com.example.apiasistente.model.dto.ChatMessageDto;
+import com.example.apiasistente.model.dto.ChatResponse;
+import com.example.apiasistente.model.dto.SessionDetailsDto;
+import com.example.apiasistente.model.dto.SessionSummaryDto;
+import com.example.apiasistente.model.dto.SourceDto;
+import com.example.apiasistente.model.entity.AppUser;
+import com.example.apiasistente.model.entity.ChatMessage;
+import com.example.apiasistente.model.entity.ChatMessageSource;
+import com.example.apiasistente.model.entity.ChatSession;
+import com.example.apiasistente.model.entity.SystemPrompt;
+import com.example.apiasistente.repository.AppUserRepository;
+import com.example.apiasistente.repository.ChatMessageRepository;
+import com.example.apiasistente.repository.ChatMessageSourceRepository;
+import com.example.apiasistente.repository.ChatSessionRepository;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.text.PDFTextStripper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.Collections;
+import java.util.List;
+import java.util.Locale;
+import java.util.NoSuchElementException;
+import java.util.Objects;
+import java.util.UUID;
 
 @Service
 public class ChatService {
 
+    private static final Logger log = LoggerFactory.getLogger(ChatService.class);
+
     private static final String DEFAULT_TITLE = "Nuevo chat";
     private static final int MANUAL_TITLE_MAX_LENGTH = 120;
     private static final int AUTO_TITLE_MAX_LENGTH = 60;
+
+    private static final int MAX_MEDIA_ITEMS = 4;
+    private static final int MAX_MEDIA_TEXT_CHARS = 18_000;
+    private static final int MAX_VISUAL_CONTEXT_CHARS = 3_200;
+    private static final int MAX_RETRIEVAL_MEDIA_SNIPPET = 420;
+    private static final int MAX_GUARD_QUESTION_CHARS = 1_200;
+    private static final int MAX_GUARD_ANSWER_CHARS = 10_000;
+    private static final int MAX_GUARD_SOURCE_HINTS = 3;
 
     private final ChatSessionRepository sessionRepo;
     private final ChatMessageRepository messageRepo;
@@ -28,18 +63,20 @@ public class ChatService {
     private final AppUserRepository userRepo;
     private final ChatModelSelector modelSelector;
 
-    /**
-     * CuÃƒÂ¡ntos mensajes anteriores metemos en el contexto del modelo.
-     * TÃƒÂº has subido esto a 40: perfecto, pero controla coste / latencia.
-     *
-     * En application.properties:
-     * rag.max-history=40
-     */
     @Value("${rag.max-history:40}")
     private int maxHistory;
 
     @Value("${rag.retrieval.user-turns:3}")
     private int retrievalUserTurns;
+
+    @Value("${chat.response-guard.enabled:true}")
+    private boolean responseGuardEnabled;
+
+    @Value("${chat.response-guard.min-answer-chars:260}")
+    private int responseGuardMinAnswerChars;
+
+    @Value("${chat.response-guard.strict-mode:false}")
+    private boolean responseGuardStrictMode;
 
     public ChatService(
             ChatSessionRepository sessionRepo,
@@ -65,93 +102,44 @@ public class ChatService {
     // CHAT
     // =========================================================================
 
-    /**
-     * Flujo completo:
-     * 1) comprobar usuario
-     * 2) resolver sesiÃƒÂ³n (la que viene o la ÃƒÂºltima del usuario o crear)
-     * 3) guardar mensaje usuario
-     * 4) RAG retrieve
-     * 5) construir contexto para Ollama (system + history + rag)
-     * 6) llamar al modelo
-     * 7) guardar respuesta + fuentes
-     */
     @Transactional
     public ChatResponse chat(String username, String maybeSessionId, String userText) {
-        return chat(username, maybeSessionId, userText, null, null);
+        return chat(username, maybeSessionId, userText, null, null, List.of());
     }
 
-    /**
-     * Flujo completo de chat con selecciÃƒÂ³n de modelo.
-     */
     @Transactional
     public ChatResponse chat(String username, String maybeSessionId, String userText, String requestedModel) {
-
-        // 1) Usuario autenticado debe existir en BD
-        AppUser user = requireUser(username);
-
-        // 2) Resolver sesiÃƒÂ³n (o validar que sea suya)
-        ChatSession session = resolveSession(user, maybeSessionId);
-
-        // 3) actualizar "ÃƒÂºltima actividad" y tÃƒÂ­tulo automÃƒÂ¡tico si procede
-        touchSession(session);
-        autoTitleIfDefault(session, userText);
-
-        // 4) Guardar mensaje del usuario
-        ChatMessage userMsg = new ChatMessage();
-        userMsg.setSession(session);
-        userMsg.setRole(ChatMessage.Role.USER);
-        userMsg.setContent(userText);
-        userMsg = messageRepo.save(userMsg);
-
-        // 5) RAG: recuperar chunks relevantes (query enriquecida con turnos previos del usuario)
-        String retrievalQuery = buildRetrievalQuery(session.getId(), userText);
-        var scored = ragService.retrieveTopKForOwnerOrGlobal(retrievalQuery, username);
-        List<SourceDto> sources = ragService.toSourceDtos(scored);
-
-        // 6) Construir mensajes para Ollama
-        List<OllamaClient.Message> msgs = new ArrayList<>();
-
-        // prompt del sistema asociado a la sesiÃƒÂ³n
-        SystemPrompt prompt = session.getSystemPrompt();
-        msgs.add(new OllamaClient.Message("system", prompt.getContent()));
-
-        // histÃƒÂ³rico (ÃƒÂºltimos N)
-        appendRecentHistory(msgs, session.getId(), userMsg.getId());
-
-        // bloque RAG + pregunta del usuario
-        msgs.add(new OllamaClient.Message("user", buildRagBlock(userText, scored)));
-
-        // 7) Llamada al modelo (resuelve modelo permitido)
-        String model = modelSelector.resolveChatModel(requestedModel);
-        String assistantText = ollama.chat(msgs, model);
-
-        // 8) Guardar respuesta del asistente
-        ChatMessage assistantMsg = new ChatMessage();
-        assistantMsg.setSession(session);
-        assistantMsg.setRole(ChatMessage.Role.ASSISTANT);
-        assistantMsg.setContent(assistantText);
-        assistantMsg = messageRepo.save(assistantMsg);
-
-        // 9) Log de fuentes (relaciÃƒÂ³n mensaje -> chunks)
-        persistSources(assistantMsg, scored);
-
-        // 10) actualizar actividad
-        touchSession(session);
-
-        return new ChatResponse(session.getId(), assistantText, sources);
+        return chat(username, maybeSessionId, userText, requestedModel, null, List.of());
     }
 
-    /**
-     * Variante para API externa con aislamiento por usuario final.
-     */
+    @Transactional
+    public ChatResponse chat(String username,
+                             String maybeSessionId,
+                             String userText,
+                             String requestedModel,
+                             List<ChatMediaInput> media) {
+        return chat(username, maybeSessionId, userText, requestedModel, null, media);
+    }
+
     @Transactional
     public ChatResponse chat(String username,
                              String maybeSessionId,
                              String userText,
                              String requestedModel,
                              String externalUserId) {
+        return chat(username, maybeSessionId, userText, requestedModel, externalUserId, List.of());
+    }
+
+    @Transactional
+    public ChatResponse chat(String username,
+                             String maybeSessionId,
+                             String userText,
+                             String requestedModel,
+                             String externalUserId,
+                             List<ChatMediaInput> media) {
 
         String normalizedExternalUserId = normalizeExternalUserId(externalUserId);
+        List<PreparedMedia> preparedMedia = prepareMedia(media);
 
         AppUser user = requireUser(username);
         ChatSession session = resolveSession(user, maybeSessionId, normalizedExternalUserId);
@@ -165,7 +153,7 @@ public class ChatService {
         userMsg.setContent(userText);
         userMsg = messageRepo.save(userMsg);
 
-        String retrievalQuery = buildRetrievalQuery(session.getId(), userText);
+        String retrievalQuery = buildRetrievalQuery(session.getId(), userText, preparedMedia);
         var scored = hasText(normalizedExternalUserId)
                 ? ragService.retrieveTopKForOwnerScopedAndGlobal(retrievalQuery, username, normalizedExternalUserId)
                 : ragService.retrieveTopKForOwnerOrGlobal(retrievalQuery, username);
@@ -177,10 +165,12 @@ public class ChatService {
 
         appendRecentHistory(msgs, session.getId(), userMsg.getId());
 
-        msgs.add(new OllamaClient.Message("user", buildRagBlock(userText, scored)));
+        String visualBridge = buildVisualBridgeContext(userText, preparedMedia, requestedModel);
+        msgs.add(new OllamaClient.Message("user", buildRagBlock(userText, scored, visualBridge, preparedMedia)));
 
         String model = modelSelector.resolveChatModel(requestedModel);
         String assistantText = ollama.chat(msgs, model);
+        assistantText = applyResponseGuard(userText, assistantText, scored);
 
         ChatMessage assistantMsg = new ChatMessage();
         assistantMsg.setSession(session);
@@ -195,21 +185,14 @@ public class ChatService {
     }
 
     // =========================================================================
-    // HISTORIAL (FIX CRÃƒÂTICO)
+    // HISTORIAL
     // =========================================================================
 
-    /**
-     * NUNCA devuelvas entidades JPA al frontend.
-     * Esto evita LazyInitializationException y evita exponer relaciones internas.
-     */
     @Transactional(readOnly = true)
     public List<ChatMessageDto> historyDto(String username, String sessionId) {
         AppUser user = requireUser(username);
-
-        // valida propiedad y devuelve la sesiÃƒÂ³n por si la necesitas
         requireOwnedSession(user, sessionId);
 
-        // cargamos mensajes como entidades, pero devolvemos DTOs (sin session/user)
         return messageRepo.findBySession_IdOrderByCreatedAtAsc(sessionId)
                 .stream()
                 .map(m -> new ChatMessageDto(
@@ -221,10 +204,6 @@ public class ChatService {
                 .toList();
     }
 
-    /**
-     * Si quieres mantener esto para lÃƒÂ³gica interna, ok,
-     * pero NO lo expongas como JSON.
-     */
     @Transactional(readOnly = true)
     public List<ChatMessage> historyEntitiesForInternalUse(String username, String sessionId) {
         AppUser user = requireUser(username);
@@ -233,7 +212,7 @@ public class ChatService {
     }
 
     // =========================================================================
-    // SESIÃƒâ€œN ACTIVA / CREAR NUEVA
+    // SESIONES
     // =========================================================================
 
     public String activeSessionId(String username) {
@@ -249,10 +228,6 @@ public class ChatService {
         return createSession(user).getId();
     }
 
-    // =========================================================================
-    // SESIONES (LIST/ACTIVATE/RENAME/DELETE)
-    // =========================================================================
-
     public List<SessionSummaryDto> listSessions(String username) {
         AppUser user = requireUser(username);
         return sessionRepo.listSummaries(user.getId());
@@ -261,7 +236,6 @@ public class ChatService {
     @Transactional
     public String activateSession(String username, String sessionId) {
         AppUser user = requireUser(username);
-
         ChatSession s = requireOwnedSession(user, sessionId);
         touchSession(s);
         return s.getId();
@@ -270,7 +244,6 @@ public class ChatService {
     @Transactional
     public void renameSession(String username, String sessionId, String title) {
         AppUser user = requireUser(username);
-
         ChatSession s = requireOwnedSession(user, sessionId);
         s.setTitle(normalizeManualTitle(title));
         touchSession(s);
@@ -280,9 +253,7 @@ public class ChatService {
     @Transactional
     public void deleteSession(String username, String sessionId) {
         AppUser user = requireUser(username);
-
         ChatSession s = requireOwnedSession(user, sessionId);
-        // Si tu cascade REMOVE estÃƒÂ¡ bien, esto borra todo el chat
         sessionRepo.delete(s);
     }
 
@@ -290,13 +261,23 @@ public class ChatService {
     public int deleteAllSessions(String username) {
         AppUser user = requireUser(username);
         List<ChatSession> sessions = sessionRepo.findByUser_Id(user.getId());
-        if (sessions.isEmpty()) return 0;
+        if (sessions.isEmpty()) {
+            return 0;
+        }
         sessionRepo.deleteAll(sessions);
         return sessions.size();
     }
 
+    public SessionDetailsDto sessionDetails(String username, String sessionId) {
+        AppUser user = requireUser(username);
+        return sessionRepo.findDetails(user.getId(), sessionId)
+                .orElseThrow(() -> new AccessDeniedException(
+                        "Sesion no encontrada o no pertenece al usuario"
+                ));
+    }
+
     // =========================================================================
-    // HELPERS (seguridad + creaciÃƒÂ³n + tÃƒÂ­tulos)
+    // HELPERS
     // =========================================================================
 
     private AppUser requireUser(String username) {
@@ -304,21 +285,16 @@ public class ChatService {
                 .orElseThrow(() -> new IllegalStateException("Usuario autenticado no existe en BD: " + username));
     }
 
-    /**
-     * Resuelve una sesiÃƒÂ³n:
-     * - si viene sessionId -> valida que exista y sea del usuario
-     * - si no viene -> usa la ÃƒÂºltima sesiÃƒÂ³n del usuario o crea una nueva
-     */
     private ChatSession resolveSession(AppUser user, String maybeSessionId) {
         return resolveSession(user, maybeSessionId, null);
     }
 
     private ChatSession resolveSession(AppUser user, String maybeSessionId, String externalUserId) {
-        if (maybeSessionId != null && !maybeSessionId.isBlank()) {
+        if (hasText(maybeSessionId)) {
             ChatSession s = sessionRepo.findById(maybeSessionId)
                     .orElseThrow(() -> new NoSuchElementException("Sesion no encontrada: " + maybeSessionId));
 
-            if (!s.getUser().getId().equals(user.getId())) {
+            if (!Objects.equals(s.getUser().getId(), user.getId())) {
                 throw new AccessDeniedException("No puedes acceder a sesiones de otro usuario");
             }
 
@@ -344,9 +320,9 @@ public class ChatService {
 
     private ChatSession requireOwnedSession(AppUser user, String sessionId) {
         ChatSession s = sessionRepo.findById(sessionId)
-                .orElseThrow(() -> new NoSuchElementException("SesiÃƒÂ³n no encontrada: " + sessionId));
+                .orElseThrow(() -> new NoSuchElementException("Sesion no encontrada: " + sessionId));
 
-        if (!s.getUser().getId().equals(user.getId())) {
+        if (!Objects.equals(s.getUser().getId(), user.getId())) {
             throw new AccessDeniedException("No puedes acceder a sesiones de otro usuario");
         }
         if (hasText(s.getExternalUserId())) {
@@ -373,31 +349,28 @@ public class ChatService {
         return sessionRepo.save(s);
     }
 
-    /**
-     * Marca sesiÃƒÂ³n como Ã¢â‚¬Å“ÃƒÂºltima actividadÃ¢â‚¬Â.
-     * Importante para ordenar chats y para /active.
-     */
     private void touchSession(ChatSession s) {
         s.setLastActivityAt(Instant.now());
         sessionRepo.save(s);
     }
 
-    /**
-     * AutotÃƒÂ­tulo: si el chat estÃƒÂ¡ en "Nuevo chat", lo reemplaza por el texto inicial del usuario.
-     */
     private void autoTitleIfDefault(ChatSession s, String userText) {
-        if (s.getTitle() != null && !s.getTitle().equalsIgnoreCase(DEFAULT_TITLE)) return;
+        if (s.getTitle() != null && !s.getTitle().equalsIgnoreCase(DEFAULT_TITLE)) {
+            return;
+        }
 
         String t = normalizeAutoTitle(userText);
-        if (t.isEmpty()) return;
+        if (t.isEmpty()) {
+            return;
+        }
         s.setTitle(t);
         sessionRepo.save(s);
     }
 
     private String normalizeManualTitle(String title) {
-        String clean = (title == null) ? "" : title.trim();
+        String clean = title == null ? "" : title.trim();
         if (clean.isEmpty()) {
-            throw new IllegalArgumentException("TÃƒÂ­tulo vacÃƒÂ­o");
+            throw new IllegalArgumentException("Titulo vacio");
         }
         if (clean.length() > MANUAL_TITLE_MAX_LENGTH) {
             clean = clean.substring(0, MANUAL_TITLE_MAX_LENGTH);
@@ -406,19 +379,21 @@ public class ChatService {
     }
 
     private String normalizeAutoTitle(String text) {
-        String t = (text == null ? "" : text.trim());
+        String t = text == null ? "" : text.trim();
         if (t.isEmpty()) {
             return "";
         }
         t = t.replaceAll("\\s+", " ");
         if (t.length() > AUTO_TITLE_MAX_LENGTH) {
-            t = t.substring(0, AUTO_TITLE_MAX_LENGTH) + "Ã¢â‚¬Â¦";
+            t = t.substring(0, AUTO_TITLE_MAX_LENGTH) + "...";
         }
         return t;
     }
 
     private String normalizeExternalUserId(String raw) {
-        if (!hasText(raw)) return null;
+        if (!hasText(raw)) {
+            return null;
+        }
         String clean = raw.trim();
         if (clean.length() > 160) {
             clean = clean.substring(0, 160);
@@ -430,45 +405,56 @@ public class ChatService {
         return s != null && !s.isBlank();
     }
 
-    private String buildRetrievalQuery(String sessionId, String userText) {
-        String current = userText == null ? "" : userText.trim();
+    private String buildRetrievalQuery(String sessionId, String userText, List<PreparedMedia> media) {
+        String current = collapseSpaces(userText);
         if (current.isBlank()) {
             return "";
         }
 
-        int turns = Math.max(1, retrievalUserTurns);
-        if (turns <= 1) {
-            return current;
-        }
-
-        List<ChatMessage> userTurnsDesc = messageRepo.findRecentBySessionAndRole(
-                sessionId,
-                ChatMessage.Role.USER,
-                PageRequest.of(0, turns)
-        );
-
-        if (userTurnsDesc.size() <= 1) {
-            return current;
-        }
-
-        StringBuilder sb = new StringBuilder(current.length() + 320);
+        StringBuilder sb = new StringBuilder(current.length() + 640);
         sb.append(current);
-        sb.append("\n\nContexto reciente del usuario:\n");
 
-        boolean appendedAny = false;
-        for (int i = userTurnsDesc.size() - 1; i >= 1; i--) {
-            String previous = collapseSpaces(userTurnsDesc.get(i).getContent());
-            if (previous.isBlank()) {
-                continue;
+        int turns = Math.max(1, retrievalUserTurns);
+        if (turns > 1) {
+            List<ChatMessage> userTurnsDesc = messageRepo.findRecentBySessionAndRole(
+                    sessionId,
+                    ChatMessage.Role.USER,
+                    PageRequest.of(0, turns)
+            );
+
+            if (userTurnsDesc.size() > 1) {
+                sb.append("\n\nContexto reciente del usuario:\n");
+                for (int i = userTurnsDesc.size() - 1; i >= 1; i--) {
+                    String previous = collapseSpaces(userTurnsDesc.get(i).getContent());
+                    if (previous.isBlank()) {
+                        continue;
+                    }
+                    if (previous.length() > 220) {
+                        previous = previous.substring(0, 220);
+                    }
+                    sb.append("- ").append(previous).append('\n');
+                }
             }
-            if (previous.length() > 220) {
-                previous = previous.substring(0, 220);
-            }
-            sb.append("- ").append(previous).append('\n');
-            appendedAny = true;
         }
 
-        return appendedAny ? sb.toString() : current;
+        if (media != null && !media.isEmpty()) {
+            boolean hasDoc = media.stream().anyMatch(m -> hasText(m.documentText()));
+            if (hasDoc) {
+                sb.append("\nContenido adjunto:\n");
+                for (PreparedMedia m : media) {
+                    if (!hasText(m.documentText())) {
+                        continue;
+                    }
+                    String snippet = collapseSpaces(m.documentText());
+                    if (snippet.length() > MAX_RETRIEVAL_MEDIA_SNIPPET) {
+                        snippet = snippet.substring(0, MAX_RETRIEVAL_MEDIA_SNIPPET);
+                    }
+                    sb.append("- ").append(snippet).append('\n');
+                }
+            }
+        }
+
+        return sb.toString();
     }
 
     private String collapseSpaces(String text) {
@@ -515,10 +501,10 @@ public class ChatService {
         sourceRepo.saveAll(links);
     }
 
-    /**
-     * Construye el bloque que se envia al modelo con las fuentes y reglas de citacion.
-     */
-    private String buildRagBlock(String userText, List<RagService.ScoredChunk> scored) {
+    private String buildRagBlock(String userText,
+                                 List<RagService.ScoredChunk> scored,
+                                 String visualBridge,
+                                 List<PreparedMedia> media) {
         StringBuilder sb = new StringBuilder();
         sb.append("Fuentes RAG (ordenadas por relevancia):\n");
 
@@ -529,7 +515,7 @@ public class ChatService {
                 sb.append("\n[S").append(i + 1).append("] ")
                         .append("doc=\"").append(c.getDocument().getTitle()).append("\" ")
                         .append("(chunk ").append(c.getChunkIndex()).append(") ")
-                        .append("score=").append(String.format(java.util.Locale.US, "%.3f", scoredChunk.score()))
+                        .append("score=").append(String.format(Locale.US, "%.3f", scoredChunk.score()))
                         .append("\n")
                         .append(c.getText())
                         .append("\n");
@@ -538,25 +524,370 @@ public class ChatService {
             sb.append("(sin contexto relevante)\n");
         }
 
+        if (hasText(visualBridge)) {
+            sb.append("\n---\n");
+            sb.append("Contexto visual/documental intermedio (Qwen-VL):\n");
+            sb.append(visualBridge).append("\n");
+        }
+
+        if (media != null && !media.isEmpty()) {
+            sb.append("\nAdjuntos recibidos:\n");
+            for (PreparedMedia m : media) {
+                sb.append("- ")
+                        .append(m.name())
+                        .append(" [")
+                        .append(m.mimeType())
+                        .append("]");
+                if (hasText(m.documentText())) {
+                    sb.append(" (con texto extraido)");
+                }
+                if (hasText(m.imageBase64())) {
+                    sb.append(" (imagen)");
+                }
+                sb.append('\n');
+            }
+        }
+
         sb.append("\n---\n");
         sb.append("Instrucciones:\n");
         sb.append("- Usa las fuentes solo si ayudan y cita como [S#].\n");
         sb.append("- Si ninguna fuente aplica, indica que no hay datos suficientes.\n");
-        sb.append("- Responde en castellano de forma clara y breve.\n\n");
+        sb.append("- Responde en castellano.\n");
+        sb.append("- Formatea en Markdown con titulos y subtitulos claros.\n");
+        sb.append("- Usa emojis de forma moderada para separar secciones.\n");
+        sb.append("- Si incluyes codigo, usa bloques con triple backticks y lenguaje (ej: ```java).\n\n");
         sb.append("Pregunta del usuario: ").append(userText);
 
         return sb.toString();
     }
-    // =========================================================================
-    // EXTRA: detalles sesiÃƒÂ³n (si lo usas en frontend, estÃƒÂ¡ bien que sea DTO)
-    // =========================================================================
 
-    public SessionDetailsDto sessionDetails(String username, String sessionId) {
-        AppUser user = requireUser(username);
-        return sessionRepo.findDetails(user.getId(), sessionId)
-                .orElseThrow(() -> new org.springframework.security.access.AccessDeniedException(
-                        "SesiÃƒÂ³n no encontrada o no pertenece al usuario"
-                ));
+    private String applyResponseGuard(String userText,
+                                      String assistantText,
+                                      List<RagService.ScoredChunk> scored) {
+        if (!responseGuardEnabled || !hasText(assistantText)) {
+            return assistantText;
+        }
+
+        String original = assistantText.trim();
+        if (original.length() < Math.max(80, responseGuardMinAnswerChars)) {
+            return original;
+        }
+
+        String guardModel = modelSelector.resolveResponseGuardModel();
+        if (!hasText(guardModel)) {
+            return original;
+        }
+
+        String question = truncateForGuard(collapseSpaces(userText), MAX_GUARD_QUESTION_CHARS);
+        String sourceHints = buildSourceHints(scored);
+        String currentAnswer = truncateForGuard(original, MAX_GUARD_ANSWER_CHARS);
+
+        StringBuilder guardPrompt = new StringBuilder();
+        guardPrompt.append("Pregunta original:\n").append(question).append("\n\n");
+        if (hasText(sourceHints)) {
+            guardPrompt.append("Fuentes citables disponibles:\n").append(sourceHints).append("\n\n");
+        }
+        guardPrompt.append("Respuesta actual (a depurar):\n").append(currentAnswer);
+
+        String guardSystemPrompt = responseGuardStrictMode
+                ? """
+                        Eres un editor ultra-estricto de respuestas RAG.
+                        Objetivo: entregar solo informacion util y accionable, sin relleno.
+                        Reglas obligatorias:
+                        - No inventes ni agregues informacion nueva.
+                        - Conserva hechos, cifras, pasos, advertencias y limites.
+                        - Elimina introducciones, despedidas, redundancias y texto decorativo.
+                        - Si hay citas [S#], mantenlas.
+                        - Si hay codigo, conserva los bloques ``` con su lenguaje.
+                        - Manten Markdown limpio y directo, con titulos cortos.
+                        - Devuelve solo la version final depurada.
+                        """
+                : """
+                        Eres un editor estricto de respuestas RAG.
+                        Objetivo: eliminar relleno, repeticiones y texto irrelevante.
+                        Reglas obligatorias:
+                        - No inventes ni agregues informacion nueva.
+                        - Conserva hechos, cifras, pasos y limitaciones.
+                        - Si hay citas [S#], mantenlas.
+                        - Si hay codigo, conserva los bloques ``` con su lenguaje.
+                        - Manten formato Markdown limpio con titulos/subtitulos y emojis moderados.
+                        - Devuelve solo la version final depurada.
+                        """;
+
+        List<OllamaClient.Message> guardMessages = List.of(
+                new OllamaClient.Message(
+                        "system",
+                        guardSystemPrompt
+                ),
+                new OllamaClient.Message("user", guardPrompt.toString())
+        );
+
+        try {
+            String refined = ollama.chat(guardMessages, guardModel);
+            if (!hasText(refined)) {
+                return original;
+            }
+
+            String clean = refined.trim();
+            if (clean.length() < 80) {
+                return original;
+            }
+            if (clean.length() > original.length() + 220) {
+                return original;
+            }
+            if (responseGuardStrictMode && clean.length() >= original.length()) {
+                return original;
+            }
+            if (original.contains("[S") && !clean.contains("[S")) {
+                return original;
+            }
+            if (original.contains("```") && !clean.contains("```")) {
+                return original;
+            }
+
+            double ratio = (double) clean.length() / (double) Math.max(1, original.length());
+            double minRatio = responseGuardStrictMode ? 0.22 : 0.35;
+            if (ratio < minRatio) {
+                return original;
+            }
+            return clean;
+        } catch (Exception ex) {
+            log.warn("No se pudo depurar respuesta con mini-modelo: {}", ex.getMessage());
+            return original;
+        }
+    }
+
+    private String buildSourceHints(List<RagService.ScoredChunk> scored) {
+        if (scored == null || scored.isEmpty()) {
+            return "";
+        }
+
+        int max = Math.min(MAX_GUARD_SOURCE_HINTS, scored.size());
+        StringBuilder sb = new StringBuilder(max * 180);
+        for (int i = 0; i < max; i++) {
+            RagService.ScoredChunk entry = scored.get(i);
+            String title = entry.chunk().getDocument().getTitle();
+            String snippet = collapseSpaces(entry.chunk().getText());
+            if (snippet.length() > 120) {
+                snippet = snippet.substring(0, 120) + "...";
+            }
+            sb.append("- [S").append(i + 1).append("] ")
+                    .append(title)
+                    .append(": ")
+                    .append(snippet)
+                    .append('\n');
+        }
+        return sb.toString().trim();
+    }
+
+    private String truncateForGuard(String value, int maxChars) {
+        if (!hasText(value)) {
+            return "";
+        }
+        String clean = value.trim();
+        if (clean.length() <= maxChars) {
+            return clean;
+        }
+        return clean.substring(0, maxChars);
+    }
+
+    private String buildVisualBridgeContext(String userText,
+                                            List<PreparedMedia> media,
+                                            String requestedModel) {
+        if (media == null || media.isEmpty()) {
+            return "";
+        }
+
+        List<String> images = media.stream()
+                .map(PreparedMedia::imageBase64)
+                .filter(this::hasText)
+                .toList();
+
+        StringBuilder prompt = new StringBuilder();
+        prompt.append("Analiza el material visual/documental y extrae hechos verificables.\n");
+        prompt.append("Responde SOLO con:\n");
+        prompt.append("1) Observaciones clave\n");
+        prompt.append("2) Datos concretos\n");
+        prompt.append("3) Incertidumbres o limites\n\n");
+
+        boolean hasDocText = false;
+        for (PreparedMedia m : media) {
+            if (!hasText(m.documentText())) {
+                continue;
+            }
+            hasDocText = true;
+            String text = m.documentText();
+            if (text.length() > 2200) {
+                text = text.substring(0, 2200);
+            }
+            prompt.append("Documento '").append(m.name()).append("':\n");
+            prompt.append(text).append("\n\n");
+        }
+
+        if (!hasDocText && images.isEmpty()) {
+            return "";
+        }
+
+        prompt.append("Pregunta del usuario: ").append(userText);
+
+        try {
+            String visualModel = modelSelector.resolveVisualModel(requestedModel);
+            String bridge = ollama.chat(
+                    List.of(new OllamaClient.Message("user", prompt.toString(), images)),
+                    visualModel
+            );
+
+            if (!hasText(bridge)) {
+                return "";
+            }
+            String clean = bridge.trim();
+            if (clean.length() > MAX_VISUAL_CONTEXT_CHARS) {
+                clean = clean.substring(0, MAX_VISUAL_CONTEXT_CHARS);
+            }
+            return clean;
+        } catch (Exception ex) {
+            log.warn("No se pudo completar analisis visual intermedio: {}", ex.getMessage());
+            return "";
+        }
+    }
+
+    private List<PreparedMedia> prepareMedia(List<ChatMediaInput> media) {
+        if (media == null || media.isEmpty()) {
+            return List.of();
+        }
+
+        List<PreparedMedia> prepared = new ArrayList<>();
+        for (ChatMediaInput raw : media) {
+            if (raw == null) {
+                continue;
+            }
+            if (prepared.size() >= MAX_MEDIA_ITEMS) {
+                break;
+            }
+
+            String name = sanitizeName(raw.getName());
+            String mime = sanitizeMimeType(raw.getMimeType());
+            String base64 = sanitizeBase64(raw.getBase64());
+            String directText = sanitizeText(raw.getText(), MAX_MEDIA_TEXT_CHARS);
+
+            String imageBase64 = "";
+            if (isImageMime(mime) && hasText(base64)) {
+                imageBase64 = base64;
+            }
+
+            String docText = "";
+            if (hasText(directText)) {
+                docText = directText;
+            } else if (hasText(base64) && isPdfMime(mime)) {
+                docText = sanitizeText(extractPdfText(base64), MAX_MEDIA_TEXT_CHARS);
+            } else if (hasText(base64) && isTextMime(mime)) {
+                docText = sanitizeText(decodeBase64AsText(base64), MAX_MEDIA_TEXT_CHARS);
+            }
+
+            if (!hasText(imageBase64) && !hasText(docText)) {
+                continue;
+            }
+
+            prepared.add(new PreparedMedia(name, mime, imageBase64, docText));
+        }
+
+        return Collections.unmodifiableList(prepared);
+    }
+
+    private String sanitizeName(String name) {
+        String clean = hasText(name) ? name.trim() : "archivo";
+        if (clean.length() > 120) {
+            clean = clean.substring(0, 120);
+        }
+        return clean;
+    }
+
+    private String sanitizeMimeType(String mime) {
+        String clean = hasText(mime) ? mime.trim().toLowerCase(Locale.ROOT) : "application/octet-stream";
+        if (clean.length() > 120) {
+            clean = clean.substring(0, 120);
+        }
+        return clean;
+    }
+
+    private String sanitizeText(String text, int maxChars) {
+        if (!hasText(text)) {
+            return "";
+        }
+        String clean = text.replaceAll("\\u0000", "").trim();
+        if (clean.length() > maxChars) {
+            clean = clean.substring(0, maxChars);
+        }
+        return clean;
+    }
+
+    private String sanitizeBase64(String value) {
+        if (!hasText(value)) {
+            return "";
+        }
+        String clean = value.trim();
+        int comma = clean.indexOf(',');
+        if (comma >= 0) {
+            clean = clean.substring(comma + 1);
+        }
+        clean = clean.replaceAll("\\s+", "");
+        if (clean.length() > 12_000_000) {
+            clean = clean.substring(0, 12_000_000);
+        }
+        return clean;
+    }
+
+    private boolean isImageMime(String mime) {
+        return hasText(mime) && mime.startsWith("image/");
+    }
+
+    private boolean isPdfMime(String mime) {
+        return "application/pdf".equalsIgnoreCase(mime);
+    }
+
+    private boolean isTextMime(String mime) {
+        if (!hasText(mime)) {
+            return false;
+        }
+        return mime.startsWith("text/")
+                || mime.contains("json")
+                || mime.contains("xml")
+                || mime.contains("csv")
+                || mime.contains("javascript");
+    }
+
+    private String extractPdfText(String base64) {
+        byte[] bytes = decodeBase64(base64);
+        if (bytes.length == 0) {
+            return "";
+        }
+
+        try (PDDocument doc = Loader.loadPDF(bytes)) {
+            PDFTextStripper stripper = new PDFTextStripper();
+            String text = stripper.getText(doc);
+            return sanitizeText(text, MAX_MEDIA_TEXT_CHARS);
+        } catch (Exception ex) {
+            log.warn("No se pudo extraer texto PDF: {}", ex.getMessage());
+            return "";
+        }
+    }
+
+    private String decodeBase64AsText(String base64) {
+        byte[] bytes = decodeBase64(base64);
+        if (bytes.length == 0) {
+            return "";
+        }
+        return new String(bytes, StandardCharsets.UTF_8);
+    }
+
+    private byte[] decodeBase64(String base64) {
+        try {
+            return Base64.getDecoder().decode(base64);
+        } catch (Exception ex) {
+            return new byte[0];
+        }
+    }
+
+    private record PreparedMedia(String name, String mimeType, String imageBase64, String documentText) {
     }
 }
-

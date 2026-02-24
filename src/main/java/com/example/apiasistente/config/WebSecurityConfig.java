@@ -50,6 +50,10 @@ public class WebSecurityConfig {
                         .requestMatchers("/actuator/health", "/actuator/info", "/actuator/prometheus").permitAll()
 
                         // NO permitas "/" si ahí está el chat. Debe pedir login
+                        .requestMatchers("/chat", "/api/chat/**").hasAuthority("PERM_CHAT")
+                        .requestMatchers("/rag-admin", "/api/rag/**").hasAuthority("PERM_RAG")
+                        .requestMatchers("/monitor", "/api/monitor/**", "/ops/**").hasAuthority("PERM_MONITOR")
+                        .requestMatchers("/api/api-keys/**", "/api/registration-codes/**").hasAuthority("PERM_API_KEYS")
                         .anyRequest().authenticated()
                 )
                 .formLogin(form -> form
@@ -61,6 +65,7 @@ public class WebSecurityConfig {
                         .logoutSuccessUrl("/login?logout")
                         .permitAll()
                 )
+                .exceptionHandling(ex -> ex.accessDeniedPage("/access-denied"))
                 .cors(Customizer.withDefaults());
 
         return http.build();

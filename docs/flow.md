@@ -6,11 +6,17 @@ Este documento resume como circulan datos y requests en el sistema.
 
 1. El cliente envia `POST /api/chat` (web) o `POST /api/ext/chat` (externo).
 2. El backend identifica usuario y sesion.
-3. `RagService` calcula embedding de la consulta y recupera Top-K chunks.
-4. `ChatService` construye prompt final con historial + contexto RAG.
-5. `OllamaClient` genera respuesta.
-6. Se persisten mensajes y fuentes usadas.
-7. Se retorna `ChatResponse` al cliente.
+3. Si hay adjuntos visuales/documentales, `ChatService` ejecuta una etapa intermedia con `ollama.visual-model` (Qwen-VL).
+4. `RagService` calcula embedding de la consulta y recupera Top-K chunks.
+5. `ChatService` construye prompt final con historial + contexto RAG + contexto visual intermedio.
+6. `OllamaClient` genera respuesta final con el modelo grande.
+7. Si esta activo `chat.response-guard`, un mini-modelo depura la respuesta para quitar relleno (sin perder citas/codigo).
+8. Se persisten mensajes y fuentes usadas.
+9. Se retorna `ChatResponse` al cliente.
+
+Notas:
+- Si `chat.response-guard.strict-mode=true`, la depuracion es mas agresiva contra texto innecesario.
+- El acceso a vistas/APIs web depende de permisos del usuario (`CHAT`, `RAG`, `MONITOR`, `API_KEYS`).
 
 ## 2) Ingesta de conocimiento RAG
 

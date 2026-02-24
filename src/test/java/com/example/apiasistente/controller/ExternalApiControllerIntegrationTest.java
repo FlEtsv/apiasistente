@@ -55,7 +55,7 @@ class ExternalApiControllerIntegrationTest {
                 .thenReturn(new ApiKeyService.ApiKeyAuthResult(11L, "ext-user", "finanzas-generic", false));
 
         ChatResponse response = new ChatResponse("sid-3", "hola", List.of());
-        when(chatQueueService.chatAndWait(eq("ext-user"), eq("sid-3"), eq("Hola"), eq("fast"), isNull()))
+        when(chatQueueService.chatAndWait(eq("ext-user"), eq("sid-3"), eq("Hola"), eq("fast"), isNull(), isNull()))
                 .thenReturn(response);
 
         mockMvc.perform(post("/api/ext/chat")
@@ -94,7 +94,8 @@ class ExternalApiControllerIntegrationTest {
                 isNull(),
                 eq("Hola"),
                 eq("fast"),
-                eq("key:99|user:cliente-7")
+                eq("key:99|user:cliente-7"),
+                isNull()
         )).thenReturn(response);
 
         mockMvc.perform(post("/api/ext/chat")

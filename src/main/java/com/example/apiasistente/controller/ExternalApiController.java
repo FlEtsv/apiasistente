@@ -67,7 +67,8 @@ public class ExternalApiController {
                 req.getSessionId(),
                 req.getMessage(),
                 req.getModel(),
-                externalUserId
+                externalUserId,
+                req.getMedia()
         );
     }
 

@@ -14,6 +14,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.List;
 
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -35,7 +36,7 @@ class ChatApiControllerTest {
     @Test
     void chatAcceptsModelSelection() throws Exception {
         ChatResponse response = new ChatResponse("sid-1", "hola", List.of());
-        when(chatQueueService.chatAndWait(eq("user"), eq("sid-1"), eq("Hola"), eq("fast")))
+        when(chatQueueService.chatAndWait(eq("user"), eq("sid-1"), eq("Hola"), eq("fast"), isNull(), isNull()))
                 .thenReturn(response);
 
         mockMvc.perform(post("/api/chat")

@@ -410,6 +410,61 @@
             align-items: center;
         }
 
+        .composer-tools {
+            margin-top: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .composer-tools .btn {
+            padding: 7px 10px;
+            font-size: 11px;
+        }
+
+        .media-preview {
+            margin-top: 10px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .media-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            max-width: 100%;
+            padding: 6px 8px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: rgba(12, 20, 31, 0.75);
+            font-size: 11px;
+        }
+
+        .media-chip .meta {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .media-chip .remove {
+            border: 1px solid var(--border);
+            background: #152236;
+            color: var(--text);
+            border-radius: 8px;
+            font-size: 10px;
+            line-height: 1;
+            padding: 4px 6px;
+            cursor: pointer;
+        }
+
+        .media-hint {
+            font-size: 11px;
+            color: var(--muted);
+        }
+
         #input {
             min-width: 0;
             width: 100%;
@@ -618,6 +673,76 @@
             animation: pulse-slow 1.4s ease-in-out infinite;
         }
 
+        .msg-markdown {
+            font-size: 13px;
+            line-height: 1.6;
+            word-break: break-word;
+        }
+
+        .msg-markdown > :first-child { margin-top: 0; }
+        .msg-markdown > :last-child { margin-bottom: 0; }
+
+        .msg-markdown h1,
+        .msg-markdown h2,
+        .msg-markdown h3 {
+            margin: 0.65rem 0 0.45rem;
+            font-weight: 700;
+            line-height: 1.35;
+        }
+
+        .msg-markdown h1 { font-size: 1.12rem; }
+        .msg-markdown h2 { font-size: 1.04rem; }
+        .msg-markdown h3 { font-size: 0.97rem; }
+
+        .msg-markdown p { margin: 0.48rem 0; }
+
+        .msg-markdown ul,
+        .msg-markdown ol {
+            margin: 0.5rem 0 0.5rem 1.15rem;
+            padding: 0;
+        }
+
+        .msg-markdown li { margin: 0.24rem 0; }
+
+        .msg-markdown blockquote {
+            margin: 0.7rem 0;
+            padding: 0.55rem 0.75rem;
+            border-left: 3px solid var(--accent);
+            background: rgba(31, 122, 224, 0.09);
+            border-radius: 8px;
+            color: #d9e7f6;
+        }
+
+        .msg-markdown a {
+            color: #9dceff;
+            text-decoration: underline;
+            text-underline-offset: 2px;
+        }
+
+        .msg-markdown code {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.86em;
+            padding: 0.15rem 0.32rem;
+            border-radius: 7px;
+            background: rgba(137, 184, 231, 0.15);
+        }
+
+        .msg-markdown pre {
+            margin: 0.72rem 0;
+            padding: 0.86rem;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background: #091220;
+            overflow-x: auto;
+        }
+
+        .msg-markdown pre code {
+            display: block;
+            padding: 0;
+            background: transparent;
+            white-space: pre;
+        }
+
         #toggleSessions { display: none; }
 
         @media (max-width: 1300px) {
@@ -704,13 +829,13 @@
         </div>
 
         <nav class="nav">
-            <a href="/chat" class="active">Chat</a>
-            <a href="/rag-admin">RAG Admin</a>
-            <button id="openApiKeys" type="button">API Keys</button>
-            <a href="/monitor">Monitor local</a>
-            <a href="/ops/status/ui" target="_blank" rel="noopener">Ops Status</a>
-            <a href="/ops/grafana" target="_blank" rel="noopener">Grafana</a>
-            <a href="/ops/prometheus" target="_blank" rel="noopener">Prometheus</a>
+            <a href="/chat" class="active" sec:authorize="hasAuthority('PERM_CHAT')">Chat</a>
+            <a href="/rag-admin" sec:authorize="hasAuthority('PERM_RAG')">RAG Admin</a>
+            <button id="openApiKeys" type="button" sec:authorize="hasAuthority('PERM_API_KEYS')">API Keys</button>
+            <a href="/monitor" sec:authorize="hasAuthority('PERM_MONITOR')">Monitor local</a>
+            <a href="/ops/status/ui" target="_blank" rel="noopener" sec:authorize="hasAuthority('PERM_MONITOR')">Ops Status</a>
+            <a href="/ops/grafana" target="_blank" rel="noopener" sec:authorize="hasAuthority('PERM_MONITOR')">Grafana</a>
+            <a href="/ops/prometheus" target="_blank" rel="noopener" sec:authorize="hasAuthority('PERM_MONITOR')">Prometheus</a>
         </nav>
 
         <div class="sidebar-footer">
@@ -737,8 +862,8 @@
             </div>
             <div class="actions">
                 <button id="newChat" class="btn primary">Nuevo chat</button>
-                <span class="pill"><span class="dot" id="grafana-dot"></span>Grafana</span>
-                <span class="pill"><span class="dot" id="prometheus-dot"></span>Prometheus</span>
+                <span class="pill" sec:authorize="hasAuthority('PERM_MONITOR')"><span class="dot" id="grafana-dot"></span>Grafana</span>
+                <span class="pill" sec:authorize="hasAuthority('PERM_MONITOR')"><span class="dot" id="prometheus-dot"></span>Prometheus</span>
             </div>
         </header>
 
@@ -757,8 +882,8 @@
                 <div class="panel-header">
                     <h3>Chat operativo</h3>
                     <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
-                        <span class="pill">RAG + Ollama</span>
-                        <span class="pill" id="ragContextPill">Contexto RAG: ...</span>
+                        <span class="pill" sec:authorize="hasAuthority('PERM_RAG')">RAG + Ollama</span>
+                        <span class="pill" id="ragContextPill" sec:authorize="hasAuthority('PERM_RAG')">Contexto RAG: ...</span>
                     </div>
                 </div>
                 <div id="chat">
@@ -776,27 +901,37 @@
                         <select id="modelSelect">
                             <option value="default">qwen2.5:32b (Calidad)</option>
                             <option value="fast">qwen3.0:14b (Rapido)</option>
+                            <option value="visual">Qwen-VL (Vision)</option>
                         </select>
                     </div>
+                    <div class="composer-tools">
+                        <input id="mediaInput" type="file" accept="image/*,.txt,.md,.json,.csv,.pdf" multiple class="hidden" />
+                        <input id="cameraInput" type="file" accept="image/*" capture="environment" class="hidden" />
+                        <button id="attachBtn" type="button" class="btn">Adjuntar archivo</button>
+                        <button id="cameraBtn" type="button" class="btn">Usar camara</button>
+                        <button id="clearMediaBtn" type="button" class="btn">Limpiar adjuntos</button>
+                        <span class="media-hint">Puedes enviar imagen, camara o documento y preguntar sobre ello.</span>
+                    </div>
+                    <div id="mediaPreview" class="media-preview"></div>
                 </div>
             </div>
 
-            <aside class="panel ops-panel">
+            <aside class="panel ops-panel" sec:authorize="hasAnyAuthority('PERM_MONITOR','PERM_RAG','PERM_API_KEYS')">
                 <div class="panel-header">
                     <h3>Monitoreo y control</h3>
                 </div>
                 <div class="panel-body ops-grid">
-                    <div class="stat">
+                    <div class="stat" sec:authorize="hasAuthority('PERM_MONITOR')">
                         <strong>Estado Grafana</strong>
                         <span id="grafana-status" class="status-down">Sin datos</span>
                         <span id="grafana-url" class="sub">-</span>
                     </div>
-                    <div class="stat">
+                    <div class="stat" sec:authorize="hasAuthority('PERM_MONITOR')">
                         <strong>Estado Prometheus</strong>
                         <span id="prometheus-status" class="status-down">Sin datos</span>
                         <span id="prometheus-url" class="sub">-</span>
                     </div>
-                    <div class="stat">
+                    <div class="stat" sec:authorize="hasAuthority('PERM_MONITOR')">
                         <strong>Eventos recientes</strong>
                         <div class="sub" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                             <span>Actualizar cada</span>
@@ -814,7 +949,7 @@
                             </div>
                         </div>
                     </div>
-                    <div class="stat">
+                    <div class="stat" sec:authorize="hasAuthority('PERM_MONITOR')">
                         <strong>Accesos directos</strong>
                         <div class="link-list">
                             <a href="/ops/status/ui" target="_blank" rel="noopener">Ops Status</a>
@@ -823,14 +958,14 @@
                             <a href="/monitor" target="_blank" rel="noopener">Monitor local</a>
                         </div>
                     </div>
-                    <div class="stat">
+                    <div class="stat" sec:authorize="hasAnyAuthority('PERM_RAG','PERM_API_KEYS')">
                         <strong>Herramientas</strong>
                         <div class="link-list">
-                            <a href="/rag-admin">RAG Admin</a>
-                            <button id="openApiKeysInline" type="button">Administrar API Keys</button>
+                            <a href="/rag-admin" sec:authorize="hasAuthority('PERM_RAG')">RAG Admin</a>
+                            <button id="openApiKeysInline" type="button" sec:authorize="hasAuthority('PERM_API_KEYS')">Administrar API Keys</button>
                         </div>
                     </div>
-                    <div class="stat">
+                    <div class="stat" sec:authorize="hasAuthority('PERM_RAG')">
                         <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;">
                             <strong>Contexto RAG</strong>
                             <button id="btnRefreshRagContext" class="btn">Refrescar</button>
@@ -860,7 +995,7 @@
 </div>
 
 <!-- MODAL API KEYS -->
-<div id="apiKeysModal" class="fixed inset-0 z-[999] hidden">
+<div id="apiKeysModal" class="fixed inset-0 z-[999] hidden" sec:authorize="hasAuthority('PERM_API_KEYS')">
     <div id="apiKeysBackdrop" class="absolute inset-0 bg-black/60"></div>
 
     <div class="absolute inset-0 flex items-center justify-center p-4">
@@ -927,10 +1062,30 @@
                         <input id="regCodeTtl" class="session-search" style="max-width: 150px;" placeholder="TTL (min)" />
                         <button id="btnCreateRegCode" class="btn primary">Crear codigo</button>
                     </div>
+                    <div class="sub" style="margin-top:8px;">Permisos para el nuevo usuario:</div>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <label class="sub" style="display:flex; align-items:center; gap:6px;">
+                            <input id="regPermChat" type="checkbox" checked />
+                            Chat
+                        </label>
+                        <label class="sub" style="display:flex; align-items:center; gap:6px;">
+                            <input id="regPermRag" type="checkbox" />
+                            RAG
+                        </label>
+                        <label class="sub" style="display:flex; align-items:center; gap:6px;">
+                            <input id="regPermMonitor" type="checkbox" />
+                            Monitor
+                        </label>
+                        <label class="sub" style="display:flex; align-items:center; gap:6px;">
+                            <input id="regPermApiKeys" type="checkbox" />
+                            API Keys
+                        </label>
+                    </div>
                     <div id="regCodeCreatedBox" class="stat hidden" style="margin-top:10px;">
                         <div>Codigo creado (se muestra una sola vez)</div>
                         <pre id="regCodeCreatedValue" class="sub" style="white-space: pre-wrap; word-break: break-all;"></pre>
                         <div class="sub">Expira: <span id="regCodeCreatedExpiry">-</span></div>
+                        <div class="sub">Permisos: <span id="regCodeCreatedPermissions">-</span></div>
                         <div style="display:flex; gap:8px; flex-wrap:wrap;">
                             <button id="btnCopyRegCode" class="btn">Copiar</button>
                             <button id="btnHideRegCode" class="btn">Ocultar</button>
@@ -947,6 +1102,7 @@
                             <tr style="border-bottom: 1px solid var(--border);">
                                 <th style="text-align:left; padding:6px;">Label</th>
                                 <th style="text-align:left; padding:6px;">Prefix</th>
+                                <th style="text-align:left; padding:6px;">Permisos</th>
                                 <th style="text-align:left; padding:6px;">Expires</th>
                                 <th style="text-align:left; padding:6px;">Used</th>
                                 <th style="text-align:left; padding:6px;">Revoked</th>
@@ -973,8 +1129,10 @@
 </div>
 
 <!-- IMPORTANTE: cache-busting para que NO uses un chat.js viejo -->
-<script src="/chat.js?v=6"></script>
-<script src="/api-keys.js?v=1"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+<script src="/chat.js?v=8"></script>
+<script src="/api-keys.js?v=2"></script>
 
 </body>
 </html>

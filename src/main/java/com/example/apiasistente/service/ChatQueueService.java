@@ -1,13 +1,16 @@
 package com.example.apiasistente.service;
 
 import com.example.apiasistente.config.ChatQueueProperties;
+import com.example.apiasistente.model.dto.ChatMediaInput;
 import com.example.apiasistente.model.dto.ChatResponse;
 import com.example.apiasistente.util.RequestIdHolder;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PreDestroy;
 import java.util.ArrayDeque;
+import java.util.Collections;
 import java.util.Deque;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -39,7 +42,7 @@ public class ChatQueueService {
      * Encola el mensaje y devuelve la respuesta cuando el turno termina.
      */
     public ChatResponse chatAndWait(String username, String sessionId, String message, String model) {
-        return chatAndWait(username, sessionId, message, model, null);
+        return chatAndWait(username, sessionId, message, model, null, List.of());
     }
 
     /**
@@ -50,8 +53,17 @@ public class ChatQueueService {
                                     String message,
                                     String model,
                                     String externalUserId) {
+        return chatAndWait(username, sessionId, message, model, externalUserId, List.of());
+    }
+
+    public ChatResponse chatAndWait(String username,
+                                    String sessionId,
+                                    String message,
+                                    String model,
+                                    String externalUserId,
+                                    List<ChatMediaInput> media) {
         try {
-            return enqueueChat(username, sessionId, message, model, externalUserId).get();
+            return enqueueChat(username, sessionId, message, model, externalUserId, media).get();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("La cola de chat fue interrumpida.", e);
@@ -64,7 +76,7 @@ public class ChatQueueService {
      * Encola el mensaje y devuelve un future para esperar el resultado.
      */
     public CompletableFuture<ChatResponse> enqueueChat(String username, String sessionId, String message, String model) {
-        return enqueueChat(username, sessionId, message, model, null);
+        return enqueueChat(username, sessionId, message, model, null, List.of());
     }
 
     public CompletableFuture<ChatResponse> enqueueChat(String username,
@@ -72,10 +84,19 @@ public class ChatQueueService {
                                                        String message,
                                                        String model,
                                                        String externalUserId) {
+        return enqueueChat(username, sessionId, message, model, externalUserId, List.of());
+    }
+
+    public CompletableFuture<ChatResponse> enqueueChat(String username,
+                                                       String sessionId,
+                                                       String message,
+                                                       String model,
+                                                       String externalUserId,
+                                                       List<ChatMediaInput> media) {
         String queueKey = resolveQueueKey(username, sessionId, externalUserId);
         SessionQueue queue = sessionQueues.computeIfAbsent(queueKey, key -> new SessionQueue());
         String requestId = RequestIdHolder.ensure();
-        QueuedChat queued = new QueuedChat(username, sessionId, message, model, externalUserId, requestId);
+        QueuedChat queued = new QueuedChat(username, sessionId, message, model, externalUserId, media, requestId);
 
         queue.enqueue(queued);
         startProcessingIfNeeded(queueKey, queue);
@@ -113,7 +134,8 @@ public class ChatQueueService {
                             next.sessionId(),
                             next.message(),
                             next.model(),
-                            next.externalUserId()
+                            next.externalUserId(),
+                            next.media()
                     );
                     next.response().complete(response);
                 } catch (Exception ex) {
@@ -211,19 +233,35 @@ public class ChatQueueService {
             String message,
             String model,
             String externalUserId,
+            List<ChatMediaInput> media,
             String requestId,
             CompletableFuture<ChatResponse> response
     ) {
         QueuedChat(String username, String sessionId, String message, String model) {
-            this(username, sessionId, message, model, null, RequestIdHolder.ensure(), new CompletableFuture<>());
+            this(username, sessionId, message, model, null, List.of(), RequestIdHolder.ensure(), new CompletableFuture<>());
         }
 
         QueuedChat(String username, String sessionId, String message, String model, String requestId) {
-            this(username, sessionId, message, model, null, requestId, new CompletableFuture<>());
+            this(username, sessionId, message, model, null, List.of(), requestId, new CompletableFuture<>());
         }
 
-        QueuedChat(String username, String sessionId, String message, String model, String externalUserId, String requestId) {
-            this(username, sessionId, message, model, externalUserId, requestId, new CompletableFuture<>());
+        QueuedChat(String username,
+                   String sessionId,
+                   String message,
+                   String model,
+                   String externalUserId,
+                   List<ChatMediaInput> media,
+                   String requestId) {
+            this(
+                    username,
+                    sessionId,
+                    message,
+                    model,
+                    externalUserId,
+                    media == null ? List.of() : Collections.unmodifiableList(List.copyOf(media)),
+                    requestId,
+                    new CompletableFuture<>()
+            );
         }
     }
 }

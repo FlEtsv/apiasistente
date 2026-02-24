@@ -10,5 +10,6 @@ public record RegistrationCodeDto(
         Instant expiresAt,
         Instant usedAt,
         Instant revokedAt,
-        String usedBy
+        String usedBy,
+        java.util.List<String> permissions
 ) {}

@@ -107,7 +107,9 @@ public class ChatApiController {
                 principal.getName(),
                 req.getSessionId(),
                 req.getMessage(),
-                req.getModel()
+                req.getModel(),
+                null,
+                req.getMedia()
         );
     }
 

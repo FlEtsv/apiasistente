@@ -6,7 +6,7 @@ server:
     include-stacktrace: always
 
 spring:
-  # Configuración de base de datos para persistir sesiones, documentos y embeddings.
+  # ConfiguraciÃ³n de base de datos para persistir sesiones, documentos y embeddings.
   datasource:
     url: jdbc:mysql://${MYSQL_HOST:apiasistente_mysql}:${MYSQL_PORT:3306}/${MYSQL_DB:apiasistente_db}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
     username: ${MYSQL_USER:apiuser}
@@ -26,7 +26,7 @@ spring:
   sql:
     init:
       mode: always
-      # opcional: si quieres ser explícito
+      # opcional: si quieres ser explÃ­cito
       # schema-locations: classpath:schema.sql
       # data-locations: classpath:data.sql
 
@@ -34,17 +34,21 @@ ollama:
   # Endpoint base del servidor Ollama (local o contenedor).
   base-url: ${OLLAMA_BASE_URL:http://192.168.1.61:11434/api}
   #base-url: ${OLLAMA_BASE_URL:http://ollama:11434/api}
-  # Modelo para generación de chat.
-  chat-model: #qwen2.5:32b
-  # Modelo rápido para chats ligeros (menor consumo).
+  # Modelo para generaciÃ³n de chat.
+  chat-model: qwen2.5:32b
+  # Modelo rÃ¡pido para chats ligeros (menor consumo).
   fast-chat-model: qwen3:14b
+  # Modelo visual para etapa intermedia de imagen/camara/documento.
+  visual-model: qwen2.5vl:7b
+  # Mini-modelo opcional para depurar respuestas y quitar relleno.
+  response-guard-model: ${OLLAMA_RESPONSE_GUARD_MODEL:qwen2.5:3b}
   # Modelo para embeddings de RAG.
   embed-model: nomic-embed-text:latest
 
 rag:
-  # Número de chunks más relevantes a recuperar por consulta.
+  # NÃºmero de chunks mÃ¡s relevantes a recuperar por consulta.
   top-k: 5
-  # Máximo de mensajes previos en el historial de contexto.
+  # MÃ¡ximo de mensajes previos en el historial de contexto.
   max-history: 40
   retrieval:
     # Turnos previos del usuario para enriquecer la consulta de retrieval.
@@ -53,24 +57,24 @@ rag:
     # Cachea embeddings/chunks para acelerar respuestas repetidas.
     enabled: true
   chunk:
-    # Tamaño y solapamiento de cada chunk de texto.
+    # TamaÃ±o y solapamiento de cada chunk de texto.
     size: 900
     overlap: 150
   rerank:
-    # Numero de candidatos semánticos previos al rerank con MMR.
+    # Numero de candidatos semÃ¡nticos previos al rerank con MMR.
     candidates: 24
     # Mezcla entre relevancia y diversidad (0-1).
     lambda: 0.65
   hybrid:
-    # Peso de score semántico vs lexical en ranking final.
+    # Peso de score semÃ¡ntico vs lexical en ranking final.
     semantic-weight: 0.80
     lexical-weight: 0.20
     # Bonus cuando la frase normalizada aparece de forma exacta.
     exact-match-boost: 0.12
   owner:
-    # Asegura candidatos mínimos por owner (global/privado) antes de fusionar.
+    # Asegura candidatos mÃ­nimos por owner (global/privado) antes de fusionar.
     min-candidates-per-owner: 10
-    # Pequeños boosts para que convivan mejor contextos globales y privados.
+    # PequeÃ±os boosts para que convivan mejor contextos globales y privados.
     global-boost: 0.03
     user-boost: 0.05
   score:
@@ -79,8 +83,15 @@ rag:
 
 chat:
   queue:
-    # Retraso en ms para suavizar picos de tráfico por sesión.
+    # Retraso en ms para suavizar picos de trÃ¡fico por sesiÃ³n.
     delay-ms: 25
+  response-guard:
+    # Segunda pasada para eliminar informacion innecesaria en la respuesta final.
+    enabled: true
+    # Evita costo extra en respuestas muy cortas.
+    min-answer-chars: 260
+    # Modo estricto: recorte mas agresivo de relleno.
+    strict-mode: true
 
 
 logging:

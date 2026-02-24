@@ -50,7 +50,7 @@ class ChatQueueServiceIntegrationTest {
 
     @Test
     void enqueuesWithSpringContext() throws Exception {
-        when(chatService.chat("user", "sid", "hola", "fast", null))
+        when(chatService.chat("user", "sid", "hola", "fast", null, List.of()))
                 .thenReturn(new ChatResponse("sid", "ok", List.of()));
 
         var response = queueService.enqueueChat("user", "sid", "hola", "fast").get(2, TimeUnit.SECONDS);

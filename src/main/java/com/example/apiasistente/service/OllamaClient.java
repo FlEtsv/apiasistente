@@ -108,7 +108,11 @@ public class OllamaClient {
         return out;
     }
 
-    public record Message(String role, String content) {}
+    public record Message(String role, String content, List<String> images) {
+        public Message(String role, String content) {
+            this(role, content, List.of());
+        }
+    }
 
     public record ChatRequest(String model, List<Message> messages, boolean stream, Map<String, Object> options) {}
 

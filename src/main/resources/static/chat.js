@@ -34,6 +34,12 @@ const ragLastUpdatedEl = document.getElementById('ragLastUpdated');
 const ragRefreshBtn = document.getElementById('btnRefreshRagContext');
 
 const openApiKeysInline = document.getElementById('openApiKeysInline');
+const mediaInputEl = document.getElementById('mediaInput');
+const cameraInputEl = document.getElementById('cameraInput');
+const attachBtnEl = document.getElementById('attachBtn');
+const cameraBtnEl = document.getElementById('cameraBtn');
+const clearMediaBtnEl = document.getElementById('clearMediaBtn');
+const mediaPreviewEl = document.getElementById('mediaPreview');
 
 let sessionId = null;
 let sessionsCache = [];
@@ -42,7 +48,167 @@ const MODEL_STORAGE_KEY = 'chat.model';
 const MONITOR_INTERVAL_KEY = 'monitor.intervalMs';
 const MONITOR_MIN_SEC = 3;
 const MONITOR_MAX_SEC = 3600;
+const MAX_MEDIA_ITEMS = 4;
+const MAX_MEDIA_BYTES = 6 * 1024 * 1024;
+const MAX_MEDIA_TEXT_CHARS = 18000;
 let monitorTimer = null;
+let pendingMedia = [];
+
+function escapeHtml(value) {
+  const text = value == null ? '' : String(value);
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function renderAssistantMarkdown(text) {
+  const raw = text || '';
+  const fallback = escapeHtml(raw).replace(/\n/g, '<br>');
+
+  if (!window.marked || typeof window.marked.parse !== 'function') {
+    return fallback;
+  }
+
+  try {
+    const html = window.marked.parse(raw, {
+      gfm: true,
+      breaks: true
+    });
+
+    if (window.DOMPurify && typeof window.DOMPurify.sanitize === 'function') {
+      return window.DOMPurify.sanitize(html, {
+        USE_PROFILES: { html: true },
+        ALLOWED_ATTR: ['href', 'title', 'target', 'rel', 'class']
+      });
+    }
+
+    return html;
+  } catch (e) {
+    return fallback;
+  }
+}
+
+function sanitizeBase64(dataUrlOrBase64) {
+  if (!dataUrlOrBase64) return '';
+  const raw = String(dataUrlOrBase64).trim();
+  const idx = raw.indexOf(',');
+  const clean = (idx >= 0 ? raw.slice(idx + 1) : raw).replace(/\s+/g, '');
+  return clean;
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('No se pudo leer archivo.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function fileToText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('No se pudo leer documento de texto.'));
+    reader.readAsText(file);
+  });
+}
+
+function isTextLikeFile(file) {
+  const type = (file?.type || '').toLowerCase();
+  if (type.startsWith('text/')) return true;
+  return type.includes('json') || type.includes('xml') || type.includes('csv') || type.includes('javascript');
+}
+
+function inferMediaLabel(item) {
+  if ((item.mimeType || '').startsWith('image/')) return 'Imagen';
+  if ((item.mimeType || '').includes('pdf')) return 'PDF';
+  if (item.text) return 'Documento';
+  return 'Archivo';
+}
+
+function renderMediaPreview() {
+  if (!mediaPreviewEl) return;
+  mediaPreviewEl.innerHTML = '';
+  if (!pendingMedia.length) return;
+
+  pendingMedia.forEach((item, idx) => {
+    const chip = document.createElement('div');
+    chip.className = 'media-chip';
+
+    const meta = document.createElement('span');
+    meta.className = 'meta';
+    meta.textContent = `${inferMediaLabel(item)}: ${item.name || 'archivo'}`;
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'remove';
+    removeBtn.textContent = 'x';
+    removeBtn.addEventListener('click', () => {
+      pendingMedia.splice(idx, 1);
+      renderMediaPreview();
+    });
+
+    chip.appendChild(meta);
+    chip.appendChild(removeBtn);
+    mediaPreviewEl.appendChild(chip);
+  });
+}
+
+function clearMediaSelection() {
+  pendingMedia = [];
+  if (mediaInputEl) mediaInputEl.value = '';
+  if (cameraInputEl) cameraInputEl.value = '';
+  renderMediaPreview();
+}
+
+async function pushMediaFile(file) {
+  if (!file) return;
+  if (pendingMedia.length >= MAX_MEDIA_ITEMS) {
+    throw new Error(`Maximo ${MAX_MEDIA_ITEMS} adjuntos por mensaje.`);
+  }
+  if (file.size > MAX_MEDIA_BYTES) {
+    throw new Error(`Archivo demasiado grande (${file.name}). Limite: ${Math.round(MAX_MEDIA_BYTES / (1024 * 1024))} MB.`);
+  }
+
+  const mimeType = (file.type || 'application/octet-stream').toLowerCase();
+  const media = {
+    name: file.name || 'archivo',
+    mimeType
+  };
+
+  if (mimeType.startsWith('image/')) {
+    const dataUrl = await fileToDataUrl(file);
+    media.base64 = sanitizeBase64(dataUrl);
+  } else if (isTextLikeFile(file)) {
+    const text = await fileToText(file);
+    media.text = (text || '').slice(0, MAX_MEDIA_TEXT_CHARS);
+  } else {
+    const dataUrl = await fileToDataUrl(file);
+    media.base64 = sanitizeBase64(dataUrl);
+  }
+
+  if (!media.base64 && !media.text) {
+    throw new Error(`No se pudo leer adjunto: ${file.name}`);
+  }
+
+  pendingMedia.push(media);
+}
+
+async function handlePickedFiles(fileList) {
+  if (!fileList || !fileList.length) return;
+  try {
+    for (const file of Array.from(fileList)) {
+      await pushMediaFile(file);
+    }
+    renderMediaPreview();
+  } catch (e) {
+    alert(e.message || 'No se pudo adjuntar archivo.');
+  }
+}
 
 function getCsrf() {
   const token = document.querySelector('meta[name="_csrf"]')?.getAttribute('content');
@@ -81,7 +247,17 @@ function addMsg(who, text, sources = []) {
   div.className = `${baseClasses} ${isUser ? userClasses : aiClasses}`;
 
   const content = document.createElement('div');
-  content.innerHTML = (text || '').replace(/\n/g, '<br>');
+  if (isUser) {
+    content.className = 'whitespace-pre-wrap break-words';
+    content.textContent = text || '';
+  } else {
+    content.className = 'msg-markdown';
+    content.innerHTML = renderAssistantMarkdown(text);
+    content.querySelectorAll('a').forEach(a => {
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+    });
+  }
   div.appendChild(content);
 
   if (!isUser && sources && sources.length > 0) {
@@ -270,6 +446,13 @@ async function loadMonitorEvents() {
 }
 
 async function loadOpsStatus() {
+  const hasOpsTargets =
+    document.getElementById('grafana-dot') ||
+    document.getElementById('prometheus-dot') ||
+    document.getElementById('grafana-status') ||
+    document.getElementById('prometheus-status');
+  if (!hasOpsTargets) return;
+
   try {
     const res = await fetch('/ops/status', { credentials: 'include' });
     if (!res.ok) return;
@@ -554,11 +737,21 @@ async function deleteSessionPrompt(id, currentTitle) {
 }
 
 async function send() {
-  const text = inputEl.value.trim();
+  let text = inputEl.value.trim();
+  if (!text && pendingMedia.length > 0) {
+    text = 'Analiza el adjunto y responde a mi consulta.';
+  }
   if (!text) return;
 
+  const mediaPayload = pendingMedia.map(m => ({
+    name: m.name,
+    mimeType: m.mimeType,
+    base64: m.base64 || null,
+    text: m.text || null
+  }));
+
   inputEl.value = '';
-  addMsg('user', text);
+  addMsg('user', pendingMedia.length ? `${text}\n\n[Adjuntos: ${pendingMedia.length}]` : text);
 
   const typingId = showTyping();
   sendBtn.disabled = true;
@@ -570,7 +763,8 @@ async function send() {
       body: JSON.stringify({
         sessionId,
         message: text,
-        model: modelSelectEl?.value || null
+        model: modelSelectEl?.value || null,
+        media: mediaPayload
       })
     });
 
@@ -584,6 +778,7 @@ async function send() {
     setSidLabel(sessionId);
 
     addMsg('assistant', data.reply, data.sources);
+    clearMediaSelection();
 
     // refresca lista para ordenar por última actividad + contador
     await loadSessions();
@@ -610,6 +805,17 @@ function hideDrawer() {
 /* Listeners */
 sendBtn?.addEventListener('click', send);
 inputEl?.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+attachBtnEl?.addEventListener('click', () => mediaInputEl?.click());
+cameraBtnEl?.addEventListener('click', () => cameraInputEl?.click());
+clearMediaBtnEl?.addEventListener('click', () => clearMediaSelection());
+mediaInputEl?.addEventListener('change', async (e) => {
+  await handlePickedFiles(e.target.files);
+  e.target.value = '';
+});
+cameraInputEl?.addEventListener('change', async (e) => {
+  await handlePickedFiles(e.target.files);
+  e.target.value = '';
+});
 
 newChatBtn?.addEventListener('click', async () => {
   try { await createNewChat(); } catch (e) { alert(e.message); }
@@ -656,6 +862,7 @@ sessionSearchMobileEl?.addEventListener('input', () => renderSessions(sessionSea
     loadMonitorEvents();
     setRagContextLoading();
     loadRagContextStats();
+    renderMediaPreview();
     scheduleMonitorPolling();
     await ensureActiveSession();
     await loadSessions();

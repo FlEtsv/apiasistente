@@ -6,6 +6,7 @@ import com.example.apiasistente.model.entity.AppUser;
 import com.example.apiasistente.model.entity.RegistrationCode;
 import com.example.apiasistente.repository.AppUserRepository;
 import com.example.apiasistente.repository.RegistrationCodeRepository;
+import com.example.apiasistente.security.AppPermission;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -15,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.util.EnumSet;
 import java.util.HexFormat;
 import java.util.List;
 
@@ -45,7 +47,10 @@ public class RegistrationCodeService {
     }
 
     @Transactional
-    public RegistrationCodeCreateResponse createForUser(String username, String label, Integer ttlMinutes) {
+    public RegistrationCodeCreateResponse createForUser(String username,
+                                                        String label,
+                                                        Integer ttlMinutes,
+                                                        List<String> requestedPermissions) {
         AppUser user = userRepo.findByUsername(username)
                 .orElseThrow(() -> new IllegalStateException("Usuario no existe: " + username));
 
@@ -63,6 +68,7 @@ public class RegistrationCodeService {
         String raw = generateRawToken();
         String prefix = raw.substring(0, Math.min(12, raw.length()));
         String hash = sha256Hex(raw);
+        EnumSet<AppPermission> grantedPermissions = resolvePermissionsForNewCode(user, requestedPermissions);
 
         RegistrationCode code = new RegistrationCode();
         code.setCreatedBy(user);
@@ -70,6 +76,7 @@ public class RegistrationCodeService {
         code.setCodePrefix(prefix);
         code.setCodeHash(hash);
         code.setExpiresAt(Instant.now().plusSeconds(ttl * 60L));
+        code.setGrantedPermissions(AppPermission.toCsv(grantedPermissions));
 
         code = repo.save(code);
 
@@ -79,7 +86,8 @@ public class RegistrationCodeService {
                 code.getCodePrefix(),
                 raw,
                 code.getCreatedAt(),
-                code.getExpiresAt()
+                code.getExpiresAt(),
+                AppPermission.toApiValues(grantedPermissions)
         );
     }
 
@@ -98,7 +106,8 @@ public class RegistrationCodeService {
                         c.getExpiresAt(),
                         c.getUsedAt(),
                         c.getRevokedAt(),
-                        c.getUsedBy()
+                        c.getUsedBy(),
+                        AppPermission.toApiValues(AppPermission.fromCsv(c.getGrantedPermissions(), true))
                 ))
                 .toList();
     }
@@ -122,7 +131,7 @@ public class RegistrationCodeService {
     }
 
     @Transactional
-    public void consume(String rawCode, String newUsername) {
+    public ConsumedRegistrationCode consume(String rawCode, String newUsername) {
         if (rawCode == null || rawCode.isBlank()) {
             throw new IllegalArgumentException("Codigo requerido.");
         }
@@ -138,9 +147,35 @@ public class RegistrationCodeService {
             throw new IllegalArgumentException("Codigo expirado.");
         }
 
+        EnumSet<AppPermission> granted = AppPermission.fromCsv(code.getGrantedPermissions(), true);
+
         code.setUsedAt(Instant.now());
         code.setUsedBy(newUsername);
         repo.save(code);
+
+        return new ConsumedRegistrationCode(
+                AppPermission.toCsv(granted),
+                AppPermission.toApiValues(granted)
+        );
+    }
+
+    private EnumSet<AppPermission> resolvePermissionsForNewCode(AppUser creator, List<String> requestedPermissions) {
+        EnumSet<AppPermission> creatorPermissions = AppPermission.resolveForUser(creator);
+        EnumSet<AppPermission> granted;
+
+        if (requestedPermissions == null || requestedPermissions.isEmpty()) {
+            granted = EnumSet.copyOf(creatorPermissions);
+        } else {
+            granted = AppPermission.fromRequestList(requestedPermissions, false);
+        }
+
+        if (granted.isEmpty()) {
+            throw new IllegalArgumentException("Debes seleccionar al menos un permiso.");
+        }
+        if (!creatorPermissions.containsAll(granted)) {
+            throw new AccessDeniedException("No puedes delegar permisos que no tienes.");
+        }
+        return granted;
     }
 
     private String generateRawToken() {
@@ -157,5 +192,8 @@ public class RegistrationCodeService {
         } catch (Exception e) {
             throw new IllegalStateException("SHA-256 no disponible", e);
         }
+    }
+
+    public record ConsumedRegistrationCode(String grantedPermissionsCsv, List<String> grantedPermissions) {
     }
 }
