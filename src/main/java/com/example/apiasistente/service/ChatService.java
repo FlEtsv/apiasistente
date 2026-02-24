@@ -4,6 +4,7 @@ import com.example.apiasistente.model.dto.*;
 import com.example.apiasistente.model.entity.*;
 import com.example.apiasistente.repository.*;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,6 +37,9 @@ public class ChatService {
      */
     @Value("${rag.max-history:40}")
     private int maxHistory;
+
+    @Value("${rag.retrieval.user-turns:3}")
+    private int retrievalUserTurns;
 
     public ChatService(
             ChatSessionRepository sessionRepo,
@@ -97,10 +101,11 @@ public class ChatService {
         userMsg.setSession(session);
         userMsg.setRole(ChatMessage.Role.USER);
         userMsg.setContent(userText);
-        messageRepo.save(userMsg);
+        userMsg = messageRepo.save(userMsg);
 
-        // 5) RAG: recuperar chunks relevantes
-        var scored = ragService.retrieveTopKForOwnerOrGlobal(userText, username);
+        // 5) RAG: recuperar chunks relevantes (query enriquecida con turnos previos del usuario)
+        String retrievalQuery = buildRetrievalQuery(session.getId(), userText);
+        var scored = ragService.retrieveTopKForOwnerOrGlobal(retrievalQuery, username);
         List<SourceDto> sources = ragService.toSourceDtos(scored);
 
         // 6) Construir mensajes para Ollama
@@ -111,14 +116,7 @@ public class ChatService {
         msgs.add(new OllamaClient.Message("system", prompt.getContent()));
 
         // histÃƒÂ³rico (ÃƒÂºltimos N)
-        var historyDesc = messageRepo.findTop50BySession_IdOrderByCreatedAtDesc(session.getId());
-        historyDesc.stream()
-                .sorted(Comparator.comparing(ChatMessage::getCreatedAt))
-                .skip(Math.max(0, historyDesc.size() - maxHistory))
-                .forEach(m -> msgs.add(new OllamaClient.Message(
-                        m.getRole() == ChatMessage.Role.USER ? "user" : "assistant",
-                        m.getContent()
-                )));
+        appendRecentHistory(msgs, session.getId(), userMsg.getId());
 
         // bloque RAG + pregunta del usuario
         msgs.add(new OllamaClient.Message("user", buildRagBlock(userText, scored)));
@@ -135,13 +133,7 @@ public class ChatService {
         assistantMsg = messageRepo.save(assistantMsg);
 
         // 9) Log de fuentes (relaciÃƒÂ³n mensaje -> chunks)
-        for (var sc : scored) {
-            ChatMessageSource link = new ChatMessageSource();
-            link.setMessage(assistantMsg);
-            link.setChunk(sc.chunk());
-            link.setScore(sc.score());
-            sourceRepo.save(link);
-        }
+        persistSources(assistantMsg, scored);
 
         // 10) actualizar actividad
         touchSession(session);
@@ -171,23 +163,19 @@ public class ChatService {
         userMsg.setSession(session);
         userMsg.setRole(ChatMessage.Role.USER);
         userMsg.setContent(userText);
-        messageRepo.save(userMsg);
+        userMsg = messageRepo.save(userMsg);
 
-        var scored = ragService.retrieveTopKForOwnerOrGlobal(userText, username);
+        String retrievalQuery = buildRetrievalQuery(session.getId(), userText);
+        var scored = hasText(normalizedExternalUserId)
+                ? ragService.retrieveTopKForOwnerScopedAndGlobal(retrievalQuery, username, normalizedExternalUserId)
+                : ragService.retrieveTopKForOwnerOrGlobal(retrievalQuery, username);
         List<SourceDto> sources = ragService.toSourceDtos(scored);
 
         List<OllamaClient.Message> msgs = new ArrayList<>();
         SystemPrompt prompt = session.getSystemPrompt();
         msgs.add(new OllamaClient.Message("system", prompt.getContent()));
 
-        var historyDesc = messageRepo.findTop50BySession_IdOrderByCreatedAtDesc(session.getId());
-        historyDesc.stream()
-                .sorted(Comparator.comparing(ChatMessage::getCreatedAt))
-                .skip(Math.max(0, historyDesc.size() - maxHistory))
-                .forEach(m -> msgs.add(new OllamaClient.Message(
-                        m.getRole() == ChatMessage.Role.USER ? "user" : "assistant",
-                        m.getContent()
-                )));
+        appendRecentHistory(msgs, session.getId(), userMsg.getId());
 
         msgs.add(new OllamaClient.Message("user", buildRagBlock(userText, scored)));
 
@@ -200,13 +188,7 @@ public class ChatService {
         assistantMsg.setContent(assistantText);
         assistantMsg = messageRepo.save(assistantMsg);
 
-        for (var sc : scored) {
-            ChatMessageSource link = new ChatMessageSource();
-            link.setMessage(assistantMsg);
-            link.setChunk(sc.chunk());
-            link.setScore(sc.score());
-            sourceRepo.save(link);
-        }
+        persistSources(assistantMsg, scored);
 
         touchSession(session);
         return new ChatResponse(session.getId(), assistantText, sources);
@@ -446,6 +428,91 @@ public class ChatService {
 
     private boolean hasText(String s) {
         return s != null && !s.isBlank();
+    }
+
+    private String buildRetrievalQuery(String sessionId, String userText) {
+        String current = userText == null ? "" : userText.trim();
+        if (current.isBlank()) {
+            return "";
+        }
+
+        int turns = Math.max(1, retrievalUserTurns);
+        if (turns <= 1) {
+            return current;
+        }
+
+        List<ChatMessage> userTurnsDesc = messageRepo.findRecentBySessionAndRole(
+                sessionId,
+                ChatMessage.Role.USER,
+                PageRequest.of(0, turns)
+        );
+
+        if (userTurnsDesc.size() <= 1) {
+            return current;
+        }
+
+        StringBuilder sb = new StringBuilder(current.length() + 320);
+        sb.append(current);
+        sb.append("\n\nContexto reciente del usuario:\n");
+
+        boolean appendedAny = false;
+        for (int i = userTurnsDesc.size() - 1; i >= 1; i--) {
+            String previous = collapseSpaces(userTurnsDesc.get(i).getContent());
+            if (previous.isBlank()) {
+                continue;
+            }
+            if (previous.length() > 220) {
+                previous = previous.substring(0, 220);
+            }
+            sb.append("- ").append(previous).append('\n');
+            appendedAny = true;
+        }
+
+        return appendedAny ? sb.toString() : current;
+    }
+
+    private String collapseSpaces(String text) {
+        if (text == null || text.isBlank()) {
+            return "";
+        }
+        return text.replaceAll("\\s+", " ").trim();
+    }
+
+    private void appendRecentHistory(List<OllamaClient.Message> target, String sessionId, Long excludeMessageId) {
+        int historyLimit = Math.max(0, maxHistory);
+        if (historyLimit == 0) {
+            return;
+        }
+
+        List<ChatMessage> recentDesc = messageRepo.findRecentForContext(
+                sessionId,
+                excludeMessageId,
+                PageRequest.of(0, historyLimit)
+        );
+
+        for (int i = recentDesc.size() - 1; i >= 0; i--) {
+            ChatMessage m = recentDesc.get(i);
+            target.add(new OllamaClient.Message(
+                    m.getRole() == ChatMessage.Role.USER ? "user" : "assistant",
+                    m.getContent()
+            ));
+        }
+    }
+
+    private void persistSources(ChatMessage assistantMsg, List<RagService.ScoredChunk> scored) {
+        if (scored == null || scored.isEmpty()) {
+            return;
+        }
+
+        List<ChatMessageSource> links = new ArrayList<>(scored.size());
+        for (var sc : scored) {
+            ChatMessageSource link = new ChatMessageSource();
+            link.setMessage(assistantMsg);
+            link.setChunk(sc.chunk());
+            link.setScore(sc.score());
+            links.add(link);
+        }
+        sourceRepo.saveAll(links);
     }
 
     /**

@@ -32,7 +32,13 @@ public interface KnowledgeChunkRepository extends JpaRepository<KnowledgeChunk, 
     Slice<EmbeddingView> findEmbeddingPageByOwners(@Param("owners") List<String> owners, Pageable pageable);
 
     // Para traer chunks con documento
-    List<KnowledgeChunk> findWithDocumentByIdIn(List<Long> ids);
+    @Query("""
+        select c
+        from KnowledgeChunk c
+        join fetch c.document d
+        where c.id in :ids
+    """)
+    List<KnowledgeChunk> findWithDocumentByIdIn(@Param("ids") List<Long> ids);
 
     // NUEVO: borrar chunks de un doc al re-upsert
     void deleteByDocument_Id(Long documentId);

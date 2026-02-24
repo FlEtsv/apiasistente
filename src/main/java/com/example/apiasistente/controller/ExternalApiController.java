@@ -73,16 +73,40 @@ public class ExternalApiController {
 
     @PostMapping("/rag/documents")
     public UpsertDocumentResponse upsert(@Valid @RequestBody UpsertDocumentRequest req, Principal principal) {
-        String owner = resolveUsername(principal);
-        var doc = ragService.upsertDocumentForOwner(owner, req.getTitle(), req.getContent());
+        resolveUsername(principal);
+        var doc = ragService.upsertDocument(req.getTitle(), req.getContent());
         return new UpsertDocumentResponse(doc.getId(), doc.getTitle());
     }
 
     @PostMapping("/rag/documents/batch")
     public List<UpsertDocumentResponse> upsertBatch(@Valid @RequestBody List<UpsertDocumentRequest> reqs, Principal principal) {
-        String owner = resolveUsername(principal);
+        resolveUsername(principal);
         return reqs.stream().map(r -> {
-            var doc = ragService.upsertDocumentForOwner(owner, r.getTitle(), r.getContent());
+            var doc = ragService.upsertDocument(r.getTitle(), r.getContent());
+            return new UpsertDocumentResponse(doc.getId(), doc.getTitle());
+        }).toList();
+    }
+
+    @PostMapping("/rag/users/{externalUserId}/documents")
+    public UpsertDocumentResponse upsertForExternalUser(@PathVariable String externalUserId,
+                                                        @Valid @RequestBody UpsertDocumentRequest req,
+                                                        Principal principal,
+                                                        HttpServletRequest request) {
+        resolveUsername(principal);
+        String scopedOwner = resolveScopedExternalOwner(externalUserId, request);
+        var doc = ragService.upsertDocumentForOwner(scopedOwner, req.getTitle(), req.getContent());
+        return new UpsertDocumentResponse(doc.getId(), doc.getTitle());
+    }
+
+    @PostMapping("/rag/users/{externalUserId}/documents/batch")
+    public List<UpsertDocumentResponse> upsertBatchForExternalUser(@PathVariable String externalUserId,
+                                                                   @Valid @RequestBody List<UpsertDocumentRequest> reqs,
+                                                                   Principal principal,
+                                                                   HttpServletRequest request) {
+        resolveUsername(principal);
+        String scopedOwner = resolveScopedExternalOwner(externalUserId, request);
+        return reqs.stream().map(r -> {
+            var doc = ragService.upsertDocumentForOwner(scopedOwner, r.getTitle(), r.getContent());
             return new UpsertDocumentResponse(doc.getId(), doc.getTitle());
         }).toList();
     }
@@ -116,6 +140,28 @@ public class ExternalApiController {
 
     private String scopedExternalUser(Long apiKeyId, String externalUserId) {
         return "key:" + apiKeyId + "|user:" + externalUserId;
+    }
+
+    private String resolveScopedExternalOwner(String rawExternalUserId, HttpServletRequest request) {
+        boolean specialKey = Boolean.TRUE.equals(request.getAttribute(ApiKeyAuthFilter.ATTR_SPECIAL_KEY));
+        if (!specialKey) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "Esta API key no tiene modo especial habilitado para RAG por usuario externo."
+            );
+        }
+
+        Long apiKeyId = (Long) request.getAttribute(ApiKeyAuthFilter.ATTR_API_KEY_ID);
+        if (apiKeyId == null) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Contexto de API key no disponible.");
+        }
+
+        String externalUserId = normalizeExternalUserId(rawExternalUserId);
+        if (!hasText(externalUserId)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "externalUserId es obligatorio.");
+        }
+
+        return scopedExternalUser(apiKeyId, externalUserId);
     }
 
     private boolean hasText(String s) {

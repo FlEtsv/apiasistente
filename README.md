@@ -82,6 +82,8 @@ docker compose up -d
 - `DELETE /api/chat/sessions`
 - `POST /api/rag/documents`
 - `POST /api/rag/documents/batch`
+- `POST /api/rag/users/{username}/documents`
+- `POST /api/rag/users/{username}/documents/batch`
 - `POST /api/rag/memory`
 - `GET /api/monitor/server`
 - `GET /api/monitor/alerts`
@@ -91,6 +93,8 @@ docker compose up -d
 - `POST /api/ext/chat`
 - `POST /api/ext/rag/documents`
 - `POST /api/ext/rag/documents/batch`
+- `POST /api/ext/rag/users/{externalUserId}/documents`
+- `POST /api/ext/rag/users/{externalUserId}/documents/batch`
 - `POST /api/ext/rag/memory`
 - `GET /api/ext/monitor/server`
 - `GET /api/ext/monitor/alerts`

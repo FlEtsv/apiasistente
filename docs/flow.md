@@ -14,8 +14,10 @@ Este documento resume como circulan datos y requests en el sistema.
 
 ## 2) Ingesta de conocimiento RAG
 
-1. El cliente envia `POST /api/rag/documents` o `POST /api/ext/rag/documents`.
-2. Se valida payload y ownership.
+1. El cliente envia `POST /api/rag/documents` o `POST /api/ext/rag/documents` para contexto global,
+   o bien `POST /api/rag/users/{username}/documents` / `POST /api/ext/rag/users/{externalUserId}/documents`
+   para contexto individual.
+2. Se valida payload y ownership del namespace de destino.
 3. El contenido se divide en chunks.
 4. Cada chunk genera embedding via Ollama.
 5. Se persiste documento y chunks vectorizados.
@@ -42,11 +44,13 @@ Este documento resume como circulan datos y requests en el sistema.
 ### Web (sesion)
 - Chat: `/api/chat`, `/api/chat/sessions`, `/api/chat/active`
 - RAG: `/api/rag/documents`, `/api/rag/documents/batch`, `/api/rag/memory`
+  y rutas por usuario `/api/rag/users/{username}/documents` (+ `/batch`)
 - Monitor: `/api/monitor/server`, `/api/monitor/alerts`, `/api/monitor/alerts/state`
 
 ### Externa (API key)
 - Chat: `/api/ext/chat`
 - RAG: `/api/ext/rag/documents`, `/api/ext/rag/documents/batch`, `/api/ext/rag/memory`
+  y rutas por usuario externo `/api/ext/rag/users/{externalUserId}/documents` (+ `/batch`)
 - Monitor: `/api/ext/monitor/server`, `/api/ext/monitor/alerts`, `/api/ext/monitor/alerts/state`
 
 ## 6) Ejemplos curl (externo)

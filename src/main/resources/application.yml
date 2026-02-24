@@ -46,6 +46,9 @@ rag:
   top-k: 5
   # Máximo de mensajes previos en el historial de contexto.
   max-history: 40
+  retrieval:
+    # Turnos previos del usuario para enriquecer la consulta de retrieval.
+    user-turns: 3
   cache:
     # Cachea embeddings/chunks para acelerar respuestas repetidas.
     enabled: true
@@ -54,10 +57,22 @@ rag:
     size: 900
     overlap: 150
   rerank:
-    # Numero de candidatos previos al rerank con MMR.
-    candidates: 12
+    # Numero de candidatos semánticos previos al rerank con MMR.
+    candidates: 24
     # Mezcla entre relevancia y diversidad (0-1).
     lambda: 0.65
+  hybrid:
+    # Peso de score semántico vs lexical en ranking final.
+    semantic-weight: 0.80
+    lexical-weight: 0.20
+    # Bonus cuando la frase normalizada aparece de forma exacta.
+    exact-match-boost: 0.12
+  owner:
+    # Asegura candidatos mínimos por owner (global/privado) antes de fusionar.
+    min-candidates-per-owner: 10
+    # Pequeños boosts para que convivan mejor contextos globales y privados.
+    global-boost: 0.03
+    user-boost: 0.05
   score:
     # Puntaje minimo para aceptar un chunk en la busqueda inicial.
     min: -1.0
