@@ -30,7 +30,10 @@
 
         * { box-sizing: border-box; }
         .hidden { display: none !important; }
-        html, body { min-height: 100%; }
+        html, body {
+            height: 100%;
+            min-height: 100%;
+        }
         a, button, input, select { font: inherit; }
         button, input, select { max-width: 100%; }
         body {
@@ -59,8 +62,12 @@
         .app {
             display: grid;
             grid-template-columns: clamp(220px, 22vw, 280px) minmax(0, 1fr);
+            height: 100vh;
+            height: 100dvh;
             min-height: 100vh;
             min-height: 100dvh;
+            max-height: 100dvh;
+            overflow: hidden;
         }
 
         .sidebar {
@@ -181,6 +188,7 @@
         .main {
             min-width: 0;
             padding: clamp(14px, 2vw, 26px);
+            height: 100%;
             min-height: 100vh;
             min-height: 100dvh;
             display: flex;
@@ -267,10 +275,12 @@
         .workspace {
             display: grid;
             grid-template-columns: minmax(220px, 280px) minmax(0, 1fr) minmax(260px, 320px);
+            grid-template-rows: minmax(0, 1fr);
             gap: 16px;
             flex: 1 1 auto;
             min-height: 0;
             min-width: 0;
+            overflow: hidden;
         }
 
         .workspace > * {
@@ -363,6 +373,7 @@
         .chat-panel {
             display: flex;
             flex-direction: column;
+            height: 100%;
             min-height: 0;
         }
 
@@ -371,6 +382,7 @@
             min-height: 0;
             padding: 18px;
             overflow-y: auto;
+            overscroll-behavior: contain;
         }
 
         .empty-state {
@@ -620,7 +632,12 @@
         }
 
         @media (max-width: 980px) {
-            .app { grid-template-columns: 1fr; }
+            .app {
+                grid-template-columns: 1fr;
+                height: auto;
+                max-height: none;
+                overflow: visible;
+            }
             .sidebar {
                 position: relative;
                 top: auto;
@@ -641,7 +658,10 @@
                 flex: 0 0 auto;
             }
             .sidebar-footer { width: 100%; }
-            .main { min-height: 0; }
+            .main {
+                min-height: 0;
+                height: auto;
+            }
             .workspace { grid-template-columns: 1fr; }
             .sessions-panel { display: none; }
             .topbar { flex-direction: column; align-items: flex-start; }
