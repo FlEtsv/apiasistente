@@ -158,6 +158,9 @@ public class ChatService {
                 ? ragService.retrieveTopKForOwnerScopedAndGlobal(retrievalQuery, username, normalizedExternalUserId)
                 : ragService.retrieveTopKForOwnerOrGlobal(retrievalQuery, username);
         List<SourceDto> sources = ragService.toSourceDtos(scored);
+        boolean hasRagContext = hasRagContext(scored);
+        boolean complexQuery = ChatPromptSignals.isComplexQuery(userText);
+        boolean multiStepQuery = ChatPromptSignals.isMultiStepQuery(userText);
 
         List<OllamaClient.Message> msgs = new ArrayList<>();
         SystemPrompt prompt = session.getSystemPrompt();
@@ -168,7 +171,17 @@ public class ChatService {
         String visualBridge = buildVisualBridgeContext(userText, preparedMedia, requestedModel);
         msgs.add(new OllamaClient.Message("user", buildRagBlock(userText, scored, visualBridge, preparedMedia)));
 
-        String model = modelSelector.resolveChatModel(requestedModel);
+        String model = modelSelector.resolveChatModel(requestedModel, hasRagContext, complexQuery, multiStepQuery);
+        if (log.isDebugEnabled()) {
+            log.debug(
+                    "Model routing selected='{}' requested='{}' rag={} complex={} multiStep={}",
+                    model,
+                    requestedModel,
+                    hasRagContext,
+                    complexQuery,
+                    multiStepQuery
+            );
+        }
         String assistantText = ollama.chat(msgs, model);
         assistantText = applyResponseGuard(userText, assistantText, scored);
 
@@ -405,6 +418,10 @@ public class ChatService {
         return s != null && !s.isBlank();
     }
 
+    private boolean hasRagContext(List<RagService.ScoredChunk> scored) {
+        return scored != null && !scored.isEmpty();
+    }
+
     private String buildRetrievalQuery(String sessionId, String userText, List<PreparedMedia> media) {
         String current = collapseSpaces(userText);
         if (current.isBlank()) {
@@ -569,7 +586,9 @@ public class ChatService {
         }
 
         String original = assistantText.trim();
-        if (original.length() < Math.max(80, responseGuardMinAnswerChars)) {
+        boolean triggeredByLength = original.length() >= Math.max(80, responseGuardMinAnswerChars);
+        boolean triggeredByFiller = ChatPromptSignals.hasLikelyFiller(original);
+        if (!triggeredByLength && !triggeredByFiller) {
             return original;
         }
 
@@ -629,7 +648,8 @@ public class ChatService {
             }
 
             String clean = refined.trim();
-            if (clean.length() < 80) {
+            int minGuardOutputChars = triggeredByLength ? 80 : 40;
+            if (clean.length() < minGuardOutputChars) {
                 return original;
             }
             if (clean.length() > original.length() + 220) {
@@ -646,7 +666,12 @@ public class ChatService {
             }
 
             double ratio = (double) clean.length() / (double) Math.max(1, original.length());
-            double minRatio = responseGuardStrictMode ? 0.22 : 0.35;
+            double minRatio;
+            if (triggeredByFiller) {
+                minRatio = responseGuardStrictMode ? 0.16 : 0.25;
+            } else {
+                minRatio = responseGuardStrictMode ? 0.22 : 0.35;
+            }
             if (ratio < minRatio) {
                 return original;
             }
@@ -702,6 +727,10 @@ public class ChatService {
                 .map(PreparedMedia::imageBase64)
                 .filter(this::hasText)
                 .toList();
+        if (images.isEmpty()) {
+            // Politica: el modelo visual solo se ejecuta para entradas con imagen.
+            return "";
+        }
 
         StringBuilder prompt = new StringBuilder();
         prompt.append("Analiza el material visual/documental y extrae hechos verificables.\n");
@@ -710,22 +739,16 @@ public class ChatService {
         prompt.append("2) Datos concretos\n");
         prompt.append("3) Incertidumbres o limites\n\n");
 
-        boolean hasDocText = false;
         for (PreparedMedia m : media) {
             if (!hasText(m.documentText())) {
                 continue;
             }
-            hasDocText = true;
             String text = m.documentText();
             if (text.length() > 2200) {
                 text = text.substring(0, 2200);
             }
             prompt.append("Documento '").append(m.name()).append("':\n");
             prompt.append(text).append("\n\n");
-        }
-
-        if (!hasDocText && images.isEmpty()) {
-            return "";
         }
 
         prompt.append("Pregunta del usuario: ").append(userText);

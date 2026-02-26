@@ -899,9 +899,10 @@
                         <input id="input" type="text" placeholder="Escribe tu consulta aqui..." autocomplete="off" />
                         <button id="send">Enviar</button>
                         <select id="modelSelect">
-                            <option value="default">qwen2.5:32b (Calidad)</option>
-                            <option value="fast">qwen3.0:14b (Rapido)</option>
-                            <option value="visual">Qwen-VL (Vision)</option>
+                            <option value="auto">Auto (gemma2:9b 60-70%)</option>
+                            <option value="fast">Rapido (gemma2:9b)</option>
+                            <option value="chat">Complejo/RAG (llama3.1:8b)</option>
+                            <option value="visual">Vision (qwen2.5vl:7b)</option>
                         </select>
                     </div>
                     <div class="composer-tools">
@@ -1136,4 +1137,3 @@
 
 </body>
 </html>
-

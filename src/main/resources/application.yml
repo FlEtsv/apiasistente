@@ -35,61 +35,61 @@ ollama:
   base-url: ${OLLAMA_BASE_URL:http://192.168.1.61:11434/api}
   #base-url: ${OLLAMA_BASE_URL:http://ollama:11434/api}
   # Modelo para generaciÃ³n de chat.
-  chat-model: qwen2.5:32b
+  chat-model: llama3.1:8b
   # Modelo rÃ¡pido para chats ligeros (menor consumo).
-  fast-chat-model: qwen3:14b
+  fast-chat-model: gemma2:9b
   # Modelo visual para etapa intermedia de imagen/camara/documento.
   visual-model: qwen2.5vl:7b
   # Mini-modelo opcional para depurar respuestas y quitar relleno.
-  response-guard-model: ${OLLAMA_RESPONSE_GUARD_MODEL:qwen2.5:3b}
+  response-guard-model: ${OLLAMA_RESPONSE_GUARD_MODEL:mistral:7b}
   # Modelo para embeddings de RAG.
   embed-model: nomic-embed-text:latest
 
 rag:
   # NÃºmero de chunks mÃ¡s relevantes a recuperar por consulta.
-  top-k: 5
+  top-k: 6
   # MÃ¡ximo de mensajes previos en el historial de contexto.
-  max-history: 40
+  max-history: 16
   retrieval:
     # Turnos previos del usuario para enriquecer la consulta de retrieval.
-    user-turns: 3
+    user-turns: 2
   cache:
     # Cachea embeddings/chunks para acelerar respuestas repetidas.
     enabled: true
   chunk:
     # TamaÃ±o y solapamiento de cada chunk de texto.
-    size: 900
-    overlap: 150
+    size: 700
+    overlap: 120
   rerank:
     # Numero de candidatos semÃ¡nticos previos al rerank con MMR.
-    candidates: 24
+    candidates: 10
     # Mezcla entre relevancia y diversidad (0-1).
-    lambda: 0.65
+    lambda: 0.70
   hybrid:
     # Peso de score semÃ¡ntico vs lexical en ranking final.
-    semantic-weight: 0.80
-    lexical-weight: 0.20
+    semantic-weight: 0.85
+    lexical-weight: 0.15
     # Bonus cuando la frase normalizada aparece de forma exacta.
-    exact-match-boost: 0.12
+    exact-match-boost: 0.10
   owner:
     # Asegura candidatos mÃ­nimos por owner (global/privado) antes de fusionar.
-    min-candidates-per-owner: 10
+    min-candidates-per-owner: 8
     # PequeÃ±os boosts para que convivan mejor contextos globales y privados.
     global-boost: 0.03
     user-boost: 0.05
   score:
     # Puntaje minimo para aceptar un chunk en la busqueda inicial.
-    min: -1.0
+    min: 0.22
 
 chat:
   queue:
     # Retraso en ms para suavizar picos de trÃ¡fico por sesiÃ³n.
-    delay-ms: 25
+    delay-ms: 15
   response-guard:
     # Segunda pasada para eliminar informacion innecesaria en la respuesta final.
     enabled: true
     # Evita costo extra en respuestas muy cortas.
-    min-answer-chars: 260
+    min-answer-chars: 320
     # Modo estricto: recorte mas agresivo de relleno.
     strict-mode: true
 

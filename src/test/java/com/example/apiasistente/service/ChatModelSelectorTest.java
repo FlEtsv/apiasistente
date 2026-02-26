@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class ChatModelSelectorTest {
 
     @Test
-    void resolveChatModelPrefersConfiguredAliases() {
+    void resolveChatModelAppliesAutoRoutingPolicy() {
         OllamaProperties props = new OllamaProperties();
         props.setChatModel("qwen2.5:32b");
         props.setFastChatModel("qwen3.0:14b");
@@ -18,8 +18,25 @@ class ChatModelSelectorTest {
 
         ChatModelSelector selector = new ChatModelSelector(props);
 
-        assertEquals("qwen2.5:32b", selector.resolveChatModel(null));
-        assertEquals("qwen2.5:32b", selector.resolveChatModel("default"));
+        assertEquals("qwen3.0:14b", selector.resolveChatModel(null));
+        assertEquals("qwen3.0:14b", selector.resolveChatModel("default"));
+        assertEquals("qwen3.0:14b", selector.resolveChatModel("auto"));
+        assertEquals("qwen2.5:32b", selector.resolveChatModel("auto", true, false, false));
+        assertEquals("qwen2.5:32b", selector.resolveChatModel("auto", false, true, false));
+        assertEquals("qwen2.5:32b", selector.resolveChatModel("auto", false, false, true));
+    }
+
+    @Test
+    void resolveChatModelSupportsExplicitAliasesAndExactMatches() {
+        OllamaProperties props = new OllamaProperties();
+        props.setChatModel("qwen2.5:32b");
+        props.setFastChatModel("qwen3.0:14b");
+        props.setVisualModel("qwen-vl:latest");
+        props.setResponseGuardModel("qwen2.5:3b");
+
+        ChatModelSelector selector = new ChatModelSelector(props);
+
+        assertEquals("qwen2.5:32b", selector.resolveChatModel("chat"));
         assertEquals("qwen3.0:14b", selector.resolveChatModel("fast"));
         assertEquals("qwen2.5:32b", selector.resolveChatModel("visual"));
         assertEquals("qwen2.5:32b", selector.resolveChatModel("qwen-vl:latest"));

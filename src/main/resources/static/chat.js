@@ -314,8 +314,12 @@ function setSidLabel(id) {
 
 function loadModelSelection() {
   if (!modelSelectEl) return;
-  const saved = localStorage.getItem(MODEL_STORAGE_KEY);
-  if (saved) {
+  const options = Array.from(modelSelectEl.options).map(o => o.value);
+  let saved = localStorage.getItem(MODEL_STORAGE_KEY);
+  if (saved === 'default') {
+    saved = 'auto';
+  }
+  if (saved && options.includes(saved)) {
     modelSelectEl.value = saved;
   }
   modelSelectEl.addEventListener('change', () => {

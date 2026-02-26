@@ -10,6 +10,8 @@ import org.springframework.stereotype.Component;
 public class ChatModelSelector {
 
     public static final String DEFAULT_ALIAS = "default";
+    public static final String AUTO_ALIAS = "auto";
+    public static final String CHAT_ALIAS = "chat";
     public static final String FAST_ALIAS = "fast";
     public static final String VISUAL_ALIAS = "visual";
 
@@ -21,18 +23,37 @@ public class ChatModelSelector {
 
     /**
      * Resuelve el modelo solicitado por el cliente.
-     * - null o vacio -> modelo principal
-     * - "default" o nombre exacto -> modelo principal
-     * - "fast" o nombre exacto -> modelo rapido
+     * Politica:
+     * - "auto"/"default"/null -> fast por defecto; sube a chat si hay RAG/consulta compleja/multi-paso.
+     * - "chat" o nombre exacto del modelo principal -> modelo principal.
+     * - "fast" o nombre exacto del modelo rapido -> modelo rapido.
      */
     public String resolveChatModel(String requested) {
+        return resolveChatModel(requested, false, false, false);
+    }
+
+    public String resolveChatModel(String requested,
+                                   boolean hasRagContext,
+                                   boolean complexQuery,
+                                   boolean multiStepQuery) {
         String trimmed = requested == null ? "" : requested.trim();
         String defaultModel = normalize(properties.getChatModel());
         String fastModel = normalize(properties.getFastChatModel());
         String visualModel = normalize(properties.getVisualModel());
 
-        // Sin preferencia: elige principal o rapido como fallback.
-        if (trimmed.isEmpty() || DEFAULT_ALIAS.equalsIgnoreCase(trimmed)) {
+        // Modo auto: usa fast en simple, chat en RAG/consultas complejas/multi-paso.
+        if (isAutoRequest(trimmed)) {
+            boolean requiresChatModel = hasRagContext || complexQuery || multiStepQuery;
+            String resolved = requiresChatModel
+                    ? firstNonBlank(defaultModel, fastModel, null)
+                    : firstNonBlank(fastModel, defaultModel, null);
+            if (resolved == null) {
+                throw new IllegalArgumentException("No hay modelos de chat configurados.");
+            }
+            return resolved;
+        }
+        // Alias "chat": fuerza el modelo principal.
+        if (CHAT_ALIAS.equalsIgnoreCase(trimmed)) {
             String resolved = firstNonBlank(defaultModel, fastModel, null);
             if (resolved == null) {
                 throw new IllegalArgumentException("No hay modelos de chat configurados.");
@@ -114,5 +135,12 @@ public class ChatModelSelector {
         if (value == null) return null;
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private static boolean isAutoRequest(String requested) {
+        return requested == null
+                || requested.isBlank()
+                || DEFAULT_ALIAS.equalsIgnoreCase(requested)
+                || AUTO_ALIAS.equalsIgnoreCase(requested);
     }
 }
