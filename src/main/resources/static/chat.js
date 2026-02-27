@@ -232,7 +232,7 @@ function clearWelcomeIfNeeded() {
   if (chatEl.querySelector('.opacity-50')) chatEl.innerHTML = '';
 }
 
-function addMsg(who, text, sources = []) {
+function addMsg(who, text, sources = [], meta = null) {
   clearWelcomeIfNeeded();
 
   const wrapper = document.createElement('div');
@@ -240,6 +240,7 @@ function addMsg(who, text, sources = []) {
 
   const div = document.createElement('div');
   const isUser = who === 'user';
+  const ragUsed = !isUser && meta && meta.ragUsed === true;
 
   const baseClasses = "max-w-[92%] sm:max-w-[85%] lg:max-w-[75%] px-5 py-3 rounded-2xl shadow-xl text-sm leading-relaxed transition-all";
   const userClasses = "bg-blue-600 text-white rounded-tr-none ml-3 sm:ml-12";
@@ -260,7 +261,7 @@ function addMsg(who, text, sources = []) {
   }
   div.appendChild(content);
 
-  if (!isUser && sources && sources.length > 0) {
+  if (!isUser && ragUsed && sources && sources.length > 0) {
     const sourcesDiv = document.createElement('div');
     sourcesDiv.className = "mt-4 pt-3 border-t border-slate-700/50 space-y-2";
 
@@ -285,11 +286,32 @@ function addMsg(who, text, sources = []) {
     div.appendChild(sourcesDiv);
   }
 
+  if (!isUser && meta && typeof meta === 'object') {
+    if (ragUsed) {
+      const safe = meta.safe !== false;
+      const confidence = Number.isFinite(meta.confidence) ? Math.max(0, Math.min(1, meta.confidence)) : 0;
+      const groundedSources = Number.isFinite(meta.groundedSources) ? Math.max(0, meta.groundedSources) : 0;
+
+      const badge = document.createElement('div');
+      badge.className = `mt-3 text-[10px] px-2 py-1 inline-flex items-center gap-2 rounded-full border ${
+        safe
+          ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
+          : 'border-amber-500/40 bg-amber-500/10 text-amber-200'
+      }`;
+      badge.textContent = `${safe ? 'Grounding OK' : 'No seguro'} - Confianza ${Math.round(confidence * 100)}% - Fuentes ${groundedSources}`;
+      div.appendChild(badge);
+    } else {
+      const badge = document.createElement('div');
+      badge.className = 'mt-3 text-[10px] px-2 py-1 inline-flex items-center gap-2 rounded-full border border-slate-600/50 bg-slate-700/20 text-slate-300';
+      badge.textContent = 'Modo: Chat rapido (sin RAG)';
+      div.appendChild(badge);
+    }
+  }
+
   wrapper.appendChild(div);
   chatEl.appendChild(wrapper);
   scrollDown();
 }
-
 function showTyping() {
   const id = 'typing-' + Date.now();
   const html = `
@@ -525,9 +547,9 @@ function applyMonitorInterval() {
 }
 
 async function ensureActiveSession() {
-  // El backend decide cuál es la sesión activa real del usuario
+  // El backend decide cual es la sesion activa real del usuario
   const res = await fetch('/api/chat/active', { headers: withCsrf() });
-  if (!res.ok) throw new Error(`No se pudo obtener sesión activa: ${res.status}`);
+  if (!res.ok) throw new Error(`No se pudo obtener sesion activa: ${res.status}`);
   const data = await res.json();
   sessionId = data.sessionId || data.id; // por si tu DTO usa otro nombre
   setSidLabel(sessionId);
@@ -549,7 +571,7 @@ async function loadHistory(id) {
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
                 d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path>
         </svg>
-        <p>Inicia una conversación...</p>
+        <p>Inicia una conversacion...</p>
       </div>
     `;
 
@@ -582,14 +604,14 @@ function renderSessions(filter = '') {
         ${isActive ? 'border-blue-500/60 bg-blue-600/10' : 'border-slate-700/40 bg-slate-900/20 hover:bg-slate-800/30'}
       `;
 
-      const title = s.title || 'Chat sin título';
+      const title = s.title || 'Chat sin titulo';
       const subtitle = (s.lastActivityAt || s.createdAt || '').toString();
 
       item.innerHTML = `
         <div class="flex items-center justify-between gap-2">
           <div class="min-w-0">
             <div class="text-sm font-semibold truncate">${title}</div>
-            <div class="text-[10px] text-slate-500 truncate">${s.id.substring(0, 8)} · ${subtitle}</div>
+            <div class="text-[10px] text-slate-500 truncate">${s.id.substring(0, 8)} - ${subtitle}</div>
           </div>
           <div class="flex items-center gap-1 shrink-0">
             <button class="rename px-2 py-1 text-[10px] rounded-lg border border-slate-700/50 hover:border-blue-500/40">Renombrar</button>
@@ -604,7 +626,7 @@ function renderSessions(filter = '') {
         await activateSession(s.id);
       });
 
-      // renombrar: botón + doble click
+      // renombrar: boton + doble click
       item.querySelector('.rename').addEventListener('click', async (e) => {
         e.stopPropagation();
         await renameSessionPrompt(s.id, title);
@@ -652,12 +674,12 @@ async function activateSession(id) {
   await loadHistory(sessionId);
   await loadSessions(); // para remarcar activo
 
-  // cerrar drawer móvil
+  // cerrar drawer movil
   hideDrawer();
 }
 
 async function createNewChat() {
-  // Si tu backend usa otra ruta, cámbiala. Ej: POST /api/chat/sessions
+  // Si tu backend usa otra ruta, cambiala. Ej: POST /api/chat/sessions
   const res = await fetch('/api/chat/sessions', {
     method: 'POST',
     headers: withCsrf({ 'Content-Type': 'application/json' }),
@@ -674,7 +696,7 @@ async function createNewChat() {
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
               d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path>
       </svg>
-      <p>Inicia una conversación...</p>
+      <p>Inicia una conversacion...</p>
     </div>
   `;
 
@@ -683,7 +705,7 @@ async function createNewChat() {
 }
 
 async function handleExternalApiKeySession(newSessionId) {
-  // Aísla el chat cuando se genera una API key externa.
+  // Aisla el chat cuando se genera una API key externa.
   if (newSessionId) {
     await activateSession(newSessionId);
     return;
@@ -781,15 +803,23 @@ async function send() {
     sessionId = data.sessionId;
     setSidLabel(sessionId);
 
-    addMsg('assistant', data.reply, data.sources);
+    const reply = (data?.reply || '').toString();
+    const responseMeta = {
+      safe: data?.safe !== false,
+      confidence: Number(data?.confidence || 0),
+      groundedSources: Number(data?.groundedSources || 0),
+      ragUsed: data?.ragUsed === true
+    };
+
+    addMsg('assistant', reply, data.sources, responseMeta);
     clearMediaSelection();
 
-    // refresca lista para ordenar por última actividad + contador
+    // refresca lista para ordenar por ultima actividad + contador
     await loadSessions();
   } catch (e) {
     const typingEl = document.getElementById(typingId);
     if (typingEl) typingEl.remove();
-    addMsg('assistant', '⚠️ Error: ' + (e.message || 'desconocido'));
+    addMsg('assistant', 'Error: ' + (e.message || 'desconocido'));
   } finally {
     sendBtn.disabled = false;
     inputEl.focus();
@@ -873,7 +903,9 @@ sessionSearchMobileEl?.addEventListener('input', () => renderSessions(sessionSea
     await loadHistory(sessionId);
   } catch (e) {
     console.error(e);
-    addMsg('assistant', '⚠️ No se pudo inicializar el chat: ' + (e.message || 'error'));
+    addMsg('assistant', 'Error: No se pudo inicializar el chat: ' + (e.message || 'error'));
   }
 })();
+
+
 

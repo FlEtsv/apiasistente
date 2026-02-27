@@ -2658,3 +2658,5 @@ curl -s "$BASE_URL/api/ext/chat" \
     \"externalUserId\": \"$END_USER_ID\"
   }"
 Si usas una key genérica con specialMode=true, devuelve 403 (comportamiento requerido).
+curl -sG "http://localhost:8082/api/integration/monitor/alerts?limit=20" \
+  -H "X-API-KEY: TU_API_KEY"

@@ -36,14 +36,34 @@ public class ChatModelSelector {
                                    boolean hasRagContext,
                                    boolean complexQuery,
                                    boolean multiStepQuery) {
+        return resolveChatModel(
+                requested,
+                hasRagContext,
+                complexQuery,
+                multiStepQuery,
+                ChatPromptSignals.IntentRoute.TASK_SIMPLE
+        );
+    }
+
+    public String resolveChatModel(String requested,
+                                   boolean hasRagContext,
+                                   boolean complexQuery,
+                                   boolean multiStepQuery,
+                                   ChatPromptSignals.IntentRoute intentRoute) {
         String trimmed = requested == null ? "" : requested.trim();
         String defaultModel = normalize(properties.getChatModel());
         String fastModel = normalize(properties.getFastChatModel());
         String visualModel = normalize(properties.getVisualModel());
 
-        // Modo auto: usa fast en simple, chat en RAG/consultas complejas/multi-paso.
+        ChatPromptSignals.IntentRoute route = intentRoute == null
+                ? ChatPromptSignals.IntentRoute.TASK_SIMPLE
+                : intentRoute;
+
+        // Modo auto: usa fast para charla/tareas simples; sube a principal cuando hay RAG o consulta exigente.
         if (isAutoRequest(trimmed)) {
-            boolean requiresChatModel = hasRagContext || complexQuery || multiStepQuery;
+            boolean isSmallTalk = route == ChatPromptSignals.IntentRoute.SMALL_TALK;
+            boolean isFactualTech = route == ChatPromptSignals.IntentRoute.FACTUAL_TECH;
+            boolean requiresChatModel = isFactualTech || hasRagContext || (!isSmallTalk && (complexQuery || multiStepQuery));
             String resolved = requiresChatModel
                     ? firstNonBlank(defaultModel, fastModel, null)
                     : firstNonBlank(fastModel, defaultModel, null);
@@ -119,6 +139,17 @@ public class ChatModelSelector {
 
     public String resolveResponseGuardModel() {
         return normalize(properties.getResponseGuardModel());
+    }
+
+    public String resolvePrimaryChatModel() {
+        String defaultModel = normalize(properties.getChatModel());
+        String fastModel = normalize(properties.getFastChatModel());
+        return firstNonBlank(defaultModel, fastModel, null);
+    }
+
+    public boolean isPrimaryChatModel(String model) {
+        String primary = resolvePrimaryChatModel();
+        return primary != null && primary.equalsIgnoreCase(normalize(model));
     }
 
     private static String firstNonBlank(String... values) {

@@ -31,11 +31,15 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class ChatService {
@@ -52,7 +56,8 @@ public class ChatService {
     private static final int MAX_RETRIEVAL_MEDIA_SNIPPET = 420;
     private static final int MAX_GUARD_QUESTION_CHARS = 1_200;
     private static final int MAX_GUARD_ANSWER_CHARS = 10_000;
-    private static final int MAX_GUARD_SOURCE_HINTS = 3;
+    private static final int MAX_GUARD_SOURCE_HINTS = 6;
+    private static final Pattern SOURCE_CITATION_PATTERN = Pattern.compile("\\[S(\\d+)]");
 
     private final ChatSessionRepository sessionRepo;
     private final ChatMessageRepository messageRepo;
@@ -77,6 +82,24 @@ public class ChatService {
 
     @Value("${chat.response-guard.strict-mode:false}")
     private boolean responseGuardStrictMode;
+
+    @Value("${chat.grounding.enabled:true}")
+    private boolean groundingEnabled;
+
+    @Value("${chat.grounding.min-chunks:2}")
+    private int groundingMinChunks;
+
+    @Value("${chat.grounding.min-score:0.25}")
+    private double groundingMinScore;
+
+    @Value("${chat.grounding.require-citations:true}")
+    private boolean groundingRequireCitations;
+
+    @Value("${chat.grounding.retry-primary-model:true}")
+    private boolean groundingRetryPrimaryModel;
+
+    @Value("${chat.grounding.fallback-message:No tengo suficiente contexto para responder con precision. ¿Puedes compartir una frase mas o pegar el fragmento exacto?}")
+    private String groundingFallbackMessage;
 
     public ChatService(
             ChatSessionRepository sessionRepo,
@@ -153,37 +176,115 @@ public class ChatService {
         userMsg.setContent(userText);
         userMsg = messageRepo.save(userMsg);
 
-        String retrievalQuery = buildRetrievalQuery(session.getId(), userText, preparedMedia);
-        var scored = hasText(normalizedExternalUserId)
-                ? ragService.retrieveTopKForOwnerScopedAndGlobal(retrievalQuery, username, normalizedExternalUserId)
-                : ragService.retrieveTopKForOwnerOrGlobal(retrievalQuery, username);
-        List<SourceDto> sources = ragService.toSourceDtos(scored);
-        boolean hasRagContext = hasRagContext(scored);
+        ChatPromptSignals.IntentRoute intentRoute = ChatPromptSignals.routeIntent(userText);
+        boolean ragUsed = intentRoute == ChatPromptSignals.IntentRoute.FACTUAL_TECH;
+        String fallbackMessage = groundingFallback();
+
+        List<RagService.ScoredChunk> scored = List.of();
+        List<SourceDto> sources = List.of();
+        GroundingDecision groundingDecision = new GroundingDecision(true, 1.0, 0, 1.0);
+        boolean hasRagContext = false;
+
+        if (ragUsed) {
+            String retrievalQuery = buildRetrievalQuery(session.getId(), userText, preparedMedia);
+            scored = hasText(normalizedExternalUserId)
+                    ? ragService.retrieveTopKForOwnerScopedAndGlobal(retrievalQuery, username, normalizedExternalUserId)
+                    : ragService.retrieveTopKForOwnerOrGlobal(retrievalQuery, username);
+            sources = ragService.toSourceDtos(scored);
+            groundingDecision = assessGrounding(scored);
+            hasRagContext = hasRagContext(scored);
+        }
+
         boolean complexQuery = ChatPromptSignals.isComplexQuery(userText);
         boolean multiStepQuery = ChatPromptSignals.isMultiStepQuery(userText);
 
         List<OllamaClient.Message> msgs = new ArrayList<>();
         SystemPrompt prompt = session.getSystemPrompt();
         msgs.add(new OllamaClient.Message("system", prompt.getContent()));
+        if (ragUsed) {
+            msgs.add(new OllamaClient.Message("system", buildGroundingSystemPrompt(fallbackMessage)));
+        }
 
         appendRecentHistory(msgs, session.getId(), userMsg.getId());
 
         String visualBridge = buildVisualBridgeContext(userText, preparedMedia, requestedModel);
-        msgs.add(new OllamaClient.Message("user", buildRagBlock(userText, scored, visualBridge, preparedMedia)));
+        String userPrompt = ragUsed
+                ? buildRagBlock(userText, scored, visualBridge, preparedMedia, fallbackMessage)
+                : buildChatBlock(userText, visualBridge, preparedMedia);
+        msgs.add(new OllamaClient.Message("user", userPrompt));
 
-        String model = modelSelector.resolveChatModel(requestedModel, hasRagContext, complexQuery, multiStepQuery);
+        String model = modelSelector.resolveChatModel(
+                requestedModel,
+                hasRagContext,
+                complexQuery,
+                multiStepQuery,
+                intentRoute
+        );
         if (log.isDebugEnabled()) {
             log.debug(
-                    "Model routing selected='{}' requested='{}' rag={} complex={} multiStep={}",
+                    "Model routing selected='{}' requested='{}' route={} ragUsed={} ragContext={} complex={} multiStep={}",
                     model,
                     requestedModel,
+                    intentRoute,
+                    ragUsed,
                     hasRagContext,
                     complexQuery,
                     multiStepQuery
             );
         }
-        String assistantText = ollama.chat(msgs, model);
-        assistantText = applyResponseGuard(userText, assistantText, scored);
+
+        String assistantText;
+        GroundingAnswerAssessment answerAssessment = new GroundingAnswerAssessment(true, 0);
+        boolean enforceGrounding = groundingEnabled && ragUsed;
+
+        if (enforceGrounding && !groundingDecision.safe()) {
+            if (log.isDebugEnabled()) {
+                log.debug(
+                        "Grounding bloquea respuesta: supportingChunks={} topScore={} confidence={} minChunks={} minScore={}",
+                        groundingDecision.supportingChunks(),
+                        String.format(Locale.US, "%.3f", groundingDecision.topScore()),
+                        String.format(Locale.US, "%.3f", groundingDecision.confidence()),
+                        Math.max(1, groundingMinChunks),
+                        groundingMinScore
+                );
+            }
+            assistantText = fallbackMessage;
+            answerAssessment = new GroundingAnswerAssessment(false, groundingDecision.supportingChunks());
+        } else {
+            assistantText = ollama.chat(msgs, model);
+            assistantText = applyResponseGuard(
+                    userText,
+                    assistantText,
+                    scored,
+                    ragUsed,
+                    intentRoute == ChatPromptSignals.IntentRoute.SMALL_TALK
+            );
+
+            if (ragUsed) {
+                answerAssessment = assessAnswerGrounding(assistantText, scored, groundingDecision);
+
+                if (shouldRetryWithPrimaryModel(model, hasRagContext, answerAssessment)) {
+                    String retryModel = modelSelector.resolvePrimaryChatModel();
+                    if (hasText(retryModel) && !retryModel.equalsIgnoreCase(model)) {
+                        if (log.isDebugEnabled()) {
+                            log.debug("Respuesta no anclada con '{}', reintentando con modelo principal '{}'", model, retryModel);
+                        }
+                        String retryAnswer = ollama.chat(msgs, retryModel);
+                        retryAnswer = applyResponseGuard(userText, retryAnswer, scored, true, false);
+                        GroundingAnswerAssessment retryAssessment = assessAnswerGrounding(retryAnswer, scored, groundingDecision);
+                        if (retryAssessment.safe()) {
+                            assistantText = retryAnswer;
+                            answerAssessment = retryAssessment;
+                            model = retryModel;
+                        }
+                    }
+                }
+
+                if (enforceGrounding && !answerAssessment.safe()) {
+                    assistantText = fallbackMessage;
+                }
+            }
+        }
 
         ChatMessage assistantMsg = new ChatMessage();
         assistantMsg.setSession(session);
@@ -191,10 +292,23 @@ public class ChatService {
         assistantMsg.setContent(assistantText);
         assistantMsg = messageRepo.save(assistantMsg);
 
-        persistSources(assistantMsg, scored);
+        if (ragUsed) {
+            persistSources(assistantMsg, scored);
+        }
 
         touchSession(session);
-        return new ChatResponse(session.getId(), assistantText, sources);
+        boolean safe = !enforceGrounding || answerAssessment.safe();
+        double confidence = ragUsed ? clamp01(groundingDecision.confidence()) : 1.0;
+        int groundedSources = ragUsed ? Math.max(0, answerAssessment.groundedSources()) : 0;
+        return new ChatResponse(
+                session.getId(),
+                assistantText,
+                sources,
+                safe,
+                confidence,
+                groundedSources,
+                ragUsed
+        );
     }
 
     // =========================================================================
@@ -521,7 +635,8 @@ public class ChatService {
     private String buildRagBlock(String userText,
                                  List<RagService.ScoredChunk> scored,
                                  String visualBridge,
-                                 List<PreparedMedia> media) {
+                                 List<PreparedMedia> media,
+                                 String fallbackMessage) {
         StringBuilder sb = new StringBuilder();
         sb.append("Fuentes RAG (ordenadas por relevancia):\n");
 
@@ -567,28 +682,74 @@ public class ChatService {
 
         sb.append("\n---\n");
         sb.append("Instrucciones:\n");
-        sb.append("- Usa las fuentes solo si ayudan y cita como [S#].\n");
-        sb.append("- Si ninguna fuente aplica, indica que no hay datos suficientes.\n");
+        sb.append("- Responde SOLO con informacion basada en el contexto proporcionado en este turno.\n");
+        sb.append("- Cada afirmacion factual debe incluir cita [S#].\n");
+        sb.append("- Si no hay suficiente respaldo, responde exactamente: \"").append(fallbackMessage).append("\".\n");
+        sb.append("- No inventes, no asumas y no completes huecos.\n");
         sb.append("- Responde en castellano.\n");
         sb.append("- Formatea en Markdown con titulos y subtitulos claros.\n");
-        sb.append("- Usa emojis de forma moderada para separar secciones.\n");
         sb.append("- Si incluyes codigo, usa bloques con triple backticks y lenguaje (ej: ```java).\n\n");
         sb.append("Pregunta del usuario: ").append(userText);
 
         return sb.toString();
     }
 
-    private String applyResponseGuard(String userText,
-                                      String assistantText,
-                                      List<RagService.ScoredChunk> scored) {
-        if (!responseGuardEnabled || !hasText(assistantText)) {
-            return assistantText;
+    private String buildChatBlock(String userText,
+                                  String visualBridge,
+                                  List<PreparedMedia> media) {
+        StringBuilder sb = new StringBuilder();
+
+        if (hasText(visualBridge)) {
+            sb.append("Contexto visual/documental intermedio:\n");
+            sb.append(visualBridge).append("\n\n");
         }
 
+        if (media != null && !media.isEmpty()) {
+            sb.append("Adjuntos recibidos:\n");
+            for (PreparedMedia m : media) {
+                sb.append("- ")
+                        .append(m.name())
+                        .append(" [")
+                        .append(m.mimeType())
+                        .append("]");
+                if (hasText(m.documentText())) {
+                    sb.append(" (con texto extraido)");
+                }
+                if (hasText(m.imageBase64())) {
+                    sb.append(" (imagen)");
+                }
+                sb.append('\n');
+            }
+            sb.append('\n');
+        }
+
+        sb.append("Instrucciones:\n");
+        sb.append("- Responde en castellano, de forma directa y util.\n");
+        sb.append("- Si falta tema o contexto, haz UNA pregunta breve para precisar.\n");
+        sb.append("- Evita inventar datos concretos.\n");
+        sb.append("- Mantiene un tono natural y conciso.\n\n");
+        sb.append("Mensaje del usuario: ").append(userText);
+        return sb.toString();
+    }
+
+    private String applyResponseGuard(String userText,
+                                      String assistantText,
+                                      List<RagService.ScoredChunk> scored,
+                                      boolean ragUsed,
+                                      boolean smallTalkMode) {
+        if (!hasText(assistantText)) {
+            return ragUsed ? groundingFallback() : assistantText;
+        }
         String original = assistantText.trim();
-        boolean triggeredByLength = original.length() >= Math.max(80, responseGuardMinAnswerChars);
+        if (!responseGuardEnabled || smallTalkMode) {
+            return original;
+        }
+
+        int lengthThreshold = Math.max(500, responseGuardMinAnswerChars);
+        boolean triggeredByLength = original.length() > lengthThreshold;
         boolean triggeredByFiller = ChatPromptSignals.hasLikelyFiller(original);
-        if (!triggeredByLength && !triggeredByFiller) {
+        boolean triggeredByGrounding = ragUsed;
+        if (!triggeredByLength && !triggeredByFiller && !triggeredByGrounding) {
             return original;
         }
 
@@ -606,79 +767,78 @@ public class ChatService {
         if (hasText(sourceHints)) {
             guardPrompt.append("Fuentes citables disponibles:\n").append(sourceHints).append("\n\n");
         }
-        guardPrompt.append("Respuesta actual (a depurar):\n").append(currentAnswer);
+        guardPrompt.append("Respuesta actual (a depurar):\n").append(currentAnswer).append("\n\n");
+        guardPrompt.append("Tarea:\n");
+        guardPrompt.append("- Elimina cualquier frase no respaldada claramente por el contexto.\n");
+        guardPrompt.append("- Elimina especulacion, ambiguedad o relleno.\n");
+        guardPrompt.append("- Conserva SOLO informacion verificable.\n");
+        if (triggeredByGrounding) {
+            guardPrompt.append("- Mantiene citas [S#] validas en cada afirmacion factual.\n");
+        }
 
-        String guardSystemPrompt = responseGuardStrictMode
-                ? """
-                        Eres un editor ultra-estricto de respuestas RAG.
-                        Objetivo: entregar solo informacion util y accionable, sin relleno.
-                        Reglas obligatorias:
-                        - No inventes ni agregues informacion nueva.
-                        - Conserva hechos, cifras, pasos, advertencias y limites.
-                        - Elimina introducciones, despedidas, redundancias y texto decorativo.
-                        - Si hay citas [S#], mantenlas.
-                        - Si hay codigo, conserva los bloques ``` con su lenguaje.
-                        - Manten Markdown limpio y directo, con titulos cortos.
-                        - Devuelve solo la version final depurada.
-                        """
-                : """
-                        Eres un editor estricto de respuestas RAG.
-                        Objetivo: eliminar relleno, repeticiones y texto irrelevante.
-                        Reglas obligatorias:
-                        - No inventes ni agregues informacion nueva.
-                        - Conserva hechos, cifras, pasos y limitaciones.
-                        - Si hay citas [S#], mantenlas.
-                        - Si hay codigo, conserva los bloques ``` con su lenguaje.
-                        - Manten formato Markdown limpio con titulos/subtitulos y emojis moderados.
-                        - Devuelve solo la version final depurada.
-                        """;
+        String guardSystemPrompt;
+        if (triggeredByGrounding) {
+            guardSystemPrompt = responseGuardStrictMode
+                    ? """
+                            Eres un verificador factual ultra-estricto para respuestas RAG.
+                            Reglas obligatorias:
+                            - No inventes ni agregues informacion nueva.
+                            - Conserva solo contenido claramente respaldado por el contexto provisto.
+                            - Elimina todo lo especulativo o ambiguo.
+                            - Conserva citas [S#] y bloques de codigo cuando esten respaldados.
+                            - Si no queda contenido verificable, responde exactamente: "%s"
+                            - Devuelve solo la version final en Markdown limpio.
+                            """
+                    : """
+                            Eres un verificador factual estricto para respuestas RAG.
+                            Reglas obligatorias:
+                            - No inventes ni agregues informacion nueva.
+                            - Conserva solo contenido respaldado por el contexto provisto.
+                            - Elimina texto especulativo, ambiguo o irrelevante.
+                            - Conserva citas [S#] validas cuando existan fuentes.
+                            - Si no queda contenido verificable, responde exactamente: "%s"
+                            - Devuelve solo la version final en Markdown limpio.
+                            """;
+        } else {
+            guardSystemPrompt = """
+                    Eres un editor de respuestas breves y precisas.
+                    Reglas obligatorias:
+                    - No inventes ni agregues informacion nueva.
+                    - Elimina relleno, repeticiones y frases vagas.
+                    - Conserva la intencion original del mensaje.
+                    - Devuelve solo la version final en Markdown limpio.
+                    """;
+        }
+
+        String systemPrompt = triggeredByGrounding
+                ? String.format(Locale.ROOT, guardSystemPrompt, groundingFallback())
+                : guardSystemPrompt;
 
         List<OllamaClient.Message> guardMessages = List.of(
-                new OllamaClient.Message(
-                        "system",
-                        guardSystemPrompt
-                ),
+                new OllamaClient.Message("system", systemPrompt),
                 new OllamaClient.Message("user", guardPrompt.toString())
         );
 
         try {
             String refined = ollama.chat(guardMessages, guardModel);
             if (!hasText(refined)) {
-                return original;
+                return ragUsed ? groundingFallback() : original;
             }
 
             String clean = refined.trim();
-            int minGuardOutputChars = triggeredByLength ? 80 : 40;
-            if (clean.length() < minGuardOutputChars) {
-                return original;
+            if (clean.length() > original.length() + 260) {
+                return ragUsed ? groundingFallback() : original;
             }
-            if (clean.length() > original.length() + 220) {
-                return original;
+            if (isFallbackMessage(clean)) {
+                return groundingFallback();
             }
-            if (responseGuardStrictMode && clean.length() >= original.length()) {
-                return original;
-            }
-            if (original.contains("[S") && !clean.contains("[S")) {
-                return original;
-            }
-            if (original.contains("```") && !clean.contains("```")) {
-                return original;
-            }
-
-            double ratio = (double) clean.length() / (double) Math.max(1, original.length());
-            double minRatio;
-            if (triggeredByFiller) {
-                minRatio = responseGuardStrictMode ? 0.16 : 0.25;
-            } else {
-                minRatio = responseGuardStrictMode ? 0.22 : 0.35;
-            }
-            if (ratio < minRatio) {
-                return original;
+            if (triggeredByGrounding && !containsValidSourceCitation(clean, scored.size())) {
+                return groundingFallback();
             }
             return clean;
         } catch (Exception ex) {
             log.warn("No se pudo depurar respuesta con mini-modelo: {}", ex.getMessage());
-            return original;
+            return ragUsed ? groundingFallback() : original;
         }
     }
 
@@ -714,6 +874,142 @@ public class ChatService {
             return clean;
         }
         return clean.substring(0, maxChars);
+    }
+
+    private String buildGroundingSystemPrompt(String fallbackMessage) {
+        return """
+                Politica de grounding obligatoria:
+                - Responde SOLO con informacion respaldada por el contexto de este turno.
+                - Si no hay suficiente contexto, responde exactamente: "%s"
+                - No inventes ni especules.
+                - Cuando uses fuentes RAG, cita [S#].
+                """.formatted(fallbackMessage);
+    }
+
+    private GroundingDecision assessGrounding(List<RagService.ScoredChunk> scored) {
+        if (scored == null || scored.isEmpty()) {
+            return new GroundingDecision(false, 0.0, 0, 0.0);
+        }
+
+        int minChunks = Math.max(1, groundingMinChunks);
+        double minScore = clamp01(groundingMinScore);
+        int supportingChunks = 0;
+        double topScore = 0.0;
+        double secondScore = 0.0;
+
+        for (RagService.ScoredChunk chunk : scored) {
+            double score = clamp01(chunk.score());
+            if (score > topScore) {
+                secondScore = topScore;
+                topScore = score;
+            } else if (score > secondScore) {
+                secondScore = score;
+            }
+            if (score >= minScore) {
+                supportingChunks++;
+            }
+        }
+
+        int topTwoCount = scored.size() >= 2 ? 2 : 1;
+        double avgTopTwo = topTwoCount == 2 ? (topScore + secondScore) / 2.0 : topScore;
+        double coverage = Math.min(1.0, supportingChunks / (double) minChunks);
+        double confidence = clamp01((topScore * 0.55) + (avgTopTwo * 0.35) + (coverage * 0.10));
+        boolean safe = supportingChunks >= minChunks && topScore >= minScore;
+
+        return new GroundingDecision(safe, confidence, supportingChunks, topScore);
+    }
+
+    private GroundingAnswerAssessment assessAnswerGrounding(String assistantText,
+                                                            List<RagService.ScoredChunk> scored,
+                                                            GroundingDecision groundingDecision) {
+        if (!groundingEnabled) {
+            return new GroundingAnswerAssessment(true, 0);
+        }
+        if (!groundingDecision.safe()) {
+            return new GroundingAnswerAssessment(false, groundingDecision.supportingChunks());
+        }
+        if (!hasText(assistantText) || isFallbackMessage(assistantText)) {
+            return new GroundingAnswerAssessment(false, 0);
+        }
+        if (scored == null || scored.isEmpty()) {
+            return new GroundingAnswerAssessment(false, 0);
+        }
+
+        if (!groundingRequireCitations) {
+            return new GroundingAnswerAssessment(true, groundingDecision.supportingChunks());
+        }
+
+        Set<Integer> citations = extractValidSourceCitations(assistantText, scored.size());
+        if (citations.isEmpty()) {
+            return new GroundingAnswerAssessment(false, groundingDecision.supportingChunks());
+        }
+
+        return new GroundingAnswerAssessment(true, citations.size());
+    }
+
+    private boolean shouldRetryWithPrimaryModel(String currentModel,
+                                                boolean hasRagContext,
+                                                GroundingAnswerAssessment assessment) {
+        if (!groundingEnabled || !groundingRetryPrimaryModel) {
+            return false;
+        }
+        if (!hasRagContext || assessment.safe()) {
+            return false;
+        }
+        return !modelSelector.isPrimaryChatModel(currentModel);
+    }
+
+    private boolean containsValidSourceCitation(String text, int availableSources) {
+        return !extractValidSourceCitations(text, availableSources).isEmpty();
+    }
+
+    private Set<Integer> extractValidSourceCitations(String text, int availableSources) {
+        if (!hasText(text) || availableSources <= 0) {
+            return Set.of();
+        }
+
+        Set<Integer> citations = new HashSet<>();
+        Matcher matcher = SOURCE_CITATION_PATTERN.matcher(text);
+        while (matcher.find()) {
+            String raw = matcher.group(1);
+            if (!hasText(raw)) {
+                continue;
+            }
+            try {
+                int sourceIndex = Integer.parseInt(raw);
+                if (sourceIndex >= 1 && sourceIndex <= availableSources) {
+                    citations.add(sourceIndex);
+                }
+            } catch (NumberFormatException ignored) {
+                // ignora citas invalidas
+            }
+        }
+        return citations;
+    }
+
+    private boolean isFallbackMessage(String text) {
+        return hasText(text) && groundingFallback().equalsIgnoreCase(text.trim());
+    }
+
+    private String groundingFallback() {
+        String configured = groundingFallbackMessage == null ? "" : groundingFallbackMessage.trim();
+        if (!configured.isEmpty()) {
+            return configured;
+        }
+        return "No tengo suficiente contexto para responder con precision. ¿Puedes compartir una frase mas o pegar el fragmento exacto?";
+    }
+
+    private double clamp01(double value) {
+        if (!Double.isFinite(value)) {
+            return 0.0;
+        }
+        if (value < 0.0) {
+            return 0.0;
+        }
+        if (value > 1.0) {
+            return 1.0;
+        }
+        return value;
     }
 
     private String buildVisualBridgeContext(String userText,
@@ -909,6 +1205,12 @@ public class ChatService {
         } catch (Exception ex) {
             return new byte[0];
         }
+    }
+
+    private record GroundingDecision(boolean safe, double confidence, int supportingChunks, double topScore) {
+    }
+
+    private record GroundingAnswerAssessment(boolean safe, int groundedSources) {
     }
 
     private record PreparedMedia(String name, String mimeType, String imageBase64, String documentText) {

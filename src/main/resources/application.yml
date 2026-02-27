@@ -6,7 +6,7 @@ server:
     include-stacktrace: always
 
 spring:
-  # ConfiguraciÃ³n de base de datos para persistir sesiones, documentos y embeddings.
+  # ConfiguraciÃƒÂ³n de base de datos para persistir sesiones, documentos y embeddings.
   datasource:
     url: jdbc:mysql://${MYSQL_HOST:apiasistente_mysql}:${MYSQL_PORT:3306}/${MYSQL_DB:apiasistente_db}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
     username: ${MYSQL_USER:apiuser}
@@ -26,7 +26,7 @@ spring:
   sql:
     init:
       mode: always
-      # opcional: si quieres ser explÃ­cito
+      # opcional: si quieres ser explÃƒÂ­cito
       # schema-locations: classpath:schema.sql
       # data-locations: classpath:data.sql
 
@@ -34,9 +34,9 @@ ollama:
   # Endpoint base del servidor Ollama (local o contenedor).
   base-url: ${OLLAMA_BASE_URL:http://192.168.1.61:11434/api}
   #base-url: ${OLLAMA_BASE_URL:http://ollama:11434/api}
-  # Modelo para generaciÃ³n de chat.
+  # Modelo para generaciÃƒÂ³n de chat.
   chat-model: llama3.1:8b
-  # Modelo rÃ¡pido para chats ligeros (menor consumo).
+  # Modelo rÃƒÂ¡pido para chats ligeros (menor consumo).
   fast-chat-model: gemma2:9b
   # Modelo visual para etapa intermedia de imagen/camara/documento.
   visual-model: qwen2.5vl:7b
@@ -44,11 +44,13 @@ ollama:
   response-guard-model: ${OLLAMA_RESPONSE_GUARD_MODEL:mistral:7b}
   # Modelo para embeddings de RAG.
   embed-model: nomic-embed-text:latest
+  # Menor creatividad para reducir alucinaciones.
+  temperature: ${OLLAMA_TEMPERATURE:0.2}
 
 rag:
-  # NÃºmero de chunks mÃ¡s relevantes a recuperar por consulta.
+  # NÃƒÂºmero de chunks mÃƒÂ¡s relevantes a recuperar por consulta.
   top-k: 6
-  # MÃ¡ximo de mensajes previos en el historial de contexto.
+  # MÃƒÂ¡ximo de mensajes previos en el historial de contexto.
   max-history: 16
   retrieval:
     # Turnos previos del usuario para enriquecer la consulta de retrieval.
@@ -57,24 +59,24 @@ rag:
     # Cachea embeddings/chunks para acelerar respuestas repetidas.
     enabled: true
   chunk:
-    # TamaÃ±o y solapamiento de cada chunk de texto.
+    # TamaÃƒÂ±o y solapamiento de cada chunk de texto.
     size: 700
     overlap: 120
   rerank:
-    # Numero de candidatos semÃ¡nticos previos al rerank con MMR.
+    # Numero de candidatos semÃƒÂ¡nticos previos al rerank con MMR.
     candidates: 10
     # Mezcla entre relevancia y diversidad (0-1).
     lambda: 0.70
   hybrid:
-    # Peso de score semÃ¡ntico vs lexical en ranking final.
+    # Peso de score semÃƒÂ¡ntico vs lexical en ranking final.
     semantic-weight: 0.85
     lexical-weight: 0.15
     # Bonus cuando la frase normalizada aparece de forma exacta.
     exact-match-boost: 0.10
   owner:
-    # Asegura candidatos mÃ­nimos por owner (global/privado) antes de fusionar.
+    # Asegura candidatos mÃƒÂ­nimos por owner (global/privado) antes de fusionar.
     min-candidates-per-owner: 8
-    # PequeÃ±os boosts para que convivan mejor contextos globales y privados.
+    # PequeÃƒÂ±os boosts para que convivan mejor contextos globales y privados.
     global-boost: 0.03
     user-boost: 0.05
   score:
@@ -83,8 +85,20 @@ rag:
 
 chat:
   queue:
-    # Retraso en ms para suavizar picos de trÃ¡fico por sesiÃ³n.
+    # Retraso en ms para suavizar picos de trÃƒÂ¡fico por sesiÃƒÂ³n.
     delay-ms: 15
+  grounding:
+    # Activa bloqueo de respuestas cuando no hay soporte suficiente en contexto.
+    enabled: true
+    # Requisito minimo de chunks y score para considerar contexto confiable.
+    min-chunks: 2
+    min-score: 0.25
+    # Exige citas [S#] en respuestas con RAG.
+    require-citations: true
+    # Si la salida no queda anclada, reintenta una vez con el modelo principal.
+    retry-primary-model: true
+    # Mensaje final cuando no hay base suficiente.
+    fallback-message: "No tengo suficiente contexto para responder con precision. Puedes compartir una frase mas o pegar el fragmento exacto?"
   response-guard:
     # Segunda pasada para eliminar informacion innecesaria en la respuesta final.
     enabled: true

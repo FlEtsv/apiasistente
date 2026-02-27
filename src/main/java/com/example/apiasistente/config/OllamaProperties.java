@@ -10,6 +10,7 @@ public class OllamaProperties {
     private String visualModel;
     private String responseGuardModel;
     private String embedModel;
+    private Double temperature;
     private boolean stream;
 
     public String getBaseUrl() { return baseUrl; }
@@ -29,6 +30,9 @@ public class OllamaProperties {
 
     public String getEmbedModel() { return embedModel; }
     public void setEmbedModel(String embedModel) { this.embedModel = embedModel; }
+
+    public Double getTemperature() { return temperature; }
+    public void setTemperature(Double temperature) { this.temperature = temperature; }
 
     public boolean isStream() { return stream; }
     public void setStream(boolean stream) { this.stream = stream; }

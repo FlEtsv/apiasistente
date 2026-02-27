@@ -4,7 +4,9 @@ import com.example.apiasistente.config.OllamaProperties;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ChatModelSelectorTest {
 
@@ -24,6 +26,14 @@ class ChatModelSelectorTest {
         assertEquals("qwen2.5:32b", selector.resolveChatModel("auto", true, false, false));
         assertEquals("qwen2.5:32b", selector.resolveChatModel("auto", false, true, false));
         assertEquals("qwen2.5:32b", selector.resolveChatModel("auto", false, false, true));
+        assertEquals(
+                "qwen3.0:14b",
+                selector.resolveChatModel("auto", false, true, true, ChatPromptSignals.IntentRoute.SMALL_TALK)
+        );
+        assertEquals(
+                "qwen2.5:32b",
+                selector.resolveChatModel("auto", false, false, false, ChatPromptSignals.IntentRoute.FACTUAL_TECH)
+        );
     }
 
     @Test
@@ -45,6 +55,9 @@ class ChatModelSelectorTest {
         assertEquals("qwen-vl:latest", selector.resolveVisualModel("visual"));
         assertEquals("qwen-vl:latest", selector.resolveVisualModel("default"));
         assertEquals("qwen2.5:3b", selector.resolveResponseGuardModel());
+        assertEquals("qwen2.5:32b", selector.resolvePrimaryChatModel());
+        assertTrue(selector.isPrimaryChatModel("qwen2.5:32b"));
+        assertFalse(selector.isPrimaryChatModel("qwen3.0:14b"));
         assertThrows(IllegalArgumentException.class, () -> selector.resolveChatModel("otro-modelo"));
     }
 }

@@ -14,6 +14,8 @@ import java.util.Map;
 @Component
 public class OllamaClient {
 
+    private static final double DEFAULT_TEMPERATURE = 0.2d;
+
     private final RestClient ollama;
     private final OllamaProperties props;
     private final ObjectMapper mapper = new ObjectMapper();
@@ -35,11 +37,12 @@ public class OllamaClient {
         if (resolvedModel == null || resolvedModel.isBlank()) {
             throw new IllegalStateException("No hay modelo de chat configurado (ollama.chat-model/fast-chat-model) ni se envio uno en la peticion.");
         }
+        double temperature = resolveTemperature();
         ChatRequest req = new ChatRequest(
                 resolvedModel,
                 messages,
                 props.isStream() ? true : false,
-                Map.of("temperature", 0.2)
+                Map.of("temperature", temperature)
         );
 
         ChatResponse res = ollama.post()
@@ -112,6 +115,20 @@ public class OllamaClient {
         public Message(String role, String content) {
             this(role, content, List.of());
         }
+    }
+
+    private double resolveTemperature() {
+        Double configured = props.getTemperature();
+        if (configured == null || !Double.isFinite(configured)) {
+            return DEFAULT_TEMPERATURE;
+        }
+        if (configured < 0.0d) {
+            return 0.0d;
+        }
+        if (configured > 1.0d) {
+            return 1.0d;
+        }
+        return configured;
     }
 
     public record ChatRequest(String model, List<Message> messages, boolean stream, Map<String, Object> options) {}

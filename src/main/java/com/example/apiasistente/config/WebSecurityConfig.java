@@ -34,6 +34,21 @@ public class WebSecurityConfig {
 
     @Bean
     @Order(2)
+    SecurityFilterChain integrationChain(HttpSecurity http, ApiKeyService apiKeyService) throws Exception {
+
+        http.securityMatcher("/api/integration/**")
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .addFilterBefore(new ApiKeyAuthFilter(apiKeyService), UsernamePasswordAuthenticationFilter.class)
+                .authorizeHttpRequests(auth -> auth.anyRequest().authenticated())
+                .exceptionHandling(ex -> ex.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
+                .cors(Customizer.withDefaults());
+
+        return http.build();
+    }
+
+    @Bean
+    @Order(3)
     SecurityFilterChain webChain(HttpSecurity http) throws Exception {
 
         http

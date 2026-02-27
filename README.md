@@ -101,6 +101,11 @@ docker compose up -d
 - `GET /api/ext/monitor/alerts`
 - `GET /api/ext/monitor/alerts/state`
 
+### Integracion monitor (API key, endpoint dedicado para otra app)
+- `GET /api/integration/monitor/server`
+- `GET /api/integration/monitor/alerts`
+- `GET /api/integration/monitor/alerts/state`
+
 ## Monitoreo y alertas
 - Actuator expuesto: `health`, `info`, `prometheus`.
 - Alertas de CPU, memoria, disco, swap e internet.
@@ -109,6 +114,12 @@ docker compose up -d
 
 ```bash
 curl -sG "http://localhost:8080/api/ext/monitor/alerts" \
+  -H "X-API-KEY: <tu_api_key>" \
+  --data-urlencode "limit=20"
+```
+
+```bash
+curl -sG "http://localhost:8080/api/integration/monitor/alerts" \
   -H "X-API-KEY: <tu_api_key>" \
   --data-urlencode "limit=20"
 ```
