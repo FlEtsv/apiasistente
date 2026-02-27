@@ -57,6 +57,9 @@ public class ChatService {
     private static final int MAX_GUARD_QUESTION_CHARS = 1_200;
     private static final int MAX_GUARD_ANSWER_CHARS = 10_000;
     private static final int MAX_GUARD_SOURCE_HINTS = 6;
+    private static final int STRONG_RAG_MIN_CHUNKS_FLOOR = 2;
+    private static final double STRONG_RAG_TOP_SCORE_FLOOR = 0.25;
+    private static final double WEAK_RAG_TOP_SCORE_CUTOFF = 0.22;
     private static final Pattern SOURCE_CITATION_PATTERN = Pattern.compile("\\[S(\\d+)]");
 
     private final ChatSessionRepository sessionRepo;
@@ -177,7 +180,7 @@ public class ChatService {
         userMsg = messageRepo.save(userMsg);
 
         ChatPromptSignals.IntentRoute intentRoute = ChatPromptSignals.routeIntent(userText);
-        boolean ragUsed = intentRoute == ChatPromptSignals.IntentRoute.FACTUAL_TECH;
+        boolean factualTechIntent = intentRoute == ChatPromptSignals.IntentRoute.FACTUAL_TECH;
         String fallbackMessage = groundingFallback();
 
         List<RagService.ScoredChunk> scored = List.of();
@@ -185,7 +188,7 @@ public class ChatService {
         GroundingDecision groundingDecision = new GroundingDecision(true, 1.0, 0, 1.0);
         boolean hasRagContext = false;
 
-        if (ragUsed) {
+        if (factualTechIntent) {
             String retrievalQuery = buildRetrievalQuery(session.getId(), userText, preparedMedia);
             scored = hasText(normalizedExternalUserId)
                     ? ragService.retrieveTopKForOwnerScopedAndGlobal(retrievalQuery, username, normalizedExternalUserId)
@@ -195,41 +198,22 @@ public class ChatService {
             hasRagContext = hasRagContext(scored);
         }
 
-        boolean complexQuery = ChatPromptSignals.isComplexQuery(userText);
-        boolean multiStepQuery = ChatPromptSignals.isMultiStepQuery(userText);
+        RagRoute ragRoute = resolveRagRoute(intentRoute, groundingDecision);
+        boolean ragUsed = ragRoute != RagRoute.NO_RAG;
+        boolean weakRagRoute = ragRoute == RagRoute.WEAK;
+        boolean hardWeakRag = ragUsed && isWeakRagGrounding(groundingDecision);
 
-        List<OllamaClient.Message> msgs = new ArrayList<>();
-        SystemPrompt prompt = session.getSystemPrompt();
-        msgs.add(new OllamaClient.Message("system", prompt.getContent()));
-        if (ragUsed) {
-            msgs.add(new OllamaClient.Message("system", buildGroundingSystemPrompt(fallbackMessage)));
-        }
-
-        appendRecentHistory(msgs, session.getId(), userMsg.getId());
-
-        String visualBridge = buildVisualBridgeContext(userText, preparedMedia, requestedModel);
-        String userPrompt = ragUsed
-                ? buildRagBlock(userText, scored, visualBridge, preparedMedia, fallbackMessage)
-                : buildChatBlock(userText, visualBridge, preparedMedia);
-        msgs.add(new OllamaClient.Message("user", userPrompt));
-
-        String model = modelSelector.resolveChatModel(
-                requestedModel,
-                hasRagContext,
-                complexQuery,
-                multiStepQuery,
-                intentRoute
-        );
-        if (log.isDebugEnabled()) {
+        if (log.isDebugEnabled() && ragUsed) {
             log.debug(
-                    "Model routing selected='{}' requested='{}' route={} ragUsed={} ragContext={} complex={} multiStep={}",
-                    model,
-                    requestedModel,
-                    intentRoute,
-                    ragUsed,
-                    hasRagContext,
-                    complexQuery,
-                    multiStepQuery
+                    "RAG routing route={} hardWeak={} supportingChunks={} topScore={} confidence={} weakCutoff={} strongChunks={} strongScore={}",
+                    ragRoute,
+                    hardWeakRag,
+                    groundingDecision.supportingChunks(),
+                    String.format(Locale.US, "%.3f", groundingDecision.topScore()),
+                    String.format(Locale.US, "%.3f", groundingDecision.confidence()),
+                    WEAK_RAG_TOP_SCORE_CUTOFF,
+                    Math.max(STRONG_RAG_MIN_CHUNKS_FLOOR, Math.max(1, groundingMinChunks)),
+                    String.format(Locale.US, "%.3f", Math.max(STRONG_RAG_TOP_SCORE_FLOOR, clamp01(groundingMinScore)))
             );
         }
 
@@ -237,51 +221,94 @@ public class ChatService {
         GroundingAnswerAssessment answerAssessment = new GroundingAnswerAssessment(true, 0);
         boolean enforceGrounding = groundingEnabled && ragUsed;
 
-        if (enforceGrounding && !groundingDecision.safe()) {
-            if (log.isDebugEnabled()) {
-                log.debug(
-                        "Grounding bloquea respuesta: supportingChunks={} topScore={} confidence={} minChunks={} minScore={}",
-                        groundingDecision.supportingChunks(),
-                        String.format(Locale.US, "%.3f", groundingDecision.topScore()),
-                        String.format(Locale.US, "%.3f", groundingDecision.confidence()),
-                        Math.max(1, groundingMinChunks),
-                        groundingMinScore
-                );
-            }
-            assistantText = fallbackMessage;
+        if (weakRagRoute) {
+            assistantText = groundingWeakFallback(userText);
             answerAssessment = new GroundingAnswerAssessment(false, groundingDecision.supportingChunks());
         } else {
-            assistantText = ollama.chat(msgs, model);
-            assistantText = applyResponseGuard(
-                    userText,
-                    assistantText,
-                    scored,
-                    ragUsed,
-                    intentRoute == ChatPromptSignals.IntentRoute.SMALL_TALK
-            );
+            boolean complexQuery = ChatPromptSignals.isComplexQuery(userText);
+            boolean multiStepQuery = ChatPromptSignals.isMultiStepQuery(userText);
 
+            List<OllamaClient.Message> msgs = new ArrayList<>();
+            SystemPrompt prompt = session.getSystemPrompt();
+            msgs.add(new OllamaClient.Message("system", prompt.getContent()));
             if (ragUsed) {
-                answerAssessment = assessAnswerGrounding(assistantText, scored, groundingDecision);
+                msgs.add(new OllamaClient.Message("system", buildGroundingSystemPrompt(fallbackMessage)));
+            }
 
-                if (shouldRetryWithPrimaryModel(model, hasRagContext, answerAssessment)) {
-                    String retryModel = modelSelector.resolvePrimaryChatModel();
-                    if (hasText(retryModel) && !retryModel.equalsIgnoreCase(model)) {
-                        if (log.isDebugEnabled()) {
-                            log.debug("Respuesta no anclada con '{}', reintentando con modelo principal '{}'", model, retryModel);
-                        }
-                        String retryAnswer = ollama.chat(msgs, retryModel);
-                        retryAnswer = applyResponseGuard(userText, retryAnswer, scored, true, false);
-                        GroundingAnswerAssessment retryAssessment = assessAnswerGrounding(retryAnswer, scored, groundingDecision);
-                        if (retryAssessment.safe()) {
-                            assistantText = retryAnswer;
-                            answerAssessment = retryAssessment;
-                            model = retryModel;
+            appendRecentHistory(msgs, session.getId(), userMsg.getId());
+
+            String visualBridge = buildVisualBridgeContext(userText, preparedMedia, requestedModel);
+            String userPrompt = ragUsed
+                    ? buildRagBlock(userText, scored, visualBridge, preparedMedia, fallbackMessage)
+                    : buildChatBlock(userText, visualBridge, preparedMedia);
+            msgs.add(new OllamaClient.Message("user", userPrompt));
+
+            String model = modelSelector.resolveChatModel(
+                    requestedModel,
+                    hasRagContext,
+                    complexQuery,
+                    multiStepQuery,
+                    intentRoute
+            );
+            if (log.isDebugEnabled()) {
+                log.debug(
+                        "Model routing selected='{}' requested='{}' route={} ragUsed={} ragContext={} complex={} multiStep={}",
+                        model,
+                        requestedModel,
+                        intentRoute,
+                        ragUsed,
+                        hasRagContext,
+                        complexQuery,
+                        multiStepQuery
+                );
+            }
+
+            if (enforceGrounding && !groundingDecision.safe()) {
+                if (log.isDebugEnabled()) {
+                    log.debug(
+                            "Grounding bloquea respuesta: supportingChunks={} topScore={} confidence={} minChunks={} minScore={}",
+                            groundingDecision.supportingChunks(),
+                            String.format(Locale.US, "%.3f", groundingDecision.topScore()),
+                            String.format(Locale.US, "%.3f", groundingDecision.confidence()),
+                            Math.max(1, groundingMinChunks),
+                            groundingMinScore
+                    );
+                }
+                assistantText = fallbackMessage;
+                answerAssessment = new GroundingAnswerAssessment(false, groundingDecision.supportingChunks());
+            } else {
+                assistantText = ollama.chat(msgs, model);
+                assistantText = applyResponseGuard(
+                        userText,
+                        assistantText,
+                        scored,
+                        ragUsed,
+                        intentRoute == ChatPromptSignals.IntentRoute.SMALL_TALK
+                );
+
+                if (ragUsed) {
+                    answerAssessment = assessAnswerGrounding(assistantText, scored, groundingDecision);
+
+                    if (shouldRetryWithPrimaryModel(model, hasRagContext, answerAssessment)) {
+                        String retryModel = modelSelector.resolvePrimaryChatModel();
+                        if (hasText(retryModel) && !retryModel.equalsIgnoreCase(model)) {
+                            if (log.isDebugEnabled()) {
+                                log.debug("Respuesta no anclada con '{}', reintentando con modelo principal '{}'", model, retryModel);
+                            }
+                            String retryAnswer = ollama.chat(msgs, retryModel);
+                            retryAnswer = applyResponseGuard(userText, retryAnswer, scored, true, false);
+                            GroundingAnswerAssessment retryAssessment = assessAnswerGrounding(retryAnswer, scored, groundingDecision);
+                            if (retryAssessment.safe()) {
+                                assistantText = retryAnswer;
+                                answerAssessment = retryAssessment;
+                                model = retryModel;
+                            }
                         }
                     }
-                }
 
-                if (enforceGrounding && !answerAssessment.safe()) {
-                    assistantText = fallbackMessage;
+                    if (enforceGrounding && !answerAssessment.safe()) {
+                        assistantText = fallbackMessage;
+                    }
                 }
             }
         }
@@ -919,6 +946,55 @@ public class ChatService {
         return new GroundingDecision(safe, confidence, supportingChunks, topScore);
     }
 
+    private RagRoute resolveRagRoute(ChatPromptSignals.IntentRoute intentRoute, GroundingDecision groundingDecision) {
+        if (intentRoute != ChatPromptSignals.IntentRoute.FACTUAL_TECH) {
+            return RagRoute.NO_RAG;
+        }
+        if (isStrongRagGrounding(groundingDecision)) {
+            return RagRoute.STRONG;
+        }
+        return RagRoute.WEAK;
+    }
+
+    private boolean isStrongRagGrounding(GroundingDecision groundingDecision) {
+        if (groundingDecision == null) {
+            return false;
+        }
+        int requiredChunks = Math.max(STRONG_RAG_MIN_CHUNKS_FLOOR, Math.max(1, groundingMinChunks));
+        double requiredTopScore = Math.max(STRONG_RAG_TOP_SCORE_FLOOR, clamp01(groundingMinScore));
+        return groundingDecision.supportingChunks() >= requiredChunks
+                && groundingDecision.topScore() >= requiredTopScore;
+    }
+
+    private boolean isWeakRagGrounding(GroundingDecision groundingDecision) {
+        if (groundingDecision == null) {
+            return true;
+        }
+        return groundingDecision.supportingChunks() == 0
+                || groundingDecision.topScore() < WEAK_RAG_TOP_SCORE_CUTOFF;
+    }
+
+    private String groundingWeakFallback(String userText) {
+        String normalized = collapseSpaces(userText).toLowerCase(Locale.ROOT);
+        boolean endpointLike = normalized.contains("endpoint")
+                || normalized.contains("/api")
+                || normalized.contains("http")
+                || normalized.contains("status")
+                || normalized.contains("ruta");
+        boolean logLike = normalized.contains("log")
+                || normalized.contains("error")
+                || normalized.contains("stack")
+                || normalized.contains("trace");
+
+        if (endpointLike && !logLike) {
+            return "Te refieres al endpoint exacto o al payload? Si pegas el endpoint completo o el log, lo clavo.";
+        }
+        if (logLike && !endpointLike) {
+            return "Te refieres al error exacto del log o al endpoint que falla? Si pegas uno de los dos, lo clavo.";
+        }
+        return "Te refieres al endpoint exacto o al error del log? Si me pasas uno de los dos, lo clavo.";
+    }
+
     private GroundingAnswerAssessment assessAnswerGrounding(String assistantText,
                                                             List<RagService.ScoredChunk> scored,
                                                             GroundingDecision groundingDecision) {
@@ -1211,6 +1287,12 @@ public class ChatService {
     }
 
     private record GroundingAnswerAssessment(boolean safe, int groundedSources) {
+    }
+
+    private enum RagRoute {
+        NO_RAG,
+        STRONG,
+        WEAK
     }
 
     private record PreparedMedia(String name, String mimeType, String imageBase64, String documentText) {
