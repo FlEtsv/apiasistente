@@ -26,16 +26,22 @@
             --accent: #1f7ae0;
             --warn: #c04848;
             --shadow: 0 12px 30px rgba(0,0,0,0.35);
+            --safe-top: env(safe-area-inset-top, 0px);
+            --safe-bottom: env(safe-area-inset-bottom, 0px);
+            --app-height: 100dvh;
         }
 
         * { box-sizing: border-box; }
         .hidden { display: none !important; }
+        body.drawer-open {
+            overflow: hidden;
+        }
         html, body {
             height: 100%;
             min-height: 100%;
         }
-        a, button, input, select { font: inherit; }
-        button, input, select { max-width: 100%; }
+        a, button, input, select, textarea { font: inherit; }
+        button, input, select, textarea { max-width: 100%; }
         body {
             margin: 0;
             font-family: 'Sora', sans-serif;
@@ -62,11 +68,9 @@
         .app {
             display: grid;
             grid-template-columns: clamp(220px, 22vw, 280px) minmax(0, 1fr);
-            height: 100vh;
-            height: 100dvh;
-            min-height: 100vh;
-            min-height: 100dvh;
-            max-height: 100dvh;
+            height: var(--app-height);
+            min-height: var(--app-height);
+            max-height: var(--app-height);
             overflow: hidden;
         }
 
@@ -75,7 +79,7 @@
             top: 0;
             align-self: start;
             max-height: 100dvh;
-            padding: 20px 16px;
+            padding: calc(20px + var(--safe-top)) 16px 20px;
             background: rgba(12, 18, 26, 0.9);
             border-right: 1px solid var(--border);
             display: flex;
@@ -188,12 +192,14 @@
         .main {
             min-width: 0;
             padding: clamp(14px, 2vw, 26px);
+            padding-bottom: calc(clamp(14px, 2vw, 26px) + var(--safe-bottom));
             height: 100%;
             min-height: 100vh;
             min-height: 100dvh;
             display: flex;
             flex-direction: column;
             overflow: hidden;
+            container-type: inline-size;
         }
 
         .topbar {
@@ -204,6 +210,12 @@
             margin-bottom: 14px;
             flex: 0 0 auto;
             min-width: 0;
+            position: sticky;
+            top: 0;
+            z-index: 20;
+            padding: calc(4px + var(--safe-top)) 0 10px;
+            background: linear-gradient(180deg, rgba(11, 16, 23, 0.96) 0%, rgba(11, 16, 23, 0.88) 78%, rgba(11, 16, 23, 0) 100%);
+            backdrop-filter: blur(12px);
         }
 
         .topbar-left {
@@ -296,6 +308,7 @@
             display: flex;
             flex-direction: column;
             overflow: hidden;
+            scrollbar-gutter: stable both-edges;
         }
 
         .panel-header {
@@ -375,6 +388,7 @@
             flex-direction: column;
             height: 100%;
             min-height: 0;
+            background: linear-gradient(180deg, rgba(18, 26, 36, 0.94) 0%, rgba(10, 15, 22, 0.92) 100%);
         }
 
         #chat {
@@ -383,6 +397,7 @@
             padding: 18px;
             overflow-y: auto;
             overscroll-behavior: contain;
+            scroll-padding-bottom: 140px;
         }
 
         .empty-state {
@@ -400,14 +415,40 @@
         .composer {
             padding: 16px;
             border-top: 1px solid var(--border);
-            background: rgba(10, 15, 22, 0.6);
+            background: linear-gradient(180deg, rgba(10, 15, 22, 0.66) 0%, rgba(10, 15, 22, 0.96) 100%);
+            backdrop-filter: blur(18px);
+            position: sticky;
+            bottom: 0;
+            z-index: 5;
+            padding-bottom: calc(16px + var(--safe-bottom));
         }
 
         .composer-row {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) auto auto;
+            grid-template-columns: minmax(0, 1fr) minmax(180px, 220px);
             gap: 10px;
-            align-items: center;
+            align-items: end;
+        }
+
+        .composer-field {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            min-width: 0;
+        }
+
+        .composer-label {
+            font-size: 11px;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        .composer-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            align-self: stretch;
         }
 
         .composer-tools {
@@ -428,6 +469,8 @@
             display: flex;
             flex-wrap: wrap;
             gap: 8px;
+            max-height: 112px;
+            overflow-y: auto;
         }
 
         .media-chip {
@@ -468,17 +511,24 @@
         #input {
             min-width: 0;
             width: 100%;
-            padding: 12px 14px;
-            border-radius: 12px;
+            min-height: 54px;
+            max-height: 180px;
+            padding: 14px 16px;
+            border-radius: 16px;
             border: 1px solid var(--border);
             background: var(--bg-soft);
             color: var(--text);
             font-size: 13px;
+            line-height: 1.45;
+            resize: none;
+            overflow-y: auto;
+            field-sizing: content;
         }
 
         #send {
+            min-height: 48px;
             padding: 10px 14px;
-            border-radius: 12px;
+            border-radius: 14px;
             border: none;
             background: var(--accent);
             color: #fff;
@@ -487,9 +537,11 @@
         }
 
         #modelSelect {
-            min-width: 160px;
+            min-width: 0;
+            width: 100%;
+            min-height: 48px;
             padding: 10px 12px;
-            border-radius: 10px;
+            border-radius: 14px;
             border: 1px solid var(--border);
             background: var(--bg-soft);
             color: var(--text);
@@ -578,6 +630,7 @@
         .link-list {
             display: grid;
             gap: 8px;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
         }
 
         .link-list a,
@@ -625,6 +678,17 @@
             display: flex;
             flex-direction: column;
             gap: 12px;
+            box-shadow: 0 22px 48px rgba(0,0,0,0.45);
+            backdrop-filter: blur(18px);
+        }
+
+        .drawer-handle {
+            display: none;
+            width: 56px;
+            height: 5px;
+            border-radius: 999px;
+            background: rgba(143, 163, 184, 0.35);
+            margin: 0 auto 4px;
         }
 
         .table-scroll {
@@ -642,6 +706,14 @@
             width: min(100%, 900px);
             max-height: min(92dvh, 92vh);
             overflow-y: auto;
+            border-radius: 24px;
+        }
+
+        #apiKeysModal > div {
+            padding:
+                max(16px, var(--safe-top))
+                16px
+                max(16px, var(--safe-bottom));
         }
 
         .glass {
@@ -776,11 +848,13 @@
                 flex-wrap: wrap;
                 overflow-x: auto;
                 padding-bottom: 2px;
+                scroll-snap-type: x proximity;
             }
             .nav a,
             .nav button {
                 width: auto;
                 flex: 0 0 auto;
+                scroll-snap-align: start;
             }
             .sidebar-footer { width: 100%; }
             .main {
@@ -792,20 +866,56 @@
             .topbar { flex-direction: column; align-items: flex-start; }
             .actions { width: 100%; justify-content: flex-start; }
             #toggleSessions { display: inline-flex; }
+            .ops-panel { display: flex; }
+            .ops-panel .panel-body { overflow: visible; }
+            .ops-panel .ops-grid {
+                grid-auto-flow: column;
+                grid-auto-columns: minmax(320px, 86vw);
+                overflow-x: auto;
+                padding-bottom: 6px;
+                scroll-snap-type: x mandatory;
+            }
+            .ops-panel .ops-grid > * {
+                scroll-snap-align: start;
+            }
         }
 
         @media (max-width: 760px) {
             .composer-row { grid-template-columns: 1fr; }
+            .composer-actions {
+                width: 100%;
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) auto;
+            }
             #send, #modelSelect { width: 100%; }
-            #modelSelect { min-width: 0; }
             .panel-header { flex-direction: column; align-items: flex-start; }
+            .composer-tools {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+            .composer-tools .btn {
+                width: 100%;
+            }
+            .media-hint {
+                grid-column: 1 / -1;
+            }
         }
 
         @media (max-width: 640px) {
             body::before { opacity: 0.2; }
-            .sidebar { padding: 14px; }
-            .main { padding: 14px 12px 16px; }
+            .sidebar { padding: calc(12px + var(--safe-top)) 12px 12px; }
+            .main { padding: 12px 12px calc(16px + var(--safe-bottom)); }
+            .topbar-left { width: 100%; }
             .topbar p { font-size: 11px; }
+            .actions {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                width: 100%;
+            }
+            .actions > * {
+                width: 100%;
+                justify-content: center;
+            }
             .btn, .pill { font-size: 11px; }
             .panel-header,
             .panel-body,
@@ -814,6 +924,45 @@
                 padding-right: 12px;
             }
             #chat { padding: 12px; }
+            .chat-panel {
+                min-height: max(64dvh, 540px);
+            }
+            .ops-panel .ops-grid {
+                grid-auto-columns: minmax(88vw, 1fr);
+            }
+            .drawer-panel {
+                top: auto;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                width: auto;
+                max-height: min(78dvh, 680px);
+                border-right: 0;
+                border-top: 1px solid var(--border);
+                border-radius: 24px 24px 0 0;
+                padding: 14px 14px calc(18px + var(--safe-bottom));
+            }
+            .drawer-handle { display: block; }
+            #apiKeysModal > div {
+                align-items: flex-end;
+                justify-content: stretch;
+                padding: 0;
+            }
+            .modal-card {
+                width: 100%;
+                max-height: min(96dvh, 96vh);
+                border-radius: 24px 24px 0 0;
+                margin-top: auto;
+            }
+        }
+
+        @media (max-width: 440px) {
+            .composer-actions {
+                grid-template-columns: 1fr;
+            }
+            .composer-tools {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
@@ -867,6 +1016,7 @@
             </div>
         </header>
 
+        <!-- Workspace principal: chat al centro, sesiones fijas en escritorio y control como rail en movil -->
         <section class="workspace">
             <div class="panel sessions-panel">
                 <div class="panel-header">
@@ -878,6 +1028,7 @@
                 </div>
             </div>
 
+            <!-- Flujo de conversacion: input fijo abajo, historial arriba y contexto visible -->
             <div class="panel chat-panel">
                 <div class="panel-header">
                     <h3>Chat operativo</h3>
@@ -895,15 +1046,21 @@
                     </div>
                 </div>
                 <div class="composer">
+                    <!-- Composer preparado para movil: textarea autoajustable + selector + envio -->
                     <div class="composer-row">
-                        <input id="input" type="text" placeholder="Escribe tu consulta aqui..." autocomplete="off" />
-                        <button id="send">Enviar</button>
-                        <select id="modelSelect">
-                            <option value="auto">Auto (router de intencion)</option>
-                            <option value="fast">Rapido (gemma2:9b)</option>
-                            <option value="chat">Complejo/RAG (llama3.1:8b)</option>
-                            <option value="visual">Vision (qwen2.5vl:7b)</option>
-                        </select>
+                        <label class="composer-field" for="input">
+                            <span class="composer-label">Consulta</span>
+                            <textarea id="input" rows="1" placeholder="Escribe tu consulta aqui..." autocomplete="off" autocapitalize="sentences" enterkeyhint="send"></textarea>
+                        </label>
+                        <div class="composer-actions">
+                            <select id="modelSelect" aria-label="Modelo de respuesta">
+                                <option value="auto">Auto (router de intencion)</option>
+                                <option value="fast">Rapido (gemma2:9b)</option>
+                                <option value="chat">Complejo/RAG (llama3.1:8b)</option>
+                                <option value="visual">Vision (qwen2.5vl:7b)</option>
+                            </select>
+                            <button id="send" type="button">Enviar</button>
+                        </div>
                     </div>
                     <div class="composer-tools">
                         <input id="mediaInput" type="file" accept="image/*,.txt,.md,.json,.csv,.pdf" multiple class="hidden" />
@@ -1036,11 +1193,13 @@
     </main>
 </div>
 
-<div id="sessionDrawer" class="drawer hidden">
+<!-- Drawer de sesiones: lateral en tablet, bottom-sheet en movil -->
+<div id="sessionDrawer" class="drawer hidden" aria-hidden="true">
     <div class="drawer-backdrop" id="drawerBackdrop"></div>
-    <div class="drawer-panel">
+    <div class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="sessionDrawerTitle">
+        <div class="drawer-handle" aria-hidden="true"></div>
         <div class="panel-header">
-            <h3>Sesiones</h3>
+            <h3 id="sessionDrawerTitle">Sesiones</h3>
             <button id="closeDrawer" class="btn">Cerrar</button>
         </div>
         <input id="sessionSearchMobile" class="session-search" placeholder="Buscar sesiones" />

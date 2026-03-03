@@ -17,6 +17,8 @@ const toggleSessionsBtn = document.getElementById('toggleSessions');
 const sessionDrawer = document.getElementById('sessionDrawer');
 const drawerBackdrop = document.getElementById('drawerBackdrop');
 const closeDrawerBtn = document.getElementById('closeDrawer');
+const rootEl = document.documentElement;
+const mobileViewportQuery = window.matchMedia('(max-width: 980px)');
 
 const newChatBtn = document.getElementById('newChat');
 
@@ -53,6 +55,21 @@ const MAX_MEDIA_BYTES = 6 * 1024 * 1024;
 const MAX_MEDIA_TEXT_CHARS = 18000;
 let monitorTimer = null;
 let pendingMedia = [];
+
+function syncViewportHeight() {
+  const viewportHeight = window.visualViewport?.height || window.innerHeight || 0;
+  if (viewportHeight > 0) {
+    rootEl.style.setProperty('--app-height', `${Math.round(viewportHeight)}px`);
+  }
+}
+
+// Mantiene el textarea compacto y evita que el teclado tape el composer en movil.
+function syncComposerHeight() {
+  if (!inputEl) return;
+  inputEl.style.height = 'auto';
+  const next = Math.max(54, Math.min(inputEl.scrollHeight || 54, 180));
+  inputEl.style.height = `${next}px`;
+}
 
 function escapeHtml(value) {
   const text = value == null ? '' : String(value);
@@ -710,6 +727,11 @@ async function createNewChat() {
     </div>
   `;
 
+  if (inputEl) {
+    inputEl.value = '';
+    syncComposerHeight();
+  }
+
   await loadSessions();
   hideDrawer();
 }
@@ -787,6 +809,7 @@ async function send() {
   }));
 
   inputEl.value = '';
+  syncComposerHeight();
   addMsg('user', pendingMedia.length ? `${text}\n\n[Adjuntos: ${pendingMedia.length}]` : text);
 
   const typingId = showTyping();
@@ -834,23 +857,54 @@ async function send() {
     addMsg('assistant', 'Error: ' + (e.message || 'desconocido'));
   } finally {
     sendBtn.disabled = false;
+    syncComposerHeight();
     inputEl.focus();
   }
 }
 
+// Drawer movil: bloquea el fondo y permite cerrar al volver a escritorio.
+function setDrawerOpen(open) {
+  if (!sessionDrawer) return;
+  const isOpen = !sessionDrawer.classList.contains('hidden');
+  if (isOpen === open) return;
+
+  const updateState = () => {
+    sessionDrawer.classList.toggle('hidden', !open);
+    sessionDrawer.setAttribute('aria-hidden', open ? 'false' : 'true');
+    document.body.classList.toggle('drawer-open', open);
+  };
+
+  if (typeof document.startViewTransition === 'function') {
+    document.startViewTransition(updateState);
+    return;
+  }
+
+  updateState();
+}
+
 /* Drawer mobile */
 function showDrawer() {
-  if (!sessionDrawer) return;
-  sessionDrawer.classList.remove('hidden');
+  setDrawerOpen(true);
 }
 function hideDrawer() {
-  if (!sessionDrawer) return;
-  sessionDrawer.classList.add('hidden');
+  setDrawerOpen(false);
 }
 
 /* Listeners */
 sendBtn?.addEventListener('click', send);
-inputEl?.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+inputEl?.addEventListener('input', () => syncComposerHeight());
+inputEl?.addEventListener('focus', () => {
+  syncComposerHeight();
+  if (window.innerWidth <= 760) {
+    setTimeout(() => inputEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 180);
+  }
+});
+inputEl?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+    e.preventDefault();
+    send();
+  }
+});
 attachBtnEl?.addEventListener('click', () => mediaInputEl?.click());
 cameraBtnEl?.addEventListener('click', () => cameraInputEl?.click());
 clearMediaBtnEl?.addEventListener('click', () => clearMediaSelection());
@@ -893,6 +947,32 @@ window.addEventListener('storage', (e) => {
   }
 });
 
+window.addEventListener('resize', () => {
+  syncViewportHeight();
+  syncComposerHeight();
+  if (!mobileViewportQuery.matches) {
+    hideDrawer();
+  }
+});
+
+window.addEventListener('orientationchange', () => {
+  syncViewportHeight();
+  syncComposerHeight();
+});
+
+window.visualViewport?.addEventListener('resize', syncViewportHeight);
+mobileViewportQuery.addEventListener?.('change', (event) => {
+  if (!event.matches) {
+    hideDrawer();
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    hideDrawer();
+  }
+});
+
 toggleSessionsBtn?.addEventListener('click', showDrawer);
 drawerBackdrop?.addEventListener('click', hideDrawer);
 closeDrawerBtn?.addEventListener('click', hideDrawer);
@@ -902,6 +982,8 @@ sessionSearchMobileEl?.addEventListener('input', () => renderSessions(sessionSea
 
 (async function init() {
   try {
+    syncViewportHeight();
+    syncComposerHeight();
     loadModelSelection();
     syncMonitorIntervalUI();
     loadOpsStatus();
