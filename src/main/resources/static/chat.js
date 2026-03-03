@@ -64,6 +64,13 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+function reasoningLabel(level) {
+  const normalized = String(level || '').toUpperCase();
+  if (normalized === 'HIGH') return 'ALTO';
+  if (normalized === 'LOW') return 'BAJO';
+  return 'MEDIO';
+}
+
 function renderAssistantMarkdown(text) {
   const raw = text || '';
   const fallback = escapeHtml(raw).replace(/\n/g, '<br>');
@@ -291,6 +298,7 @@ function addMsg(who, text, sources = [], meta = null) {
       const safe = meta.safe !== false;
       const confidence = Number.isFinite(meta.confidence) ? Math.max(0, Math.min(1, meta.confidence)) : 0;
       const groundedSources = Number.isFinite(meta.groundedSources) ? Math.max(0, meta.groundedSources) : 0;
+      const reasoning = reasoningLabel(meta.reasoningLevel);
 
       const badge = document.createElement('div');
       badge.className = `mt-3 text-[10px] px-2 py-1 inline-flex items-center gap-2 rounded-full border ${
@@ -298,12 +306,14 @@ function addMsg(who, text, sources = [], meta = null) {
           ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
           : 'border-amber-500/40 bg-amber-500/10 text-amber-200'
       }`;
-      badge.textContent = `${safe ? 'Grounding OK' : 'No seguro'} - Confianza ${Math.round(confidence * 100)}% - Fuentes ${groundedSources}`;
+      badge.textContent = `${safe ? 'Grounding OK' : 'No seguro'} - Confianza ${Math.round(confidence * 100)}% - Fuentes ${groundedSources} - Razonamiento ${reasoning}`;
       div.appendChild(badge);
     } else {
+      const reasoning = reasoningLabel(meta.reasoningLevel);
+      const plan = meta.ragNeeded === true ? 'Plan: RAG' : 'Plan: sin RAG';
       const badge = document.createElement('div');
       badge.className = 'mt-3 text-[10px] px-2 py-1 inline-flex items-center gap-2 rounded-full border border-slate-600/50 bg-slate-700/20 text-slate-300';
-      badge.textContent = 'Modo: Chat rapido (sin RAG)';
+      badge.textContent = `${plan} - Razonamiento ${reasoning}`;
       div.appendChild(badge);
     }
   }
@@ -808,7 +818,9 @@ async function send() {
       safe: data?.safe !== false,
       confidence: Number(data?.confidence || 0),
       groundedSources: Number(data?.groundedSources || 0),
-      ragUsed: data?.ragUsed === true
+      ragUsed: data?.ragUsed === true,
+      ragNeeded: data?.ragNeeded === true,
+      reasoningLevel: String(data?.reasoningLevel || 'MEDIUM')
     };
 
     addMsg('assistant', reply, data.sources, responseMeta);

@@ -35,9 +35,9 @@ ollama:
   base-url: ${OLLAMA_BASE_URL:http://192.168.1.61:11434/api}
   #base-url: ${OLLAMA_BASE_URL:http://ollama:11434/api}
   # Modelo para generaciÃƒÂ³n de chat.
-  chat-model: llama3.1:8b
+  chat-model: qwen3:14b
   # Modelo rÃƒÂ¡pido para chats ligeros (menor consumo).
-  fast-chat-model: gemma2:9b
+  fast-chat-model: qwen2.5:7b
   # Modelo visual para etapa intermedia de imagen/camara/documento.
   visual-model: qwen2.5vl:7b
   # Mini-modelo opcional para depurar respuestas y quitar relleno.
@@ -49,7 +49,7 @@ ollama:
 
 rag:
   # NÃƒÂºmero de chunks mÃƒÂ¡s relevantes a recuperar por consulta.
-  top-k: 6
+  top-k: 10
   # MÃƒÂ¡ximo de mensajes previos en el historial de contexto.
   max-history: 16
   retrieval:
@@ -62,6 +62,21 @@ rag:
     # TamaÃƒÂ±o y solapamiento de cada chunk de texto.
     size: 700
     overlap: 120
+  vector:
+    # Directorio local del indice HNSW. Se reconstruye desde `vectors` al arrancar.
+    index-dir: data/rag-hnsw
+    # Mantiene el indice HNSW alineado con la tabla durable de embeddings.
+    rebuild-on-startup: true
+  migration:
+    # Si existe la estructura vieja `knowledge_document`, la absorbe al nuevo esquema al arrancar.
+    legacy-enabled: true
+  context:
+    # Cuantos chunks comprimidos terminan dentro del prompt final.
+    max-chunks: 5
+    # Maximo de fragmentos relevantes que se conservan por chunk.
+    max-snippets-per-chunk: 2
+    # Recorte maximo por chunk una vez comprimido.
+    max-chars-per-chunk: 420
   rerank:
     # Numero de candidatos semÃƒÂ¡nticos previos al rerank con MMR.
     candidates: 10
@@ -82,8 +97,47 @@ rag:
   score:
     # Puntaje minimo para aceptar un chunk en la busqueda inicial.
     min: 0.22
+    # Umbral minimo para considerar que existe evidencia util en la base.
+    evidence-threshold: 0.45
+  maintenance:
+    # Activa el robot que recorre el corpus en segundo plano.
+    enabled: true
+    # Si es true, audita candidatos sin borrar nada.
+    dry-run: false
+    # Frecuencia objetivo entre barridos completos.
+    interval-ms: 180000
+    # Tick interno del scheduler para revisar si toca una nueva pasada.
+    tick-ms: 15000
+    # Tamano de cada pagina de documentos por barrido.
+    page-size: 40
+    # Cuantos eventos recientes se mantienen en memoria para la UI.
+    max-events: 120
+    # Umbrales minimos para descartar documentos/chunks sin valor.
+    min-document-chars: 30
+    min-document-tokens: 4
+    min-chunk-chars: 20
+    min-chunk-tokens: 3
+    # Limite de copias exactas de una misma linea dentro de un documento.
+    max-line-copies: 1
+    # Tiempo para que un admin resuelva casos warning antes de pedir decision al modelo ligero.
+    warning-review-hours: 48
+    # Tiempo adicional tras la decision IA antes de auto-aplicar el cambio.
+    ai-auto-apply-hours: 24
+    # Si un documento no se usa durante este tiempo, entra en cola de revision.
+    unused-days-threshold: 30
+    # Longitud maxima del snippet mostrado en la cola de revision.
+    snippet-chars: 600
 
 chat:
+  rag-gate:
+    # Compuerta barata para decidir si merece la pena pagar retrieval + embedding.
+    enabled: true
+    # Si la query tecnica es demasiado corta, no entra en RAG preferido.
+    min-preferred-query-chars: 18
+    # Requiere al menos este numero de tokens informativos para probar metadata/tags.
+    min-preferred-query-tokens: 2
+    # Cuantos tokens largos de la query se usan para buscar pistas en title/source/tags.
+    max-probe-terms: 3
   queue:
     # Retraso en ms para suavizar picos de trÃƒÂ¡fico por sesiÃƒÂ³n.
     delay-ms: 15
@@ -99,6 +153,8 @@ chat:
     retry-primary-model: true
     # Mensaje final cuando no hay base suficiente.
     fallback-message: "No tengo suficiente contexto para responder con precision. Puedes compartir una frase mas o pegar el fragmento exacto?"
+    # Mensaje especifico cuando el retrieval no encuentra evidencia util.
+    no-evidence-message: "No encontre evidencia en tu base para responder eso. Puedes compartir una ruta, fecha, log o fragmento del documento?"
   response-guard:
     # Segunda pasada para eliminar informacion innecesaria en la respuesta final.
     enabled: true

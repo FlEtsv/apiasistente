@@ -977,6 +977,59 @@
                         <div class="sub">Config: topK <span id="ragTopK">-</span> / chunk <span id="ragChunkConfig">-</span></div>
                         <div class="sub">Ultima actualizacion: <span id="ragLastUpdated">-</span></div>
                     </div>
+                    <div class="stat" sec:authorize="hasAuthority('PERM_RAG')">
+                        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;">
+                            <strong>Robot RAG</strong>
+                            <span id="ragRobotState" class="pill"><span id="ragRobotDot" class="dot"></span><span id="ragRobotStateLabel">Sin datos</span></span>
+                        </div>
+                        <div class="sub">Modo: <span id="ragRobotMode">-</span></div>
+                        <div class="sub">Intervalo: <span id="ragRobotInterval">-</span></div>
+                        <div class="sub">Siguiente pasada: <span id="ragRobotNextRun">-</span></div>
+                        <div class="sub">Ahora mismo: <span id="ragRobotCurrent">-</span></div>
+                        <div class="sub">Corpus: <span id="ragRobotCorpus">-</span></div>
+                        <div class="sub">Huella estimada: <span id="ragRobotStorage">-</span></div>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+                            <button id="btnRagRobotRun" class="btn">Barrer ahora</button>
+                            <button id="btnRagRobotPause" class="btn">Pausar</button>
+                            <button id="btnRagRobotResume" class="btn">Reanudar</button>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:10px;">
+                            <label class="sub" style="display:flex; align-items:center; gap:6px;">
+                                <input id="ragRobotDryRun" type="checkbox" />
+                                Solo analizar
+                            </label>
+                            <input id="ragRobotIntervalInput" class="session-search" style="max-width: 110px;" placeholder="seg" />
+                            <button id="btnRagRobotApply" class="btn">Aplicar</button>
+                        </div>
+                        <div class="sub" style="margin-top:10px;">Ultimo barrido: <span id="ragRobotLastRun">-</span></div>
+                        <div class="sub">Resumen: <span id="ragRobotSummary">-</span></div>
+                        <div class="sub">Ahorro estimado: <span id="ragRobotFreed">-</span></div>
+                        <div id="ragRobotEvents" class="event-list">
+                            <div class="event-item">
+                                <div class="event-head">
+                                    <span>Sin actividad</span>
+                                    <span class="event-badge recover">IDLE</span>
+                                </div>
+                                <div class="sub">Esperando el primer barrido del robot.</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="stat" sec:authorize="hasAuthority('PERM_RAG')">
+                        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;">
+                            <strong>Decisiones RAG</strong>
+                            <button id="btnRagCasesRefresh" class="btn">Refrescar</button>
+                        </div>
+                        <div class="sub">Casos abiertos y revisiones pendientes del corpus.</div>
+                        <div id="ragCaseList" class="event-list">
+                            <div class="event-item">
+                                <div class="event-head">
+                                    <span>Sin casos</span>
+                                    <span class="event-badge recover">OK</span>
+                                </div>
+                                <div class="sub">Todavia no hay decisiones pendientes.</div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </aside>
         </section>
@@ -1134,6 +1187,7 @@
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
 <script src="/chat.js?v=9"></script>
 <script src="/api-keys.js?v=2"></script>
+<script src="/rag-maintenance.js?v=1"></script>
 
 </body>
 </html>

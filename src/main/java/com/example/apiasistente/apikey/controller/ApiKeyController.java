@@ -1,0 +1,44 @@
+package com.example.apiasistente.apikey.controller;
+
+import com.example.apiasistente.apikey.dto.ApiKeyCreateRequest;
+import com.example.apiasistente.apikey.dto.ApiKeyCreateResponse;
+import com.example.apiasistente.apikey.dto.ApiKeyDto;
+import com.example.apiasistente.apikey.service.ApiKeyService;
+import jakarta.validation.Valid;
+import org.springframework.web.bind.annotation.*;
+
+import java.security.Principal;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Controlador para API Key.
+ */
+@RestController
+@RequestMapping("/api/api-keys")
+public class ApiKeyController {
+
+    private final ApiKeyService apiKeyService;
+
+    public ApiKeyController(ApiKeyService apiKeyService) {
+        this.apiKeyService = apiKeyService;
+    }
+
+    @GetMapping
+    public List<ApiKeyDto> listMine(Principal principal) {
+        return apiKeyService.listMine(principal.getName());
+    }
+
+    @PostMapping
+    public ApiKeyCreateResponse create(@Valid @RequestBody ApiKeyCreateRequest req, Principal principal) {
+        return apiKeyService.createForUser(principal.getName(), req.getLabel(), req.isSpecialModeEnabled());
+    }
+
+    @DeleteMapping("/{id}")
+    public Map<String, String> revoke(@PathVariable Long id, Principal principal) {
+        apiKeyService.revokeMine(principal.getName(), id);
+        return Map.of("ok", "true");
+    }
+}
+
+
