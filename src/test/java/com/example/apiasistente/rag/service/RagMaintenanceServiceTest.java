@@ -2,9 +2,12 @@ package com.example.apiasistente.rag.service;
 
 import com.example.apiasistente.chat.repository.ChatMessageSourceRepository;
 import com.example.apiasistente.rag.config.RagMaintenanceProperties;
+import com.example.apiasistente.rag.dto.RagMaintenanceCaseDecisionRequest;
 import com.example.apiasistente.rag.entity.KnowledgeChunk;
 import com.example.apiasistente.rag.entity.KnowledgeDocument;
+import com.example.apiasistente.rag.entity.RagMaintenanceAction;
 import com.example.apiasistente.rag.entity.RagMaintenanceCase;
+import com.example.apiasistente.rag.entity.RagMaintenanceCaseStatus;
 import com.example.apiasistente.rag.entity.RagMaintenanceIssueType;
 import com.example.apiasistente.rag.entity.RagMaintenanceSeverity;
 import com.example.apiasistente.rag.repository.KnowledgeChunkRepository;
@@ -32,6 +35,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -90,18 +94,18 @@ class RagMaintenanceServiceTest {
                 120
         );
 
-        when(caseRepo.save(any(RagMaintenanceCase.class))).thenAnswer(invocation -> {
+        lenient().when(caseRepo.save(any(RagMaintenanceCase.class))).thenAnswer(invocation -> {
             RagMaintenanceCase ragCase = invocation.getArgument(0);
             if (ragCase.getId() == null) {
                 ReflectionTestUtils.setField(ragCase, "id", 900L);
             }
             return ragCase;
         });
-        when(caseRepo.findFirstByDocumentIdAndStatusInOrderByCreatedAtDesc(anyLong(), anyCollection()))
+        lenient().when(caseRepo.findFirstByDocumentIdAndStatusInOrderByCreatedAtDesc(anyLong(), anyCollection()))
                 .thenReturn(Optional.empty());
-        when(caseRepo.findTop100ByStatusAndAdminDueAtBeforeOrderByAdminDueAtAsc(any(), any()))
+        lenient().when(caseRepo.findTop100ByStatusAndAdminDueAtBeforeOrderByAdminDueAtAsc(any(), any()))
                 .thenReturn(List.of());
-        when(caseRepo.findTop100ByStatusAndAutoApplyAtBeforeOrderByAutoApplyAtAsc(any(), any()))
+        lenient().when(caseRepo.findTop100ByStatusAndAutoApplyAtBeforeOrderByAutoApplyAtAsc(any(), any()))
                 .thenReturn(List.of());
     }
 
@@ -116,7 +120,7 @@ class RagMaintenanceServiceTest {
                 .thenReturn(List.of(chunk(201L, newest, 0, "Contexto tecnico util sobre endpoints y despliegue.")));
         when(chunkRepo.findActiveByDocumentIdOrderByChunkIndexAsc(10L))
                 .thenReturn(List.of(chunk(101L, olderDuplicate, 0, "Contexto tecnico util sobre endpoints y despliegue.")));
-        when(sourceRepo.countByChunk_Document_Id(anyLong())).thenReturn(1L);
+        when(sourceRepo.countBySourceDocumentId(anyLong())).thenReturn(1L);
         when(sourceRepo.findLastUsedAtByDocumentId(anyLong())).thenReturn(null);
         mockCorpusSnapshots(2L, 2L, 120L, 220L, 320L);
 
@@ -139,7 +143,7 @@ class RagMaintenanceServiceTest {
         when(docRepo.findSweepPage(eq(30L), any(Pageable.class))).thenReturn(List.of());
         when(chunkRepo.findActiveByDocumentIdOrderByChunkIndexAsc(30L))
                 .thenReturn(List.of(chunk(301L, doc, 0, "@@@ ### %% ???")));
-        when(sourceRepo.countByChunk_Document_Id(30L)).thenReturn(0L);
+        when(sourceRepo.countBySourceDocumentId(30L)).thenReturn(0L);
         when(sourceRepo.findLastUsedAtByDocumentId(30L)).thenReturn(null);
         when(advisorService.advise(any(RagMaintenanceCase.class)))
                 .thenReturn(new RagMaintenanceAdvisorService.Advice(
@@ -159,6 +163,31 @@ class RagMaintenanceServiceTest {
         RagMaintenanceCase last = captor.getAllValues().get(captor.getAllValues().size() - 1);
         assertNotNull(last.getResolvedAt());
         assertEquals(com.example.apiasistente.rag.entity.RagMaintenanceAction.DELETE, last.getFinalAction());
+    }
+
+    @Test
+    void manualDeleteDecisionExecutesDocumentRemoval() {
+        RagMaintenanceCase ragCase = new RagMaintenanceCase();
+        ReflectionTestUtils.setField(ragCase, "id", 77L);
+        ragCase.setDocumentId(30L);
+        ragCase.setOwner("global");
+        ragCase.setDocumentTitle("Doc roto");
+        ragCase.setSeverity(RagMaintenanceSeverity.CRITICAL);
+        ragCase.setIssueType(RagMaintenanceIssueType.BAD_STRUCTURE);
+        ragCase.setStatus(RagMaintenanceCaseStatus.OPEN);
+        ragCase.setRecommendedAction(RagMaintenanceAction.DELETE);
+
+        when(caseRepo.findById(77L)).thenReturn(Optional.of(ragCase));
+
+        RagMaintenanceCaseDecisionRequest request = new RagMaintenanceCaseDecisionRequest();
+        request.setAction("DELETE");
+
+        var result = service.decideCase(77L, request, "ana");
+
+        verify(ragService).deleteDocumentById(30L);
+        assertEquals("EXECUTED", result.status());
+        assertEquals("DELETE", result.finalAction());
+        assertEquals("ana", result.resolvedBy());
     }
 
     private void mockCorpusSnapshots(long docs,

@@ -44,7 +44,7 @@ public class OllamaClient {
         ChatRequest req = new ChatRequest(
                 resolvedModel,
                 messages,
-                props.isStream() ? true : false,
+                props.isStream(),
                 Map.of("temperature", temperature)
         );
 
@@ -58,36 +58,38 @@ public class OllamaClient {
         return res.message.content == null ? "" : res.message.content;
     }
 
+    /**
+     * Retrieval usa un solo embedding por consulta; se alinea con el endpoint actual `/embed`.
+     */
     public double[] embedOne(String text) {
         try {
-            String model = props.getEmbedModel().trim();
-            EmbeddingsRequest req = new EmbeddingsRequest(model, text);
-
-            EmbeddingsResponse res = ollama.post()
-                    .uri("/embeddings")
+            EmbedRequest req = new EmbedRequest(requireEmbedModel(), text);
+            EmbedResponse res = ollama.post()
+                    .uri("/embed")
                     .body(req)
                     .retrieve()
-                    .body(EmbeddingsResponse.class);
+                    .body(EmbedResponse.class);
 
-            if (res == null || res.embedding() == null || res.embedding().isEmpty()) return new double[0];
-            return toPrimitive(res.embedding());
+            if (res == null || res.embeddings == null || res.embeddings.isEmpty()) {
+                return new double[0];
+            }
 
+            List<Double> firstEmbedding = res.embeddings.get(0);
+            if (firstEmbedding == null || firstEmbedding.isEmpty()) {
+                return new double[0];
+            }
+            return toPrimitive(firstEmbedding);
         } catch (HttpClientErrorException | HttpServerErrorException e) {
             throw new IllegalStateException(
-                    "Ollama embeddings fallÃ³. Status=" + e.getStatusCode() +
+                    "Ollama embed fallo. Status=" + e.getStatusCode() +
                             " Body=" + e.getResponseBodyAsString(),
                     e
             );
         }
     }
 
-    // DTOs (ajÃºstalos a tu estilo/paquete)
-    public record EmbeddingsRequest(String model, String prompt) {}
-    public record EmbeddingsResponse(java.util.List<Double> embedding) {}
-
-
     public List<double[]> embedMany(List<String> texts) {
-        EmbedRequest req = new EmbedRequest(props.getEmbedModel(), texts);
+        EmbedRequest req = new EmbedRequest(requireEmbedModel(), texts);
         EmbedResponse res = ollama.post()
                 .uri("/embed")
                 .body(req)
@@ -99,13 +101,19 @@ public class OllamaClient {
     }
 
     public String toJson(double[] v) {
-        try { return mapper.writeValueAsString(v); }
-        catch (Exception e) { throw new IllegalStateException("No se pudo serializar embedding", e); }
+        try {
+            return mapper.writeValueAsString(v);
+        } catch (Exception e) {
+            throw new IllegalStateException("No se pudo serializar embedding", e);
+        }
     }
 
     public double[] fromJson(String json) {
-        try { return mapper.readValue(json, double[].class); }
-        catch (Exception e) { return new double[0]; }
+        try {
+            return mapper.readValue(json, double[].class);
+        } catch (Exception e) {
+            return new double[0];
+        }
     }
 
     private double[] toPrimitive(List<Double> list) {
@@ -118,6 +126,14 @@ public class OllamaClient {
         public Message(String role, String content) {
             this(role, content, List.of());
         }
+    }
+
+    private String requireEmbedModel() {
+        String model = props.getEmbedModel();
+        if (model == null || model.isBlank()) {
+            throw new IllegalStateException("No hay modelo de embeddings configurado (ollama.embed-model).");
+        }
+        return model.trim();
     }
 
     private double resolveTemperature() {
@@ -144,5 +160,3 @@ public class OllamaClient {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record EmbedResponse(String model, List<List<Double>> embeddings) {}
 }
-
-

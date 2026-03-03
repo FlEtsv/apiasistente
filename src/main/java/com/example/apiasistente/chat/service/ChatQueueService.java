@@ -70,7 +70,14 @@ public class ChatQueueService {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("La cola de chat fue interrumpida.", e);
         } catch (ExecutionException e) {
-            throw new IllegalStateException("Error procesando mensaje en la cola.", e.getCause());
+            Throwable cause = e.getCause();
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            if (cause instanceof Error error) {
+                throw error;
+            }
+            throw new IllegalStateException("Error procesando mensaje en la cola.", cause);
         }
     }
 

@@ -19,10 +19,14 @@ const ragRobotResumeBtn = document.getElementById('btnRagRobotResume');
 const ragRobotApplyBtn = document.getElementById('btnRagRobotApply');
 const ragCaseListEl = document.getElementById('ragCaseList');
 const ragCasesRefreshBtn = document.getElementById('btnRagCasesRefresh');
+const ragCaseActionStatusEl = document.getElementById('ragCaseActionStatus');
 
 if (ragRobotStateEl) {
   let ragRobotBusy = false;
+  let ragCasesCache = [];
   let ragCaseBusyId = null;
+  let ragCaseBusyAction = null;
+  let ragCaseBusyTitle = '';
 
   function getCsrfToken() {
     const token = document.querySelector('meta[name="_csrf"]')?.getAttribute('content');
@@ -34,6 +38,38 @@ if (ragRobotStateEl) {
     const { token, header } = getCsrfToken();
     if (token && header) headers[header] = token;
     return headers;
+  }
+
+  async function readResponsePayload(res) {
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      return await res.json().catch(() => null);
+    }
+    return await res.text().catch(() => '');
+  }
+
+  function extractErrorMessage(payload, status) {
+    if (payload == null) return `HTTP ${status}`;
+    if (typeof payload === 'string') {
+      return payload.trim() || `HTTP ${status}`;
+    }
+    const details = Array.isArray(payload.details) && payload.details.length
+      ? ` (${payload.details.join(' | ')})`
+      : '';
+    const message = payload.message || payload.error || payload.title;
+    return message ? `${message}${details}` : `HTTP ${status}${details}`;
+  }
+
+  async function fetchJsonOrThrow(url, options = {}) {
+    const res = await fetch(url, {
+      credentials: 'same-origin',
+      ...options
+    });
+    const payload = await readResponsePayload(res);
+    if (!res.ok) {
+      throw new Error(extractErrorMessage(payload, res.status));
+    }
+    return payload;
   }
 
   function formatDateTime(value) {
@@ -59,9 +95,33 @@ if (ragRobotStateEl) {
 
   function setBusy(nextBusy) {
     ragRobotBusy = nextBusy;
-    [ragRobotRunBtn, ragRobotPauseBtn, ragRobotResumeBtn, ragRobotApplyBtn, ragCasesRefreshBtn].forEach(btn => {
+    [ragRobotRunBtn, ragRobotPauseBtn, ragRobotResumeBtn, ragRobotApplyBtn].forEach(btn => {
       if (btn) btn.disabled = nextBusy;
     });
+    if (ragCasesRefreshBtn) {
+      ragCasesRefreshBtn.disabled = nextBusy || ragCaseBusyId != null;
+    }
+  }
+
+  function setCaseBusy(caseId, action, title) {
+    const normalizedId = caseId == null ? null : Number(caseId);
+    ragCaseBusyId = Number.isFinite(normalizedId) ? normalizedId : null;
+    ragCaseBusyAction = ragCaseBusyId == null ? null : String(action || '').toUpperCase();
+    ragCaseBusyTitle = ragCaseBusyId == null ? '' : (title || '');
+    if (ragCasesRefreshBtn) {
+      ragCasesRefreshBtn.disabled = ragRobotBusy || ragCaseBusyId != null;
+    }
+  }
+
+  function setCaseActionStatus(level, message) {
+    if (!ragCaseActionStatusEl) return;
+    const normalized = String(level || 'info').toLowerCase();
+    ragCaseActionStatusEl.textContent = message || 'Sin acciones manuales recientes.';
+    ragCaseActionStatusEl.style.color =
+      normalized === 'error' ? '#fca5a5' :
+      normalized === 'success' ? '#86efac' :
+      normalized === 'progress' ? '#7dd3fc' :
+      '';
   }
 
   function stateConfig(data) {
@@ -75,6 +135,20 @@ if (ragRobotStateEl) {
   function eventBadgeClass(level) {
     const normalized = String(level || 'INFO').toUpperCase();
     return normalized === 'ERROR' || normalized === 'WARN' ? 'alert' : 'recover';
+  }
+
+  function actionLabel(action, inProgress = false) {
+    const normalized = String(action || '').toUpperCase();
+    if (inProgress) {
+      if (normalized === 'DELETE') return 'Eliminando...';
+      if (normalized === 'RESTRUCTURE') return 'Reestructurando...';
+      if (normalized === 'KEEP') return 'Guardando...';
+      return 'Procesando...';
+    }
+    if (normalized === 'DELETE') return 'Eliminar';
+    if (normalized === 'RESTRUCTURE') return 'Reestructurar';
+    if (normalized === 'KEEP') return 'Mantener';
+    return normalized || 'Accion';
   }
 
   function renderEvents(events) {
@@ -151,18 +225,22 @@ if (ragRobotStateEl) {
     const status = String(item.status || '').toUpperCase();
     if (status === 'EXECUTED' || status === 'RESOLVED') return '';
 
-    const disable = ragCaseBusyId === item.id ? 'disabled' : '';
+    const isBusyCase = ragCaseBusyId === Number(item.id);
+    const anyBusy = ragCaseBusyId != null;
+    const disable = anyBusy ? 'disabled' : '';
+
     return `
       <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">
-        <button class="btn rag-case-action" data-case-id="${item.id}" data-action="KEEP" ${disable}>Mantener</button>
-        <button class="btn rag-case-action" data-case-id="${item.id}" data-action="RESTRUCTURE" ${disable}>Reestructurar</button>
-        <button class="btn rag-case-action" data-case-id="${item.id}" data-action="DELETE" ${disable}>Eliminar</button>
+        <button class="btn rag-case-action" data-case-id="${item.id}" data-action="KEEP" ${disable}>${isBusyCase && ragCaseBusyAction === 'KEEP' ? actionLabel('KEEP', true) : actionLabel('KEEP')}</button>
+        <button class="btn rag-case-action" data-case-id="${item.id}" data-action="RESTRUCTURE" ${disable}>${isBusyCase && ragCaseBusyAction === 'RESTRUCTURE' ? actionLabel('RESTRUCTURE', true) : actionLabel('RESTRUCTURE')}</button>
+        <button class="btn rag-case-action" data-case-id="${item.id}" data-action="DELETE" ${disable}>${isBusyCase && ragCaseBusyAction === 'DELETE' ? actionLabel('DELETE', true) : actionLabel('DELETE')}</button>
       </div>
     `;
   }
 
   function renderCases(cases) {
     if (!ragCaseListEl) return;
+    ragCasesCache = Array.isArray(cases) ? cases : [];
     if (!Array.isArray(cases) || cases.length === 0) {
       ragCaseListEl.innerHTML = `
         <div class="event-item">
@@ -178,6 +256,7 @@ if (ragRobotStateEl) {
 
     ragCaseListEl.innerHTML = '';
     cases.forEach(item => {
+      const isBusyCase = ragCaseBusyId === Number(item.id);
       const event = document.createElement('div');
       event.className = 'event-item';
       event.innerHTML = `
@@ -185,11 +264,12 @@ if (ragRobotStateEl) {
           <span>${item.documentTitle || 'Documento'}</span>
           <span class="event-badge ${caseSeverityColor(item.severity)}">${item.severity || 'CASE'}</span>
         </div>
-        <div class="sub"><strong>${item.issueType || '-'}</strong> · estado ${item.status || '-'}</div>
+        <div class="sub"><strong>${item.issueType || '-'}</strong> - estado ${item.status || '-'}</div>
         <div class="sub">${item.summary || '-'}</div>
-        <div class="sub">Uso: ${item.usageCount || 0} · Ultimo uso: ${formatDateTime(item.lastUsedAt)}</div>
-        <div class="sub">Admin hasta: ${formatDateTime(item.adminDueAt)} · Auto: ${formatDateTime(item.autoApplyAt)}</div>
-        <div class="sub">IA: ${(item.aiSuggestedAction || '-')}${item.aiReason ? ` · ${item.aiReason}` : ''}</div>
+        <div class="sub">Uso: ${item.usageCount || 0} - Ultimo uso: ${formatDateTime(item.lastUsedAt)}</div>
+        <div class="sub">Admin hasta: ${formatDateTime(item.adminDueAt)} - Auto: ${formatDateTime(item.autoApplyAt)}</div>
+        <div class="sub">IA: ${(item.aiSuggestedAction || '-')}${item.aiReason ? ` - ${item.aiReason}` : ''}</div>
+        ${isBusyCase ? `<div class="sub" style="color:#7dd3fc;">Procesando decision ${actionLabel(ragCaseBusyAction)} para ${escapeHtml(ragCaseBusyTitle || item.documentTitle || 'el caso')}.</div>` : ''}
         ${item.proposedContent ? `<details style="margin-top:8px;"><summary class="sub" style="cursor:pointer;">Ver propuesta</summary><pre class="sub" style="white-space:pre-wrap; margin-top:6px;">${escapeHtml(item.proposedContent)}</pre></details>` : ''}
         ${decisionButtons(item)}
       `;
@@ -217,9 +297,7 @@ if (ragRobotStateEl) {
 
   async function fetchStatus() {
     try {
-      const res = await fetch('/api/rag/maintenance/status', { credentials: 'same-origin' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      const data = await fetchJsonOrThrow('/api/rag/maintenance/status');
       renderStatus(data);
     } catch (error) {
       if (ragRobotSummaryEl) ragRobotSummaryEl.textContent = `Error cargando robot: ${error.message || 'error'}`;
@@ -229,9 +307,7 @@ if (ragRobotStateEl) {
   async function fetchCases() {
     if (!ragCaseListEl) return;
     try {
-      const res = await fetch('/api/rag/maintenance/cases', { credentials: 'same-origin' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
+      const data = await fetchJsonOrThrow('/api/rag/maintenance/cases');
       renderCases(data);
     } catch (error) {
       ragCaseListEl.innerHTML = `
@@ -249,14 +325,11 @@ if (ragRobotStateEl) {
   async function postAction(url, body) {
     setBusy(true);
     try {
-      const res = await fetch(url, {
+      const data = await fetchJsonOrThrow(url, {
         method: 'POST',
-        credentials: 'same-origin',
         headers: withCsrf({ 'Content-Type': 'application/json' }),
         body: body == null ? null : JSON.stringify(body)
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
       renderStatus(data);
       await fetchCases();
     } catch (error) {
@@ -267,21 +340,29 @@ if (ragRobotStateEl) {
   }
 
   async function postCaseDecision(caseId, action) {
-    ragCaseBusyId = Number(caseId);
+    const currentCase = ragCasesCache.find(item => Number(item.id) === Number(caseId));
+    const title = currentCase?.documentTitle || `caso ${caseId}`;
+    setCaseBusy(caseId, action, title);
+    setCaseActionStatus('progress', `${actionLabel(action, true)} ${title}`);
+    renderCases(ragCasesCache);
+
     try {
-      const res = await fetch(`/api/rag/maintenance/cases/${caseId}/decision`, {
+      const updatedCase = await fetchJsonOrThrow(`/api/rag/maintenance/cases/${caseId}/decision`, {
         method: 'POST',
-        credentials: 'same-origin',
         headers: withCsrf({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ action })
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await fetchStatus();
       await fetchCases();
+      const finalStatus = updatedCase?.status || updatedCase?.finalAction || 'OK';
+      setCaseActionStatus('success', `Decision ${actionLabel(action)} aplicada a ${title}. Estado: ${finalStatus}.`);
     } catch (error) {
-      if (ragRobotSummaryEl) ragRobotSummaryEl.textContent = `Error aplicando decision: ${error.message || 'error'}`;
+      const message = error.message || 'error';
+      if (ragRobotSummaryEl) ragRobotSummaryEl.textContent = `Error aplicando decision: ${message}`;
+      setCaseActionStatus('error', `Error al aplicar ${actionLabel(action)} en ${title}: ${message}`);
     } finally {
-      ragCaseBusyId = null;
+      setCaseBusy(null, null, '');
+      renderCases(ragCasesCache);
     }
   }
 

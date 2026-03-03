@@ -85,7 +85,17 @@ public class ChatTurnService {
         // 4. Persiste la salida del asistente y enlaza fuentes cuando hubo grounding real.
         ChatMessage assistantMsg = historyService.saveAssistantMessage(context.session(), outcome.assistantText());
         if (ragContext.ragUsed()) {
-            historyService.persistSources(assistantMsg, ragContext.scored());
+            try {
+                historyService.persistSources(assistantMsg, ragContext.scored());
+            } catch (RuntimeException ex) {
+                log.warn(
+                        "No se pudieron persistir fuentes RAG para sessionId={} messageId={} cause={}",
+                        context.session().getId(),
+                        assistantMsg.getId(),
+                        ex.getMessage(),
+                        ex
+                );
+            }
         }
 
         // 5. Actualiza metadata operativa de la sesion y resume el resultado para el cliente.

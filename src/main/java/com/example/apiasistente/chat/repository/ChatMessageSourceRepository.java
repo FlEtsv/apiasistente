@@ -13,13 +13,13 @@ import java.time.Instant;
  */
 public interface ChatMessageSourceRepository extends JpaRepository<ChatMessageSource, Long> {
 
-    long countByChunk_Document_Id(Long documentId);
+    long countBySourceDocumentId(Long documentId);
 
     @Query("""
         select max(m.createdAt)
         from ChatMessageSource s
         join s.message m
-        where s.chunk.document.id = :documentId
+        where s.sourceDocumentId = :documentId
     """)
     Instant findLastUsedAtByDocumentId(@Param("documentId") Long documentId);
 }

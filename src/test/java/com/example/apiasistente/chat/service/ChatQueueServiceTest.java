@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.when;
 
@@ -56,6 +57,19 @@ class ChatQueueServiceTest {
         InOrder order = inOrder(chatService);
         order.verify(chatService).chat("user", "sid", "primero", "default", null, List.of());
         order.verify(chatService).chat("user", "sid", "segundo", "default", null, List.of());
+    }
+
+    @Test
+    void chatAndWaitRethrowsOriginalRuntimeCause() {
+        when(chatService.chat("user", "sid", "consulta RAG", "default", null, List.of()))
+                .thenThrow(new IllegalStateException("Ollama embed fallo"));
+
+        IllegalStateException error = assertThrows(
+                IllegalStateException.class,
+                () -> queueService.chatAndWait("user", "sid", "consulta RAG", "default", null, List.of())
+        );
+
+        assertEquals("Ollama embed fallo", error.getMessage());
     }
 }
 

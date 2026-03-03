@@ -59,6 +59,10 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
 
 /**
  * Robot que mantiene el corpus RAG compacto, auditable y con cola de decision.
+ *
+ * Responsabilidad:
+ * - Revisar el corpus en segundo plano y abrir casos cuando detecta estructura o contenido degradado.
+ * - Ejecutar o escalar decisiones con trazabilidad para admin y para la home.
  */
 @Service
 public class RagMaintenanceService {
@@ -412,7 +416,7 @@ public class RagMaintenanceService {
                                               List<KnowledgeChunk> chunks,
                                               Map<String, Set<String>> fingerprintsByOwner) {
         String owner = normalizeOwner(doc.getOwner());
-        long usageCount = sourceRepo.countByChunk_Document_Id(doc.getId());
+        long usageCount = sourceRepo.countBySourceDocumentId(doc.getId());
         Instant lastUsedAt = sourceRepo.findLastUsedAtByDocumentId(doc.getId());
         String documentText = RagService.rebuildDocumentText(chunks);
         CleanContentResult cleaned = cleanContent(documentText);

@@ -101,13 +101,21 @@ public class ChatHistoryService {
         // Persistimos todos los chunks devueltos para trazabilidad posterior del turno.
         List<ChatMessageSource> links = new ArrayList<>(scored.size());
         for (RagService.ScoredChunk scoredChunk : scored) {
+            if (scoredChunk == null || scoredChunk.chunk() == null || scoredChunk.chunk().getDocument() == null) {
+                continue;
+            }
             ChatMessageSource link = new ChatMessageSource();
             link.setMessage(assistantMsg);
-            link.setChunk(scoredChunk.chunk());
+            link.setSourceChunkId(scoredChunk.chunk().getId());
+            link.setSourceDocumentId(scoredChunk.chunk().getDocument().getId());
+            link.setSourceDocumentTitle(scoredChunk.chunk().getDocument().getTitle());
+            link.setSourceSnippet(scoredChunk.effectiveText());
             link.setScore(scoredChunk.score());
             links.add(link);
         }
-        sourceRepo.saveAll(links);
+        if (!links.isEmpty()) {
+            sourceRepo.saveAll(links);
+        }
     }
 
     /**

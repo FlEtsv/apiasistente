@@ -40,6 +40,10 @@ import java.util.stream.Collectors;
  * 2. `chunks` guarda texto append-only y metadata operativa por fragmento.
  * 3. `vectors` guarda embeddings durables para reconstruccion.
  * 4. `RagVectorIndexService` mantiene el indice HNSW que realmente usa retrieval.
+ *
+ * Responsabilidad:
+ * - Coordinar ingesta, versionado, retrieval y borrado sobre la arquitectura nueva.
+ * - Mantener aislados los detalles de chunking, fingerprinting e indexacion del resto de la app.
  */
 @Service
 public class RagService {
@@ -57,6 +61,7 @@ public class RagService {
     private final KnowledgeChunkRepository chunkRepo;
     private final KnowledgeVectorRepository vectorRepo;
     private final RagVectorIndexService vectorIndexService;
+    private final RagOpsService ragOpsService;
     private final OllamaClient ollama;
 
     @Value("${rag.top-k:10}")
@@ -105,11 +110,13 @@ public class RagService {
                       KnowledgeChunkRepository chunkRepo,
                       KnowledgeVectorRepository vectorRepo,
                       RagVectorIndexService vectorIndexService,
+                      RagOpsService ragOpsService,
                       OllamaClient ollama) {
         this.docRepo = docRepo;
         this.chunkRepo = chunkRepo;
         this.vectorRepo = vectorRepo;
         this.vectorIndexService = vectorIndexService;
+        this.ragOpsService = ragOpsService;
         this.ollama = ollama;
     }
 
@@ -176,7 +183,17 @@ public class RagService {
             activeDoc.setSource(normalizedSource);
             activeDoc.setReferenceUrl(normalizedReferenceUrl);
             activeDoc.setContentFingerprint(documentFingerprint);
-            return docRepo.save(activeDoc);
+            KnowledgeDocument saved = docRepo.save(activeDoc);
+            ragOpsService.recordIngest(
+                    normalizedOwner,
+                    normalizedTitle,
+                    saved.getId(),
+                    preparedChunks.size(),
+                    normalizedSource,
+                    false,
+                    normalizedReferenceUrl
+            );
+            return saved;
         }
 
         KnowledgeDocument newDoc = new KnowledgeDocument();
@@ -202,6 +219,15 @@ public class RagService {
                 newDoc.getId(),
                 persistedChunks.size(),
                 normalizedSource,
+                normalizedReferenceUrl
+        );
+        ragOpsService.recordIngest(
+                normalizedOwner,
+                normalizedTitle,
+                newDoc.getId(),
+                persistedChunks.size(),
+                normalizedSource,
+                true,
                 normalizedReferenceUrl
         );
         return newDoc;
@@ -244,6 +270,13 @@ public class RagService {
                 doc.getTitle(),
                 documentId,
                 chunkIds.size());
+        ragOpsService.recordDocumentDelete(
+                normalizeOwner(doc.getOwner()),
+                doc.getTitle(),
+                documentId,
+                chunkIds.size(),
+                "rag-service"
+        );
         return true;
     }
 
@@ -273,6 +306,7 @@ public class RagService {
         chunkRepo.deleteAllByIdInBatch(ids);
 
         log.debug("RAG prune owner='{}' chunks={}", normalizedOwner, ids.size());
+        ragOpsService.recordChunkPrune(normalizedOwner, ids.size());
         return ids.size();
     }
 
@@ -361,22 +395,37 @@ public class RagService {
         long embeddingStartNanos = System.nanoTime();
         double[] queryEmbedding = VectorMath.normalize(ollama.embedOne(query));
         double queryEmbeddingTimeMs = nanosToMillis(embeddingStartNanos);
+        List<String> ownersClean = normalizeOwners(owners);
         if (queryEmbedding.length == 0) {
-            return RetrievalResult.empty(normalizeOwners(owners), queryEmbeddingTimeMs, topK, evidenceThreshold);
+            return finalizeRetrieval(
+                    query,
+                    ownersClean,
+                    0,
+                    0,
+                    0L,
+                    RetrievalResult.empty(ownersClean, queryEmbeddingTimeMs, topK, evidenceThreshold)
+            );
         }
 
-        List<String> ownersClean = normalizeOwners(owners);
         int retrievalTopK = Math.max(1, topK);
         int semanticCandidateLimit = Math.max(retrievalTopK, rerankCandidates) * Math.max(2, ownersClean.size());
-        long startNanos = System.nanoTime();
+        long retrievalStartNanos = System.nanoTime();
 
+        // Fase 1: recuperamos candidatos semanticos baratos desde HNSW.
         List<RagVectorIndexService.SearchHit> searchHits = vectorIndexService.search(
                 ownersClean,
                 queryEmbedding,
                 semanticCandidateLimit
         );
         if (searchHits.isEmpty()) {
-            return emptyResult(ownersClean, queryEmbeddingTimeMs, retrievalTopK);
+            return finalizeRetrieval(
+                    query,
+                    ownersClean,
+                    0,
+                    0,
+                    retrievalStartNanos,
+                    emptyResult(ownersClean, queryEmbeddingTimeMs, retrievalTopK)
+            );
         }
 
         List<Long> candidateIds = searchHits.stream()
@@ -392,6 +441,7 @@ public class RagService {
                         view -> VectorMath.normalize(ollama.fromJson(view.getEmbeddingJson()))
                 ));
 
+        // Fase 2: reconstruimos el contexto minimo necesario para rescoring y MMR.
         List<CandidateChunk> semanticCandidates = new ArrayList<>(searchHits.size());
         for (RagVectorIndexService.SearchHit hit : searchHits) {
             KnowledgeChunk chunk = chunkById.get(hit.chunkId());
@@ -408,18 +458,39 @@ public class RagService {
             ));
         }
         if (semanticCandidates.isEmpty()) {
-            return emptyResult(ownersClean, queryEmbeddingTimeMs, retrievalTopK);
+            return finalizeRetrieval(
+                    query,
+                    ownersClean,
+                    searchHits.size(),
+                    0,
+                    retrievalStartNanos,
+                    emptyResult(ownersClean, queryEmbeddingTimeMs, retrievalTopK)
+            );
         }
 
         List<CandidateChunk> hybridCandidates = applyHybridScoring(query, semanticCandidates, chunkById);
         if (hybridCandidates.isEmpty()) {
-            return emptyResult(ownersClean, queryEmbeddingTimeMs, retrievalTopK);
+            return finalizeRetrieval(
+                    query,
+                    ownersClean,
+                    semanticCandidates.size(),
+                    0,
+                    retrievalStartNanos,
+                    emptyResult(ownersClean, queryEmbeddingTimeMs, retrievalTopK)
+            );
         }
 
         hybridCandidates.sort(Comparator.comparingDouble(CandidateChunk::score).reversed());
         List<CandidateChunk> reranked = rerankWithMmr(hybridCandidates, retrievalTopK, rerankLambda);
         if (reranked.isEmpty()) {
-            return emptyResult(ownersClean, queryEmbeddingTimeMs, retrievalTopK);
+            return finalizeRetrieval(
+                    query,
+                    ownersClean,
+                    semanticCandidates.size(),
+                    0,
+                    retrievalStartNanos,
+                    emptyResult(ownersClean, queryEmbeddingTimeMs, retrievalTopK)
+            );
         }
 
         List<ScoredChunk> retrieved = reranked.stream()
@@ -445,7 +516,7 @@ public class RagService {
         int contextTokens = estimateTokens(context);
 
         if (log.isDebugEnabled()) {
-            double elapsedMs = nanosToMillis(startNanos);
+            double elapsedMs = nanosToMillis(retrievalStartNanos);
             log.debug(
                     "RAG retrieve owners={} candidates={} selected={} evidence={} context={} elapsedMs={}",
                     ownersClean,
@@ -457,7 +528,13 @@ public class RagService {
             );
         }
 
-        return new RetrievalResult(
+        return finalizeRetrieval(
+                query,
+                ownersClean,
+                semanticCandidates.size(),
+                evidence.size(),
+                retrievalStartNanos,
+                new RetrievalResult(
                 retrieved,
                 context,
                 new RetrievalStats(
@@ -471,6 +548,7 @@ public class RagService {
                         contextTokens,
                         chunkIds,
                         sourceDocs
+                )
                 )
         );
     }
@@ -504,6 +582,31 @@ public class RagService {
                         List.of()
                 )
         );
+    }
+
+    /**
+     * Cierra la telemetria del retrieval en un solo punto para que el metodo principal no repita logging.
+     */
+    private RetrievalResult finalizeRetrieval(String query,
+                                              List<String> owners,
+                                              int semanticCandidates,
+                                              int evidenceChunks,
+                                              long retrievalStartNanos,
+                                              RetrievalResult result) {
+        double retrievalMs = retrievalStartNanos <= 0L ? 0.0 : nanosToMillis(retrievalStartNanos);
+        ragOpsService.recordRetrieval(
+                query,
+                owners,
+                semanticCandidates,
+                result.retrievedChunks().size(),
+                evidenceChunks,
+                result.contextChunks().size(),
+                result.stats().queryEmbeddingTimeMs(),
+                retrievalMs,
+                result.stats().sourceDocs(),
+                result.hasEvidence()
+        );
+        return result;
     }
 
     private List<ScoredChunk> applyEvidenceThreshold(List<ScoredChunk> scored) {
@@ -716,6 +819,7 @@ public class RagService {
     // ----------------- PERSISTENCIA INTERNA -----------------
 
     private void archiveDocumentVersion(KnowledgeDocument activeDoc, Long replacementDocumentId) {
+        // La version vieja deja de estar activa y sus vectores salen del indice para que retrieval no mezcle corpus.
         List<Long> chunkIds = chunkRepo.findIdsByDocumentId(activeDoc.getId());
         if (!chunkIds.isEmpty()) {
             vectorRepo.deleteByChunkIdIn(chunkIds);
@@ -747,6 +851,7 @@ public class RagService {
             return;
         }
 
+        // Primero persistimos el respaldo durable en `vectors` y solo despues reflejamos el cambio en HNSW.
         List<String> texts = chunks.stream().map(KnowledgeChunk::getText).toList();
         List<double[]> embeddings = ollama.embedMany(texts);
         List<KnowledgeVector> vectors = new ArrayList<>(chunks.size());
