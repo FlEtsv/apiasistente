@@ -2,11 +2,13 @@ package com.example.apiasistente.chat.service;
 
 import com.example.apiasistente.chat.dto.ChatMediaInput;
 import com.example.apiasistente.chat.dto.ChatMessageDto;
+import com.example.apiasistente.chat.dto.ChatRagTelemetrySnapshotDto;
 import com.example.apiasistente.chat.dto.ChatResponse;
 import com.example.apiasistente.chat.dto.SessionDetailsDto;
 import com.example.apiasistente.chat.dto.SessionSummaryDto;
 import com.example.apiasistente.chat.entity.ChatMessage;
 import com.example.apiasistente.chat.service.flow.ChatHistoryService;
+import com.example.apiasistente.chat.service.flow.ChatRagTelemetryService;
 import com.example.apiasistente.chat.service.flow.ChatSessionService;
 import com.example.apiasistente.chat.service.flow.ChatTurnService;
 import org.springframework.stereotype.Service;
@@ -24,13 +26,16 @@ public class ChatService {
     private final ChatTurnService turnService;
     private final ChatSessionService sessionService;
     private final ChatHistoryService historyService;
+    private final ChatRagTelemetryService ragTelemetryService;
 
     public ChatService(ChatTurnService turnService,
                        ChatSessionService sessionService,
-                       ChatHistoryService historyService) {
+                       ChatHistoryService historyService,
+                       ChatRagTelemetryService ragTelemetryService) {
         this.turnService = turnService;
         this.sessionService = sessionService;
         this.historyService = historyService;
+        this.ragTelemetryService = ragTelemetryService;
     }
 
     /**
@@ -150,6 +155,13 @@ public class ChatService {
      */
     public SessionDetailsDto sessionDetails(String username, String sessionId) {
         return sessionService.sessionDetails(username, sessionId);
+    }
+
+    /**
+     * Devuelve el snapshot operativo del motor de decisión RAG.
+     */
+    public ChatRagTelemetrySnapshotDto ragTelemetry() {
+        return ragTelemetryService.snapshot();
     }
 }
 

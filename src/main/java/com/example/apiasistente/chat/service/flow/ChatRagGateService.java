@@ -1,6 +1,7 @@
 package com.example.apiasistente.chat.service.flow;
 
 import com.example.apiasistente.chat.service.ChatPromptSignals;
+import com.example.apiasistente.chat.service.ChatTurnPlanner;
 import com.example.apiasistente.rag.repository.KnowledgeChunkRepository;
 import com.example.apiasistente.rag.repository.KnowledgeDocumentRepository;
 import com.example.apiasistente.rag.service.RagService;
@@ -37,6 +38,7 @@ public class ChatRagGateService {
 
     private final KnowledgeDocumentRepository documentRepository;
     private final KnowledgeChunkRepository chunkRepository;
+    private final ChatRagDecisionEngine decisionEngine;
 
     @Value("${chat.rag-gate.enabled:true}")
     private boolean gateEnabled;
@@ -51,24 +53,37 @@ public class ChatRagGateService {
     private int maxProbeTerms;
 
     public ChatRagGateService(KnowledgeDocumentRepository documentRepository,
-                              KnowledgeChunkRepository chunkRepository) {
+                              KnowledgeChunkRepository chunkRepository,
+                              ChatRagDecisionEngine decisionEngine) {
         this.documentRepository = documentRepository;
         this.chunkRepository = chunkRepository;
+        this.decisionEngine = decisionEngine;
     }
 
-    public GateDecision evaluate(ChatPromptSignals.RagDecision ragDecision,
+    public GateDecision evaluate(ChatTurnPlanner.TurnPlan turnPlan,
+                                 ChatPromptSignals.RagDecision requestedRagDecision,
                                  String userText,
                                  String owner,
                                  String scopedOwner,
                                  boolean hasDocumentMedia) {
+        ChatPromptSignals.RagDecision ragDecision = requestedRagDecision != null
+                ? requestedRagDecision
+                : (turnPlan == null
+                ? ChatPromptSignals.RagDecision.off("Sin plan de turno")
+                : turnPlan.ragDecision());
         if (ragDecision == null || !ragDecision.enabled()) {
             return GateDecision.skip("rag-off", resolveOwners(owner, scopedOwner), 0, 0, List.of(), false);
         }
 
         List<String> owners = resolveOwners(owner, scopedOwner);
+        ChatRagDecisionEngine.DecisionAssessment assessment = decisionEngine.assessQuery(
+                userText,
+                turnPlan,
+                hasDocumentMedia
+        );
 
         if (!gateEnabled) {
-            return GateDecision.allow("gate-disabled", owners, 0, 0, List.of());
+            return GateDecision.allow("gate-disabled", owners, 0, 0, List.of(), assessment);
         }
 
         long activeDocuments = documentRepository.countByOwnerInAndActiveTrue(owners);
@@ -76,33 +91,56 @@ public class ChatRagGateService {
 
         // Si no hay corpus activo, no tiene sentido pagar la latencia del embedding.
         if (activeDocuments <= 0 || activeChunks <= 0) {
+            boolean forceNoEvidence = ragDecision.requiresEvidence()
+                    || assessment.queryType() == ChatRagDecisionEngine.QueryType.PERSONAL
+                    || assessment.queryType() == ChatRagDecisionEngine.QueryType.REALTIME
+                    || hasDocumentMedia;
             return new GateDecision(
                     false,
-                    ragDecision.requiresEvidence(),
+                    forceNoEvidence,
                     "corpus-vacio",
                     owners,
                     activeDocuments,
                     activeChunks,
-                    List.of()
+                    List.of(),
+                    assessment
             );
         }
 
         if (ragDecision.requiresEvidence()) {
-            return GateDecision.allow("rag-required", owners, activeDocuments, activeChunks, List.of());
+            return GateDecision.allow("rag-required", owners, activeDocuments, activeChunks, List.of(), assessment);
         }
 
         if (hasDocumentMedia) {
-            return GateDecision.allow("adjunto-documental", owners, activeDocuments, activeChunks, List.of("adjunto"));
+            return GateDecision.allow("adjunto-documental", owners, activeDocuments, activeChunks, List.of("adjunto"), assessment);
+        }
+
+        if (!assessment.needsRag()) {
+            return GateDecision.skip(
+                    "decision-engine-no-rag",
+                    owners,
+                    activeDocuments,
+                    activeChunks,
+                    List.of(),
+                    false,
+                    assessment
+            );
         }
 
         String normalizedQuery = normalize(userText);
         if (normalizedQuery.length() < Math.max(1, minPreferredQueryChars)) {
-            return GateDecision.skip("preferred-query-corta", owners, activeDocuments, activeChunks, List.of(), false);
+            if (shouldBypassMetadataProbe(assessment)) {
+                return GateDecision.allow("decision-engine-query-corta", owners, activeDocuments, activeChunks, List.of(), assessment);
+            }
+            return GateDecision.skip("preferred-query-corta", owners, activeDocuments, activeChunks, List.of(), false, assessment);
         }
 
         List<String> probeTerms = selectProbeTerms(normalizedQuery);
         if (probeTerms.size() < Math.max(1, minPreferredQueryTokens)) {
-            return GateDecision.skip("preferred-query-generica", owners, activeDocuments, activeChunks, probeTerms, false);
+            if (shouldBypassMetadataProbe(assessment)) {
+                return GateDecision.allow("decision-engine-query-generica", owners, activeDocuments, activeChunks, probeTerms, assessment);
+            }
+            return GateDecision.skip("preferred-query-generica", owners, activeDocuments, activeChunks, probeTerms, false, assessment);
         }
 
         List<String> matchedTerms = new ArrayList<>();
@@ -115,10 +153,25 @@ public class ChatRagGateService {
         }
 
         if (!matchedTerms.isEmpty()) {
-            return GateDecision.allow("preferred-metadata-hit", owners, activeDocuments, activeChunks, matchedTerms);
+            return GateDecision.allow("preferred-metadata-hit", owners, activeDocuments, activeChunks, matchedTerms, assessment);
         }
 
-        return GateDecision.skip("preferred-sin-pistas-metadata", owners, activeDocuments, activeChunks, probeTerms, false);
+        if (shouldBypassMetadataProbe(assessment)) {
+            return GateDecision.allow("decision-engine-low-confidence", owners, activeDocuments, activeChunks, probeTerms, assessment);
+        }
+
+        return GateDecision.skip("preferred-sin-pistas-metadata", owners, activeDocuments, activeChunks, probeTerms, false, assessment);
+    }
+
+    private boolean shouldBypassMetadataProbe(ChatRagDecisionEngine.DecisionAssessment assessment) {
+        if (assessment == null) {
+            return false;
+        }
+        if (assessment.queryType() == ChatRagDecisionEngine.QueryType.PERSONAL
+                || assessment.queryType() == ChatRagDecisionEngine.QueryType.REALTIME) {
+            return true;
+        }
+        return assessment.needsExternalContext() || assessment.confidence() < 0.65;
     }
 
     private List<String> resolveOwners(String owner, String scopedOwner) {
@@ -170,7 +223,8 @@ public class ChatRagGateService {
                                List<String> owners,
                                long activeDocuments,
                                long activeChunks,
-                               List<String> matchedTerms) {
+                               List<String> matchedTerms,
+                               ChatRagDecisionEngine.DecisionAssessment decisionAssessment) {
 
         public GateDecision {
             reason = reason == null ? "" : reason.trim();
@@ -178,6 +232,48 @@ public class ChatRagGateService {
             activeDocuments = Math.max(0, activeDocuments);
             activeChunks = Math.max(0, activeChunks);
             matchedTerms = matchedTerms == null ? List.of() : List.copyOf(matchedTerms);
+            decisionAssessment = decisionAssessment == null
+                    ? new ChatRagDecisionEngine.DecisionAssessment(
+                    ChatRagDecisionEngine.QueryType.OTHER,
+                    false,
+                    false,
+                    0.0,
+                    0.0,
+                    false,
+                    false,
+                    false,
+                    "heuristic",
+                    "sin-decision"
+            )
+                    : decisionAssessment;
+        }
+
+        public GateDecision(boolean attemptRag,
+                            boolean forceNoEvidence,
+                            String reason,
+                            List<String> owners,
+                            long activeDocuments,
+                            long activeChunks,
+                            List<String> matchedTerms) {
+            this(
+                    attemptRag,
+                    forceNoEvidence,
+                    reason,
+                    owners,
+                    activeDocuments,
+                    activeChunks,
+                    matchedTerms,
+                    null
+            );
+        }
+
+        public static GateDecision allow(String reason,
+                                         List<String> owners,
+                                         long activeDocuments,
+                                         long activeChunks,
+                                         List<String> matchedTerms,
+                                         ChatRagDecisionEngine.DecisionAssessment decisionAssessment) {
+            return new GateDecision(true, false, reason, owners, activeDocuments, activeChunks, matchedTerms, decisionAssessment);
         }
 
         public static GateDecision allow(String reason,
@@ -185,7 +281,17 @@ public class ChatRagGateService {
                                          long activeDocuments,
                                          long activeChunks,
                                          List<String> matchedTerms) {
-            return new GateDecision(true, false, reason, owners, activeDocuments, activeChunks, matchedTerms);
+            return allow(reason, owners, activeDocuments, activeChunks, matchedTerms, null);
+        }
+
+        public static GateDecision skip(String reason,
+                                        List<String> owners,
+                                        long activeDocuments,
+                                        long activeChunks,
+                                        List<String> matchedTerms,
+                                        boolean forceNoEvidence,
+                                        ChatRagDecisionEngine.DecisionAssessment decisionAssessment) {
+            return new GateDecision(false, forceNoEvidence, reason, owners, activeDocuments, activeChunks, matchedTerms, decisionAssessment);
         }
 
         public static GateDecision skip(String reason,
@@ -194,7 +300,7 @@ public class ChatRagGateService {
                                         long activeChunks,
                                         List<String> matchedTerms,
                                         boolean forceNoEvidence) {
-            return new GateDecision(false, forceNoEvidence, reason, owners, activeDocuments, activeChunks, matchedTerms);
+            return skip(reason, owners, activeDocuments, activeChunks, matchedTerms, forceNoEvidence, null);
         }
     }
 }

@@ -16,8 +16,10 @@ import com.example.apiasistente.chat.service.flow.ChatGroundingService;
 import com.example.apiasistente.chat.service.flow.ChatHistoryService;
 import com.example.apiasistente.chat.service.flow.ChatMediaService;
 import com.example.apiasistente.chat.service.flow.ChatPromptBuilder;
+import com.example.apiasistente.chat.service.flow.ChatRagDecisionEngine;
 import com.example.apiasistente.chat.service.flow.ChatRagFlowService;
 import com.example.apiasistente.chat.service.flow.ChatRagGateService;
+import com.example.apiasistente.chat.service.flow.ChatRagTelemetryService;
 import com.example.apiasistente.chat.service.flow.ChatSessionService;
 import com.example.apiasistente.chat.service.flow.ChatTurnContextFactory;
 import com.example.apiasistente.chat.service.flow.ChatTurnService;
@@ -98,7 +100,9 @@ class ChatServiceTest {
         ChatPromptBuilder promptBuilder = new ChatPromptBuilder(modelSelector);
         ChatMediaService mediaService = new ChatMediaService(ollama, modelSelector);
         ChatGroundingService groundingService = new ChatGroundingService(ollama, modelSelector);
-        ChatRagGateService ragGateService = new ChatRagGateService(documentRepository, chunkRepository);
+        ChatRagDecisionEngine decisionEngine = new ChatRagDecisionEngine(ollama, modelSelector);
+        ChatRagTelemetryService ragTelemetryService = new ChatRagTelemetryService();
+        ChatRagGateService ragGateService = new ChatRagGateService(documentRepository, chunkRepository, decisionEngine);
         ChatTurnContextFactory contextFactory = new ChatTurnContextFactory(
                 sessionService,
                 historyService,
@@ -110,7 +114,8 @@ class ChatServiceTest {
                 historyService,
                 ragService,
                 groundingService,
-                ragGateService
+                ragGateService,
+                ragTelemetryService
         );
         ChatAssistantService assistantService = new ChatAssistantService(
                 ollama,
@@ -124,19 +129,24 @@ class ChatServiceTest {
                 ragFlowService,
                 assistantService,
                 historyService,
-                sessionService
+                sessionService,
+                decisionEngine,
+                ragTelemetryService
         );
 
         service = new ChatService(
                 turnService,
                 sessionService,
-                historyService
+                historyService,
+                ragTelemetryService
         );
 
         ReflectionTestUtils.setField(historyService, "maxHistory", 6);
         ReflectionTestUtils.setField(historyService, "retrievalUserTurns", 3);
         ReflectionTestUtils.setField(groundingService, "responseGuardEnabled", true);
         ReflectionTestUtils.setField(ragGateService, "gateEnabled", false);
+        ReflectionTestUtils.setField(decisionEngine, "decisionEnabled", false);
+        ReflectionTestUtils.setField(ragTelemetryService, "maxEvents", 40);
     }
 
     @Test

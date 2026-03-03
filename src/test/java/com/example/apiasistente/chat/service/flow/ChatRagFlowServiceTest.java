@@ -42,11 +42,14 @@ class ChatRagFlowServiceTest {
     @Mock
     private ChatRagGateService ragGateService;
 
+    @Mock
+    private ChatRagTelemetryService telemetryService;
+
     private ChatRagFlowService service;
 
     @BeforeEach
     void setUp() {
-        service = new ChatRagFlowService(promptBuilder, historyService, ragService, groundingService, ragGateService);
+        service = new ChatRagFlowService(promptBuilder, historyService, ragService, groundingService, ragGateService, telemetryService);
     }
 
     @Test
@@ -59,7 +62,7 @@ class ChatRagFlowServiceTest {
         when(promptBuilder.buildRetrievalQuery("Que paso ayer en /api/ext/chat?", List.of(), List.of()))
                 .thenReturn("Que paso ayer en /api/ext/chat?");
         when(historyService.recentUserTurnsForRetrieval("sid-1")).thenReturn(List.of());
-        when(ragGateService.evaluate(any(ChatPromptSignals.RagDecision.class), eq("Que paso ayer en /api/ext/chat?"), eq("user"), isNull(), eq(false)))
+        when(ragGateService.evaluate(any(ChatTurnPlanner.TurnPlan.class), any(ChatPromptSignals.RagDecision.class), eq("Que paso ayer en /api/ext/chat?"), eq("user"), isNull(), eq(false)))
                 .thenReturn(ChatRagGateService.GateDecision.allow("rag-required", List.of("global", "user"), 2, 10, List.of()));
         when(ragService.retrieveForOwnerOrGlobal("Que paso ayer en /api/ext/chat?", "user"))
                 .thenReturn(RagService.RetrievalResult.empty(List.of("global", "user"), 1.25, 10, 0.45));
@@ -82,7 +85,7 @@ class ChatRagFlowServiceTest {
         when(promptBuilder.buildRetrievalQuery("Compara dos estrategias de cache para Spring Boot", List.of(), List.of()))
                 .thenReturn("Compara dos estrategias de cache para Spring Boot");
         when(historyService.recentUserTurnsForRetrieval("sid-1")).thenReturn(List.of());
-        when(ragGateService.evaluate(any(ChatPromptSignals.RagDecision.class), eq("Compara dos estrategias de cache para Spring Boot"), eq("user"), isNull(), eq(false)))
+        when(ragGateService.evaluate(any(ChatTurnPlanner.TurnPlan.class), any(ChatPromptSignals.RagDecision.class), eq("Compara dos estrategias de cache para Spring Boot"), eq("user"), isNull(), eq(false)))
                 .thenReturn(ChatRagGateService.GateDecision.allow("preferred-metadata-hit", List.of("global", "user"), 5, 50, List.of("cache")));
         when(ragService.retrieveForOwnerOrGlobal("Compara dos estrategias de cache para Spring Boot", "user"))
                 .thenReturn(RagService.RetrievalResult.empty(List.of("global", "user"), 0.95, 10, 0.45));
@@ -104,7 +107,7 @@ class ChatRagFlowServiceTest {
                 ChatPromptSignals.RagDecision.preferred("Consulta tecnica", List.of("consulta-tecnica"))
         );
 
-        when(ragGateService.evaluate(any(ChatPromptSignals.RagDecision.class), eq("Compara estrategias de cache"), eq("user"), isNull(), eq(false)))
+        when(ragGateService.evaluate(any(ChatTurnPlanner.TurnPlan.class), any(ChatPromptSignals.RagDecision.class), eq("Compara estrategias de cache"), eq("user"), isNull(), eq(false)))
                 .thenReturn(ChatRagGateService.GateDecision.skip(
                         "preferred-sin-pistas-metadata",
                         List.of("global", "user"),
@@ -130,7 +133,7 @@ class ChatRagFlowServiceTest {
                 ChatPromptSignals.RagDecision.required("Contexto propio", List.of("contexto-propio"))
         );
 
-        when(ragGateService.evaluate(any(ChatPromptSignals.RagDecision.class), eq("Que paso en nuestro endpoint interno?"), eq("user"), isNull(), eq(false)))
+        when(ragGateService.evaluate(any(ChatTurnPlanner.TurnPlan.class), any(ChatPromptSignals.RagDecision.class), eq("Que paso en nuestro endpoint interno?"), eq("user"), isNull(), eq(false)))
                 .thenReturn(new ChatRagGateService.GateDecision(
                         false,
                         true,

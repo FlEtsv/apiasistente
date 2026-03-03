@@ -24,29 +24,47 @@ public class ChatRagFlowService {
     private final RagService ragService;
     private final ChatGroundingService groundingService;
     private final ChatRagGateService ragGateService;
+    private final ChatRagTelemetryService telemetryService;
 
     public ChatRagFlowService(ChatPromptBuilder promptBuilder,
                               ChatHistoryService historyService,
                               RagService ragService,
                               ChatGroundingService groundingService,
-                              ChatRagGateService ragGateService) {
+                              ChatRagGateService ragGateService,
+                              ChatRagTelemetryService telemetryService) {
         this.promptBuilder = promptBuilder;
         this.historyService = historyService;
         this.ragService = ragService;
         this.groundingService = groundingService;
         this.ragGateService = ragGateService;
+        this.telemetryService = telemetryService;
     }
 
     /**
      * Resuelve el contexto RAG efectivo del turno a partir del plan ya calculado.
      */
     public ChatRagContext resolve(ChatTurnContext context) {
-        ChatPromptSignals.RagDecision ragDecision = context.turnPlan().ragDecision();
+        return resolve(context, context.turnPlan().ragDecision());
+    }
+
+    /**
+     * Reintenta retrieval con una decision forzada cuando la verificacion posterior lo exige.
+     */
+    public ChatRagContext resolveForced(ChatTurnContext context, String reason) {
+        ChatPromptSignals.RagDecision forcedDecision = ChatPromptSignals.RagDecision.required(
+                "post-answer-rag: " + (reason == null ? "sin-razon" : reason.trim()),
+                List.of("post-answer-verification")
+        );
+        return resolve(context, forcedDecision);
+    }
+
+    private ChatRagContext resolve(ChatTurnContext context, ChatPromptSignals.RagDecision ragDecision) {
         if (!ragDecision.enabled()) {
             return ChatRagContext.noRag(groundingService);
         }
 
         ChatRagGateService.GateDecision gateDecision = ragGateService.evaluate(
+                context.turnPlan(),
                 ragDecision,
                 context.userText(),
                 context.username(),
@@ -136,6 +154,7 @@ public class ChatRagFlowService {
     private void logRetrievalTelemetry(ChatPromptSignals.RagDecision ragDecision,
                                        RagService.RetrievalStats stats,
                                        double retrievalElapsedMs) {
+        telemetryService.recordRetrieval(ragDecision, stats, retrievalElapsedMs);
         log.info(
                 "rag_retrieval rag_decision={} rag_mode={} retrieval_phase_ms={} query_embedding_time_ms={} topK_returned={} max_similarity={} avg_similarity={} evidence_threshold={} chunks_used_ids={} source_docs={} context_tokens={}",
                 ragDecision.enabled() ? "ON" : "OFF",
@@ -154,8 +173,9 @@ public class ChatRagFlowService {
 
     private void logGateTelemetry(ChatPromptSignals.RagDecision ragDecision,
                                   ChatRagGateService.GateDecision gateDecision) {
+        telemetryService.recordGate(ragDecision, gateDecision);
         log.info(
-                "rag_gate rag_decision={} rag_mode={} attempt_rag={} force_no_evidence={} reason={} owners={} active_documents={} active_chunks={} matched_terms={}",
+                "rag_gate rag_decision={} rag_mode={} attempt_rag={} force_no_evidence={} reason={} owners={} active_documents={} active_chunks={} matched_terms={} query_type={} decision_source={} decision_confidence={} heuristic_confidence={} needs_external_context={} used_llm={} cache_hit={} verify_after_direct_answer={}",
                 ragDecision.enabled() ? "ON" : "OFF",
                 ragDecision.mode(),
                 gateDecision.attemptRag(),
@@ -164,7 +184,15 @@ public class ChatRagFlowService {
                 gateDecision.owners(),
                 gateDecision.activeDocuments(),
                 gateDecision.activeChunks(),
-                gateDecision.matchedTerms()
+                gateDecision.matchedTerms(),
+                gateDecision.decisionAssessment().queryType(),
+                gateDecision.decisionAssessment().source(),
+                String.format(Locale.US, "%.3f", gateDecision.decisionAssessment().confidence()),
+                String.format(Locale.US, "%.3f", gateDecision.decisionAssessment().heuristicConfidence()),
+                gateDecision.decisionAssessment().needsExternalContext(),
+                gateDecision.decisionAssessment().usedLlm(),
+                gateDecision.decisionAssessment().cacheHit(),
+                gateDecision.decisionAssessment().verifyAfterDirectAnswer()
         );
     }
 

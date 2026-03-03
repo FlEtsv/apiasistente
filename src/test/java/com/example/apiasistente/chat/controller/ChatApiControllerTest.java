@@ -1,6 +1,8 @@
 package com.example.apiasistente.chat.controller;
 
 import com.example.apiasistente.chat.dto.ChatResponse;
+import com.example.apiasistente.chat.dto.ChatRagTelemetryEventDto;
+import com.example.apiasistente.chat.dto.ChatRagTelemetrySnapshotDto;
 import com.example.apiasistente.chat.dto.SessionSummaryDto;
 import com.example.apiasistente.chat.service.ChatQueueService;
 import com.example.apiasistente.chat.service.ChatService;
@@ -69,6 +71,47 @@ class ChatApiControllerTest {
         mockMvc.perform(get("/api/chat/active").principal(() -> "user"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.sessionId").value("sid-active"));
+    }
+
+    @Test
+    void ragMetricsReturnsSnapshot() throws Exception {
+        when(chatService.ragTelemetry()).thenReturn(new ChatRagTelemetrySnapshotDto(
+                Instant.parse("2026-03-03T18:00:00Z"),
+                12,
+                5,
+                7,
+                8,
+                6,
+                4,
+                1,
+                3,
+                1,
+                2,
+                1,
+                0.42,
+                0.58,
+                0.33,
+                0.50,
+                0.74,
+                0.81,
+                0.69,
+                182.4,
+                41.3,
+                List.of(new ChatRagTelemetryEventDto(
+                        Instant.parse("2026-03-03T18:00:00Z"),
+                        "gate",
+                        "attempt",
+                        "preferred-metadata-hit",
+                        "type=technical"
+                ))
+        ));
+
+        mockMvc.perform(get("/api/chat/rag/metrics").principal(() -> "user"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalTurns").value(12))
+                .andExpect(jsonPath("$.ragUsedTurns").value(5))
+                .andExpect(jsonPath("$.avgRetrievalPhaseMs").value(182.4))
+                .andExpect(jsonPath("$.recentEvents[0].type").value("gate"));
     }
 
     @Test

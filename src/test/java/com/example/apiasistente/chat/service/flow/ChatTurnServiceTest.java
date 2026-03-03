@@ -44,6 +44,12 @@ class ChatTurnServiceTest {
     @Mock
     private ChatSessionService sessionService;
 
+    @Mock
+    private ChatRagDecisionEngine decisionEngine;
+
+    @Mock
+    private ChatRagTelemetryService telemetryService;
+
     private ChatTurnService service;
 
     @BeforeEach
@@ -53,7 +59,9 @@ class ChatTurnServiceTest {
                 ragFlowService,
                 assistantService,
                 historyService,
-                sessionService
+                sessionService,
+                decisionEngine,
+                telemetryService
         );
     }
 
@@ -132,6 +140,101 @@ class ChatTurnServiceTest {
         verify(historyService).persistSources(assistantMessage, scored);
         verify(sessionService).touchSession(session);
         verify(historyService).saveAssistantMessage(session, "Respuesta final [S1]");
+    }
+
+    @Test
+    void retriesWithRagWhenPostVerificationFlagsDirectAnswerAsUnsafe() {
+        ChatSession session = new ChatSession();
+        session.setId("sid-88");
+        session.setSystemPrompt(new SystemPrompt());
+
+        ChatMessage userMessage = new ChatMessage();
+        ReflectionTestUtils.setField(userMessage, "id", 21L);
+        userMessage.setSession(session);
+        userMessage.setRole(ChatMessage.Role.USER);
+        userMessage.setContent("Explica el error del endpoint");
+
+        ChatTurnPlanner.TurnPlan turnPlan = new ChatTurnPlanner.TurnPlan(
+                ChatPromptSignals.IntentRoute.FACTUAL_TECH,
+                false,
+                ChatTurnPlanner.ReasoningLevel.MEDIUM,
+                false,
+                false,
+                0.63,
+                ChatPromptSignals.RagDecision.off("Consulta general")
+        );
+        ChatTurnContext context = new ChatTurnContext(
+                "user",
+                "Explica el error del endpoint",
+                "auto",
+                null,
+                session,
+                userMessage,
+                List.of(),
+                turnPlan,
+                ChatPromptSignals.IntentRoute.FACTUAL_TECH,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+        );
+
+        ChatRagContext directContext = new ChatRagContext(
+                List.of(),
+                List.of(),
+                new ChatGroundingService.GroundingDecision(true, 1.0, 0, 1.0),
+                false,
+                ChatGroundingService.RagRoute.NO_RAG,
+                false,
+                false,
+                false,
+                "fallback",
+                RagService.RetrievalStats.empty(List.of(), 0.0, 0, 0.0),
+                false
+        );
+        ChatAssistantOutcome directOutcome = new ChatAssistantOutcome(
+                "Respuesta apresurada",
+                new ChatGroundingService.GroundingAnswerAssessment(true, 0)
+        );
+
+        List<SourceDto> sources = List.of(new SourceDto(3L, 4L, "Runbook", 0.93, "snippet"));
+        List<RagService.ScoredChunk> scored = List.of(new RagService.ScoredChunk(null, 0.93));
+        ChatRagContext retriedContext = new ChatRagContext(
+                scored,
+                sources,
+                new ChatGroundingService.GroundingDecision(true, 0.93, 2, 0.91),
+                true,
+                ChatGroundingService.RagRoute.STRONG,
+                true,
+                false,
+                true,
+                "fallback"
+        );
+        ChatAssistantOutcome retriedOutcome = new ChatAssistantOutcome(
+                "Respuesta con fuentes [S1]",
+                new ChatGroundingService.GroundingAnswerAssessment(true, 1)
+        );
+
+        ChatMessage assistantMessage = new ChatMessage();
+        ReflectionTestUtils.setField(assistantMessage, "id", 22L);
+
+        when(contextFactory.create("user", null, "Explica el error del endpoint", "auto", null, List.of())).thenReturn(context);
+        when(ragFlowService.resolve(context)).thenReturn(directContext);
+        when(assistantService.answer(context, directContext)).thenReturn(directOutcome);
+        when(decisionEngine.verifyDirectAnswer("Explica el error del endpoint", "Respuesta apresurada", turnPlan))
+                .thenReturn(new ChatRagDecisionEngine.AnswerVerification(true, 0.41, "respuesta-incompleta", true));
+        when(ragFlowService.resolveForced(context, "respuesta-incompleta")).thenReturn(retriedContext);
+        when(assistantService.answer(context, retriedContext)).thenReturn(retriedOutcome);
+        when(historyService.saveAssistantMessage(session, "Respuesta con fuentes [S1]")).thenReturn(assistantMessage);
+
+        ChatResponse response = service.chat("user", null, "Explica el error del endpoint", "auto", null, List.of());
+
+        assertTrue(response.isRagUsed());
+        assertTrue(response.isRagNeeded());
+        assertEquals("Respuesta con fuentes [S1]", response.getReply());
+        verify(historyService).persistSources(assistantMessage, scored);
     }
 }
 

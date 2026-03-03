@@ -129,6 +129,25 @@ rag:
     snippet-chars: 600
 
 chat:
+  rag-decision:
+    # Motor de decisión híbrido: heurística + modelo ligero + verificación posterior.
+    enabled: true
+    # Usa el modelo rápido para autoevaluar consultas ambiguas o técnicas.
+    llm-assessment-enabled: true
+    # Revisa respuestas directas antes de aceptar que "no hacía falta RAG".
+    verify-no-rag-answers: true
+    # Umbrales base para decidir si la heurística necesita ayuda del modelo ligero.
+    heuristic-confidence-threshold: 0.72
+    self-confidence-threshold: 0.70
+    technical-confidence-threshold: 0.80
+    verify-answer-confidence-threshold: 0.74
+    # Evita pagar verificación posterior en respuestas demasiado cortas.
+    min-answer-chars: 140
+    # Cache TTL y tamaño para no repetir la misma decisión en consultas iguales.
+    cache-ttl-ms: 3600000
+    max-cache-entries: 500
+    # Cuantos eventos recientes de decisión se muestran en la home.
+    max-events: 80
   rag-gate:
     # Compuerta barata para decidir si merece la pena pagar retrieval + embedding.
     enabled: true

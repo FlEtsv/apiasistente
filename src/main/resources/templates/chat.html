@@ -581,6 +581,29 @@
             font-size: 14px;
         }
 
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .micro-stat {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding: 10px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            background: rgba(7, 15, 24, 0.5);
+            min-width: 0;
+        }
+
+        .micro-stat strong {
+            font-size: 16px;
+            line-height: 1.1;
+        }
+
         .sub {
             color: var(--muted);
             word-break: break-word;
@@ -1133,6 +1156,44 @@
                         <div class="sub">Privado usuario: <span id="ragOwnerContext">-</span></div>
                         <div class="sub">Config: topK <span id="ragTopK">-</span> / chunk <span id="ragChunkConfig">-</span></div>
                         <div class="sub">Ultima actualizacion: <span id="ragLastUpdated">-</span></div>
+                    </div>
+                    <div class="stat" sec:authorize="hasAuthority('PERM_RAG')">
+                        <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;">
+                            <strong>Motor de decision RAG</strong>
+                            <button id="btnRefreshRagDecision" class="btn">Refrescar</button>
+                        </div>
+                        <div class="metric-grid">
+                            <div class="micro-stat">
+                                <span class="sub">RAG usado</span>
+                                <strong id="ragDecisionUsedRate">-</strong>
+                            </div>
+                            <div class="micro-stat">
+                                <span class="sub">RAG evitado</span>
+                                <strong id="ragDecisionAvoidedRate">-</strong>
+                            </div>
+                            <div class="micro-stat">
+                                <span class="sub">Turnos</span>
+                                <strong id="ragDecisionTotalTurns">-</strong>
+                            </div>
+                            <div class="micro-stat">
+                                <span class="sub">Relanzados</span>
+                                <strong id="ragDecisionRetryRate">-</strong>
+                            </div>
+                        </div>
+                        <div class="sub">Gate: <span id="ragDecisionGateSummary">-</span></div>
+                        <div class="sub">Post-check: <span id="ragDecisionPostCheckSummary">-</span></div>
+                        <div class="sub">Latencia media: <span id="ragDecisionLatency">-</span></div>
+                        <div class="sub">Confianza media: <span id="ragDecisionConfidence">-</span></div>
+                        <div class="sub">Ultima actualizacion: <span id="ragDecisionUpdated">-</span></div>
+                        <div id="ragDecisionEvents" class="event-list">
+                            <div class="event-item">
+                                <div class="event-head">
+                                    <span>Sin telemetria</span>
+                                    <span class="event-badge recover">IDLE</span>
+                                </div>
+                                <div class="sub">Esperando decisiones del motor RAG.</div>
+                            </div>
+                        </div>
                     </div>
                     <div class="stat" sec:authorize="hasAuthority('PERM_RAG')">
                         <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;">

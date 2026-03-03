@@ -1,6 +1,7 @@
 package com.example.apiasistente.chat.controller;
 
 import com.example.apiasistente.chat.dto.ChatMessageDto;
+import com.example.apiasistente.chat.dto.ChatRagTelemetrySnapshotDto;
 import com.example.apiasistente.chat.dto.ChatRequest;
 import com.example.apiasistente.chat.dto.ChatResponse;
 import com.example.apiasistente.chat.dto.RenameSessionRequest;
@@ -43,6 +44,14 @@ public class ChatApiController {
     @GetMapping("/active")
     public Map<String, String> active(Principal principal) {
         return Map.of("sessionId", chatService.activeSessionId(principal.getName()));
+    }
+
+    /**
+     * Devuelve métricas vivas del motor de decisión RAG para la home.
+     */
+    @GetMapping("/rag/metrics")
+    public ChatRagTelemetrySnapshotDto ragMetrics(Principal principal) {
+        return chatService.ragTelemetry();
     }
 
     /**

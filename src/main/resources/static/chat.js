@@ -34,6 +34,17 @@ const ragTopKEl = document.getElementById('ragTopK');
 const ragChunkConfigEl = document.getElementById('ragChunkConfig');
 const ragLastUpdatedEl = document.getElementById('ragLastUpdated');
 const ragRefreshBtn = document.getElementById('btnRefreshRagContext');
+const ragDecisionUsedRateEl = document.getElementById('ragDecisionUsedRate');
+const ragDecisionAvoidedRateEl = document.getElementById('ragDecisionAvoidedRate');
+const ragDecisionTotalTurnsEl = document.getElementById('ragDecisionTotalTurns');
+const ragDecisionRetryRateEl = document.getElementById('ragDecisionRetryRate');
+const ragDecisionGateSummaryEl = document.getElementById('ragDecisionGateSummary');
+const ragDecisionPostCheckSummaryEl = document.getElementById('ragDecisionPostCheckSummary');
+const ragDecisionLatencyEl = document.getElementById('ragDecisionLatency');
+const ragDecisionConfidenceEl = document.getElementById('ragDecisionConfidence');
+const ragDecisionUpdatedEl = document.getElementById('ragDecisionUpdated');
+const ragDecisionEventsEl = document.getElementById('ragDecisionEvents');
+const ragDecisionRefreshBtn = document.getElementById('btnRefreshRagDecision');
 
 const openApiKeysInline = document.getElementById('openApiKeysInline');
 const mediaInputEl = document.getElementById('mediaInput');
@@ -402,6 +413,18 @@ function formatDateTime(value) {
   return d.toLocaleString();
 }
 
+function formatPercent(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '-';
+  return `${Math.round(Math.max(0, Math.min(1, num)) * 100)}%`;
+}
+
+function formatMs(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '-';
+  return `${num.toFixed(num >= 100 ? 0 : 1)} ms`;
+}
+
 function setRagContextLoading() {
   if (ragContextPillEl) ragContextPillEl.textContent = 'Contexto RAG: cargando...';
   if (ragTotalContextEl) ragTotalContextEl.textContent = '-';
@@ -436,6 +459,98 @@ function renderRagContextError(message) {
   if (ragTopKEl) ragTopKEl.textContent = text;
   if (ragChunkConfigEl) ragChunkConfigEl.textContent = text;
   if (ragLastUpdatedEl) ragLastUpdatedEl.textContent = text;
+}
+
+function renderRagDecisionLoading() {
+  if (ragDecisionUsedRateEl) ragDecisionUsedRateEl.textContent = '-';
+  if (ragDecisionAvoidedRateEl) ragDecisionAvoidedRateEl.textContent = '-';
+  if (ragDecisionTotalTurnsEl) ragDecisionTotalTurnsEl.textContent = '-';
+  if (ragDecisionRetryRateEl) ragDecisionRetryRateEl.textContent = '-';
+  if (ragDecisionGateSummaryEl) ragDecisionGateSummaryEl.textContent = '-';
+  if (ragDecisionPostCheckSummaryEl) ragDecisionPostCheckSummaryEl.textContent = '-';
+  if (ragDecisionLatencyEl) ragDecisionLatencyEl.textContent = '-';
+  if (ragDecisionConfidenceEl) ragDecisionConfidenceEl.textContent = '-';
+  if (ragDecisionUpdatedEl) ragDecisionUpdatedEl.textContent = '-';
+}
+
+function renderRagDecisionEvents(events) {
+  if (!ragDecisionEventsEl) return;
+  if (!Array.isArray(events) || events.length === 0) {
+    ragDecisionEventsEl.innerHTML = `
+      <div class="event-item">
+        <div class="event-head">
+          <span>Sin telemetria</span>
+          <span class="event-badge recover">IDLE</span>
+        </div>
+        <div class="sub">Esperando decisiones del motor RAG.</div>
+      </div>
+    `;
+    return;
+  }
+
+  ragDecisionEventsEl.innerHTML = '';
+  events.slice(0, 8).forEach(evt => {
+    const outcome = String(evt?.outcome || 'info').toLowerCase();
+    const badgeClass = outcome.includes('skip') || outcome.includes('avoided') || outcome.includes('ok')
+      ? 'recover'
+      : 'alert';
+    const title = evt?.type || 'evento';
+    const reason = evt?.reason || '-';
+    const detail = evt?.detail || '-';
+    const ts = evt?.at ? new Date(evt.at).toLocaleTimeString() : '-';
+
+    const div = document.createElement('div');
+    div.className = 'event-item';
+    div.innerHTML = `
+      <div class="event-head">
+        <span>${title}</span>
+        <span class="event-badge ${badgeClass}">${escapeHtml(evt?.outcome || 'INFO')}</span>
+      </div>
+      <div class="sub">${escapeHtml(reason)}</div>
+      <div class="sub">${escapeHtml(detail)}</div>
+      <div class="sub">${ts}</div>
+    `;
+    ragDecisionEventsEl.appendChild(div);
+  });
+}
+
+function renderRagDecisionMetrics(data) {
+  if (ragDecisionUsedRateEl) ragDecisionUsedRateEl.textContent = formatPercent(data.ragUsedRate);
+  if (ragDecisionAvoidedRateEl) ragDecisionAvoidedRateEl.textContent = formatPercent(data.ragAvoidedRate);
+  if (ragDecisionTotalTurnsEl) ragDecisionTotalTurnsEl.textContent = String(data.totalTurns ?? 0);
+  if (ragDecisionRetryRateEl) ragDecisionRetryRateEl.textContent = formatPercent(data.postCheckRetryRate);
+  if (ragDecisionGateSummaryEl) {
+    ragDecisionGateSummaryEl.textContent =
+      `${data.gateAttemptedTurns || 0} intento(s), ${data.gateSkippedTurns || 0} evitado(s), ${data.forcedNoEvidenceTurns || 0} sin evidencia`;
+  }
+  if (ragDecisionPostCheckSummaryEl) {
+    ragDecisionPostCheckSummaryEl.textContent =
+      `${data.postChecksReviewed || 0} revisado(s), ${data.postCheckRetries || 0} relanzado(s), cache hit ${formatPercent(data.cacheHitRate)}`;
+  }
+  if (ragDecisionLatencyEl) {
+    ragDecisionLatencyEl.textContent =
+      `retrieval ${formatMs(data.avgRetrievalPhaseMs)} / embedding ${formatMs(data.avgEmbeddingTimeMs)}`;
+  }
+  if (ragDecisionConfidenceEl) {
+    ragDecisionConfidenceEl.textContent =
+      `decision ${formatPercent(data.avgDecisionConfidence)} / heuristica ${formatPercent(data.avgHeuristicConfidence)} / turno ${formatPercent(data.avgTurnConfidence)}`;
+  }
+  if (ragDecisionUpdatedEl) ragDecisionUpdatedEl.textContent = formatDateTime(data.updatedAt);
+  renderRagDecisionEvents(data.recentEvents);
+}
+
+async function loadRagDecisionMetrics() {
+  if (!ragDecisionUsedRateEl && !ragDecisionEventsEl) return;
+  try {
+    const res = await fetch('/api/chat/rag/metrics', { headers: withCsrf() });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    renderRagDecisionMetrics(data || {});
+  } catch (e) {
+    renderRagDecisionLoading();
+    if (ragDecisionUpdatedEl) ragDecisionUpdatedEl.textContent = 'error';
+    renderRagDecisionEvents([]);
+  }
 }
 
 function renderMonitorEvents(events) {
@@ -557,6 +672,7 @@ function scheduleMonitorPolling() {
     loadMonitorEvents();
     loadOpsStatus();
     loadRagContextStats();
+    loadRagDecisionMetrics();
   }, ms);
 }
 
@@ -571,6 +687,7 @@ function applyMonitorInterval() {
   loadMonitorEvents();
   loadOpsStatus();
   loadRagContextStats();
+  loadRagDecisionMetrics();
 }
 
 async function ensureActiveSession() {
@@ -928,6 +1045,7 @@ openApiKeysInline?.addEventListener('click', () => {
 
 monitorApplyBtn?.addEventListener('click', () => applyMonitorInterval());
 ragRefreshBtn?.addEventListener('click', () => loadRagContextStats());
+ragDecisionRefreshBtn?.addEventListener('click', () => loadRagDecisionMetrics());
 monitorIntervalEl?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') applyMonitorInterval();
 });
@@ -990,6 +1108,8 @@ sessionSearchMobileEl?.addEventListener('input', () => renderSessions(sessionSea
     loadMonitorEvents();
     setRagContextLoading();
     loadRagContextStats();
+    renderRagDecisionLoading();
+    loadRagDecisionMetrics();
     renderMediaPreview();
     scheduleMonitorPolling();
     await ensureActiveSession();
