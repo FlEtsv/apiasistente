@@ -4,9 +4,11 @@ import com.example.apiasistente.shared.config.OllamaProperties;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 
 import java.util.List;
 import java.util.Map;
@@ -48,14 +50,26 @@ public class OllamaClient {
                 Map.of("temperature", temperature)
         );
 
-        ChatResponse res = ollama.post()
-                .uri("/chat")
-                .body(req)
-                .retrieve()
-                .body(ChatResponse.class);
+        try {
+            ChatResponse res = ollama.post()
+                    .uri("/chat")
+                    .body(req)
+                    .retrieve()
+                    .body(ChatResponse.class);
 
-        if (res == null || res.message == null) return "";
-        return res.message.content == null ? "" : res.message.content;
+            if (res == null || res.message == null) return "";
+            return res.message.content == null ? "" : res.message.content;
+        } catch (HttpClientErrorException | HttpServerErrorException e) {
+            throw new IllegalStateException(
+                    "Ollama chat fallo. Status=" + e.getStatusCode() +
+                            " Body=" + e.getResponseBodyAsString(),
+                    e
+            );
+        } catch (ResourceAccessException e) {
+            throw new IllegalStateException("Ollama chat no disponible: " + safeMessage(e), e);
+        } catch (RestClientException e) {
+            throw new IllegalStateException("Ollama chat fallo: " + safeMessage(e), e);
+        }
     }
 
     /**
@@ -148,6 +162,13 @@ public class OllamaClient {
             return 1.0d;
         }
         return configured;
+    }
+
+    private String safeMessage(Throwable error) {
+        if (error == null || error.getMessage() == null || error.getMessage().isBlank()) {
+            return "sin detalle";
+        }
+        return error.getMessage().replaceAll("\\s+", " ").trim();
     }
 
     public record ChatRequest(String model, List<Message> messages, boolean stream, Map<String, Object> options) {}

@@ -14,7 +14,11 @@ import java.util.List;
 import java.security.Principal;
 
 /**
- * Controlador para RAG API.
+ * API interna de ingesta y consulta del contexto RAG.
+ *
+ * Responsabilidad:
+ * - Traducir el contrato HTTP al core de `RagService`.
+ * - Mantener compatibilidad con payload legacy mientras el core trabaja con la estructura nueva.
  */
 @RestController
 @RequestMapping("/api/rag")
@@ -80,6 +84,7 @@ public class RagApiController {
 
     private com.example.apiasistente.rag.entity.KnowledgeDocument upsertWithOptionalMetadata(String owner,
                                                                                               UpsertDocumentRequest req) {
+        // Si el cliente sigue hablando el contrato viejo, mantenemos el camino simple.
         if (!req.hasExplicitChunks()
                 && (req.getSource() == null || req.getSource().isBlank())
                 && (req.getTags() == null || req.getTags().isBlank())

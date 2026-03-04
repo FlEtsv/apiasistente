@@ -21,8 +21,10 @@ import com.example.apiasistente.chat.service.flow.ChatRagFlowService;
 import com.example.apiasistente.chat.service.flow.ChatRagGateService;
 import com.example.apiasistente.chat.service.flow.ChatRagTelemetryService;
 import com.example.apiasistente.chat.service.flow.ChatSessionService;
+import com.example.apiasistente.chat.service.flow.ChatSourceSnapshotService;
 import com.example.apiasistente.chat.service.flow.ChatTurnContextFactory;
 import com.example.apiasistente.chat.service.flow.ChatTurnService;
+import com.example.apiasistente.chat.service.flow.ChatImageGenerationService;
 import com.example.apiasistente.rag.service.RagService;
 import com.example.apiasistente.rag.repository.KnowledgeChunkRepository;
 import com.example.apiasistente.rag.repository.KnowledgeDocumentRepository;
@@ -49,6 +51,8 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -85,6 +89,9 @@ class ChatServiceTest {
     @Mock
     private KnowledgeChunkRepository chunkRepository;
 
+    @Mock
+    private ChatImageGenerationService imageGenerationService;
+
     private ChatService service;
 
     @BeforeEach
@@ -103,6 +110,7 @@ class ChatServiceTest {
         ChatRagDecisionEngine decisionEngine = new ChatRagDecisionEngine(ollama, modelSelector);
         ChatRagTelemetryService ragTelemetryService = new ChatRagTelemetryService();
         ChatRagGateService ragGateService = new ChatRagGateService(documentRepository, chunkRepository, decisionEngine);
+        ChatSourceSnapshotService sourceSnapshotService = new ChatSourceSnapshotService(messageRepo, sourceRepo);
         ChatTurnContextFactory contextFactory = new ChatTurnContextFactory(
                 sessionService,
                 historyService,
@@ -129,6 +137,7 @@ class ChatServiceTest {
                 ragFlowService,
                 assistantService,
                 historyService,
+                sourceSnapshotService,
                 sessionService,
                 decisionEngine,
                 ragTelemetryService
@@ -136,6 +145,7 @@ class ChatServiceTest {
 
         service = new ChatService(
                 turnService,
+                imageGenerationService,
                 sessionService,
                 historyService,
                 ragTelemetryService
@@ -147,6 +157,12 @@ class ChatServiceTest {
         ReflectionTestUtils.setField(ragGateService, "gateEnabled", false);
         ReflectionTestUtils.setField(decisionEngine, "decisionEnabled", false);
         ReflectionTestUtils.setField(ragTelemetryService, "maxEvents", 40);
+
+        lenient().when(messageRepo.getReferenceById(anyLong())).thenAnswer(invocation -> {
+            ChatMessage ref = new ChatMessage();
+            ReflectionTestUtils.setField(ref, "id", invocation.getArgument(0));
+            return ref;
+        });
     }
 
     @Test
@@ -302,6 +318,19 @@ class ChatServiceTest {
         assertTrue(finalPrompt.contains("Mensaje del usuario: Redacta un correo breve para pedir una reunion el martes"));
 
         verifyNoInteractions(ragService, sourceRepo);
+    }
+
+    @Test
+    void routesImageAliasToImageGenerationService() {
+        ChatResponse imageResponse = new ChatResponse("sid-img", "Imagen lista", List.of());
+        when(imageGenerationService.generate("user", null, "gato astronauta", "image", null))
+                .thenReturn(imageResponse);
+
+        ChatResponse response = service.chat("user", null, "gato astronauta", "image");
+
+        assertEquals("sid-img", response.getSessionId());
+        assertEquals("Imagen lista", response.getReply());
+        verify(imageGenerationService).generate("user", null, "gato astronauta", "image", null);
     }
 }
 

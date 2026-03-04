@@ -21,6 +21,7 @@ import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -60,18 +61,23 @@ public class RagVectorIndexService {
     private final OllamaClient ollamaClient;
     private final Directory directory;
     private final IndexWriter writer;
+    private final Path indexPath;
     private final boolean rebuildOnStartup;
+    private final ObjectProvider<RagOpsService> ragOpsServiceProvider;
 
     public RagVectorIndexService(KnowledgeVectorRepository vectorRepo,
                                  OllamaClient ollamaClient,
+                                 ObjectProvider<RagOpsService> ragOpsServiceProvider,
                                  @Value("${rag.vector.index-dir:data/rag-hnsw}") String indexDir,
                                  @Value("${rag.vector.rebuild-on-startup:true}") boolean rebuildOnStartup) throws IOException {
         this.vectorRepo = vectorRepo;
         this.ollamaClient = ollamaClient;
+        this.ragOpsServiceProvider = ragOpsServiceProvider;
         this.rebuildOnStartup = rebuildOnStartup;
 
         Path dir = Path.of(indexDir).toAbsolutePath().normalize();
         Files.createDirectories(dir);
+        this.indexPath = dir;
         this.directory = FSDirectory.open(dir);
         this.writer = new IndexWriter(directory, new IndexWriterConfig(new KeywordAnalyzer()));
     }
@@ -85,14 +91,23 @@ public class RagVectorIndexService {
         if (!rebuildOnStartup) {
             return;
         }
-        rebuildFromDatabase();
+        rebuildFromDatabase("startup");
     }
 
     public synchronized void rebuildFromDatabase() {
+        rebuildFromDatabase("system");
+    }
+
+    /**
+     * Recorre `vectors` como fuente durable y recompone el HNSW completo.
+     * Se expone con trigger explicito para poder auditar si fue un arranque o una accion manual.
+     */
+    public synchronized void rebuildFromDatabase(String trigger) {
         try {
             writer.deleteAll();
 
             int page = 0;
+            int indexedVectors = 0;
             while (true) {
                 var slice = vectorRepo.findActiveIndexPage(PageRequest.of(page, REBUILD_PAGE_SIZE));
                 if (slice.isEmpty()) {
@@ -112,6 +127,7 @@ public class RagVectorIndexService {
                             Instant.now()
                     ));
                 }
+                indexedVectors += batch.size();
                 indexBatchInternal(batch);
 
                 if (!slice.hasNext()) {
@@ -122,8 +138,11 @@ public class RagVectorIndexService {
 
             writer.commit();
             log.info("RAG HNSW rebuild completado");
+            int finalIndexedVectors = indexedVectors;
+            ragOps().ifPresent(ops -> ops.recordIndexRebuild(trigger, finalIndexedVectors));
         } catch (Exception e) {
             log.warn("No se pudo reconstruir el indice HNSW del RAG", e);
+            ragOps().ifPresent(ops -> ops.recordFailure("rag-index-rebuild", "No se pudo reconstruir el indice HNSW.", e));
         }
     }
 
@@ -138,7 +157,9 @@ public class RagVectorIndexService {
         try {
             indexBatchInternal(vectors);
             writer.commit();
+            ragOps().ifPresent(ops -> ops.recordIndexWrite(vectors.size()));
         } catch (IOException e) {
+            ragOps().ifPresent(ops -> ops.recordFailure("rag-index-write", "No se pudieron indexar vectores RAG.", e));
             throw new IllegalStateException("No se pudieron indexar vectores RAG.", e);
         }
     }
@@ -155,7 +176,9 @@ public class RagVectorIndexService {
                 writer.deleteDocuments(new Term(CHUNK_ID_FIELD, String.valueOf(chunkId)));
             }
             writer.commit();
+            ragOps().ifPresent(ops -> ops.recordIndexDelete(chunkIds.size()));
         } catch (IOException e) {
+            ragOps().ifPresent(ops -> ops.recordFailure("rag-index-delete", "No se pudieron borrar vectores del indice HNSW.", e));
             throw new IllegalStateException("No se pudieron borrar vectores del indice HNSW.", e);
         }
     }
@@ -230,6 +253,13 @@ public class RagVectorIndexService {
         }
     }
 
+    /**
+     * Ruta del indice para inspeccion operativa desde la home y soporte manual.
+     */
+    public String indexLocation() {
+        return indexPath.toString();
+    }
+
     @PreDestroy
     public synchronized void shutdown() {
         try {
@@ -259,6 +289,10 @@ public class RagVectorIndexService {
 
             writer.updateDocument(new Term(CHUNK_ID_FIELD, String.valueOf(vector.chunkId())), doc);
         }
+    }
+
+    private java.util.Optional<RagOpsService> ragOps() {
+        return java.util.Optional.ofNullable(ragOpsServiceProvider.getIfAvailable());
     }
 
     private static float[] toFloatArray(double[] vector) {

@@ -4,6 +4,8 @@ import com.example.apiasistente.chat.config.ChatQueueProperties;
 import com.example.apiasistente.chat.dto.ChatMediaInput;
 import com.example.apiasistente.chat.dto.ChatResponse;
 import com.example.apiasistente.shared.util.RequestIdHolder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PreDestroy;
@@ -25,6 +27,8 @@ import java.util.concurrent.ExecutionException;
  */
 @Service
 public class ChatQueueService {
+
+    private static final Logger log = LoggerFactory.getLogger(ChatQueueService.class);
 
     private final ChatService chatService;
     private final ChatQueueProperties properties;
@@ -71,6 +75,17 @@ public class ChatQueueService {
             throw new IllegalStateException("La cola de chat fue interrumpida.", e);
         } catch (ExecutionException e) {
             Throwable cause = e.getCause();
+            log.error(
+                    "chat_queue_wait_failed requestId={} sessionId={} externalUserId={} model={} mediaCount={} messagePreview={} causeType={} cause={}",
+                    RequestIdHolder.ensure(),
+                    safe(sessionId),
+                    safe(externalUserId),
+                    safe(model),
+                    media == null ? 0 : media.size(),
+                    preview(message),
+                    cause == null ? "" : cause.getClass().getSimpleName(),
+                    cause == null ? "sin detalle" : safe(cause.getMessage())
+            );
             if (cause instanceof RuntimeException runtimeException) {
                 throw runtimeException;
             }
@@ -112,6 +127,16 @@ public class ChatQueueService {
         SessionQueue queue = sessionQueues.computeIfAbsent(queueKey, key -> new SessionQueue());
         String requestId = RequestIdHolder.ensure();
         QueuedChat queued = new QueuedChat(username, sessionId, message, model, externalUserId, media, requestId);
+        log.info(
+                "chat_queue_enqueued requestId={} queueKey={} sessionId={} externalUserId={} model={} mediaCount={} messagePreview={}",
+                requestId,
+                queueKey,
+                safe(sessionId),
+                safe(externalUserId),
+                safe(model),
+                media == null ? 0 : media.size(),
+                preview(message)
+        );
 
         // La cola por sesion garantiza que dos turnos del mismo contexto no compitan por historial o persistencia.
         queue.enqueue(queued);
@@ -152,6 +177,16 @@ public class ChatQueueService {
                 applyDelay();
 
                 try (var ignored = RequestIdHolder.use(next.requestId())) {
+                    log.info(
+                            "chat_queue_processing requestId={} queueKey={} sessionId={} externalUserId={} model={} mediaCount={} messagePreview={}",
+                            next.requestId(),
+                            queueKey,
+                            safe(next.sessionId()),
+                            safe(next.externalUserId()),
+                            safe(next.model()),
+                            next.media() == null ? 0 : next.media().size(),
+                            preview(next.message())
+                    );
                     // Toda la logica de negocio vive en ChatService/ChatTurnService; la cola solo ordena y propaga contexto.
                     ChatResponse response = chatService.chat(
                             next.username(),
@@ -161,8 +196,30 @@ public class ChatQueueService {
                             next.externalUserId(),
                             next.media()
                     );
+                    log.info(
+                            "chat_queue_completed requestId={} queueKey={} responseSessionId={} ragUsed={} ragNeeded={} replyPreview={}",
+                            next.requestId(),
+                            queueKey,
+                            response == null ? "" : safe(response.getSessionId()),
+                            response != null && response.isRagUsed(),
+                            response != null && response.isRagNeeded(),
+                            response == null ? "" : preview(response.getReply())
+                    );
                     next.response().complete(response);
                 } catch (Exception ex) {
+                    log.error(
+                            "chat_queue_failed requestId={} queueKey={} sessionId={} externalUserId={} model={} mediaCount={} messagePreview={} causeType={} cause={}",
+                            next.requestId(),
+                            queueKey,
+                            safe(next.sessionId()),
+                            safe(next.externalUserId()),
+                            safe(next.model()),
+                            next.media() == null ? 0 : next.media().size(),
+                            preview(next.message()),
+                            ex.getClass().getSimpleName(),
+                            safe(ex.getMessage()),
+                            ex
+                    );
                     next.response().completeExceptionally(ex);
                 } finally {
                     RequestIdHolder.clear();
@@ -195,6 +252,21 @@ public class ChatQueueService {
         if (queue.isIdle()) {
             sessionQueues.remove(queueKey, queue);
         }
+    }
+
+    private String preview(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        String normalized = value.replaceAll("\\s+", " ").trim();
+        if (normalized.length() <= 120) {
+            return normalized;
+        }
+        return normalized.substring(0, 120).trim() + "...";
+    }
+
+    private String safe(String value) {
+        return value == null ? "" : value;
     }
 
     /**

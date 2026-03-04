@@ -1,6 +1,8 @@
 package com.example.apiasistente.rag.service;
 
 import com.example.apiasistente.chat.repository.ChatMessageSourceRepository;
+import com.example.apiasistente.monitoring.dto.MonitoringAlertStateDto;
+import com.example.apiasistente.monitoring.service.MonitoringAlertService;
 import com.example.apiasistente.rag.config.RagMaintenanceProperties;
 import com.example.apiasistente.rag.dto.RagMaintenanceCaseDecisionRequest;
 import com.example.apiasistente.rag.entity.KnowledgeChunk;
@@ -23,6 +25,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Pageable;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -62,6 +65,9 @@ class RagMaintenanceServiceTest {
     private RagMaintenanceAdvisorService advisorService;
 
     @Mock
+    private MonitoringAlertService monitoringAlertService;
+
+    @Mock
     private RagService ragService;
 
     @Mock
@@ -78,6 +84,9 @@ class RagMaintenanceServiceTest {
         properties.setPageSize(10);
         properties.setWarningReviewHours(48);
         properties.setAiAutoApplyHours(24);
+        properties.setAdminBacklogThreshold(10);
+        properties.setAdminBacklogAiMaxPerPass(3);
+        properties.setAiRequireHealthyMonitoring(true);
         properties.setUnusedDaysThreshold(30);
 
         service = new RagMaintenanceService(
@@ -88,6 +97,7 @@ class RagMaintenanceServiceTest {
                 caseRepo,
                 sourceRepo,
                 advisorService,
+                monitoringAlertService,
                 vectorIndexService,
                 ragService,
                 700,
@@ -105,8 +115,12 @@ class RagMaintenanceServiceTest {
                 .thenReturn(Optional.empty());
         lenient().when(caseRepo.findTop100ByStatusAndAdminDueAtBeforeOrderByAdminDueAtAsc(any(), any()))
                 .thenReturn(List.of());
+        lenient().when(caseRepo.findTop100ByStatusOrderByAdminDueAtAscCreatedAtAsc(any()))
+                .thenReturn(List.of());
         lenient().when(caseRepo.findTop100ByStatusAndAutoApplyAtBeforeOrderByAutoApplyAtAsc(any(), any()))
                 .thenReturn(List.of());
+        lenient().when(caseRepo.countByStatus(any())).thenReturn(0L);
+        lenient().when(monitoringAlertService.currentState()).thenReturn(healthyMonitoring());
     }
 
     @Test
@@ -190,6 +204,67 @@ class RagMaintenanceServiceTest {
         assertEquals("ana", result.resolvedBy());
     }
 
+    @Test
+    void backlogAboveThresholdTriggersAiReviewWhenMonitoringIsHealthy() {
+        RagMaintenanceCase ragCase = warningCase(91L, Instant.now().plusSeconds(3600));
+        when(caseRepo.countByStatus(RagMaintenanceCaseStatus.OPEN)).thenReturn(11L);
+        when(caseRepo.findTop100ByStatusOrderByAdminDueAtAscCreatedAtAsc(RagMaintenanceCaseStatus.OPEN))
+                .thenReturn(List.of(ragCase));
+        when(advisorService.advise(ragCase))
+                .thenReturn(new RagMaintenanceAdvisorService.Advice(
+                        RagMaintenanceAction.DELETE,
+                        "Backlog alto, adelantar decision.",
+                        null,
+                        "{\"decision\":\"DELETE\"}",
+                        "fast-model"
+                ));
+
+        service.scheduledCaseFollowUp();
+
+        verify(advisorService).advise(ragCase);
+        assertEquals(RagMaintenanceCaseStatus.AI_REVIEWED, ragCase.getStatus());
+        assertNotNull(ragCase.getAutoApplyAt());
+        assertTrue(ragCase.getAuditLog().contains("Revision IA adelantada por backlog admin alto"));
+        assertTrue(ragCase.getAuditLog().contains("Decision IA con modelo fast-model: DELETE"));
+        assertTrue(ragCase.getAuditLog().contains("Caso pendiente de auto-aplicacion tras decision IA"));
+    }
+
+    @Test
+    void backlogAboveThresholdSkipsAiReviewWhenMonitoringIsDegraded() {
+        RagMaintenanceCase ragCase = warningCase(92L, Instant.now().plusSeconds(3600));
+        when(caseRepo.countByStatus(RagMaintenanceCaseStatus.OPEN)).thenReturn(11L);
+        when(monitoringAlertService.currentState()).thenReturn(new MonitoringAlertStateDto(
+                true, false, false, false, false,
+                Instant.now(), null, null, null, null
+        ));
+
+        service.scheduledCaseFollowUp();
+
+        verify(advisorService, never()).advise(any(RagMaintenanceCase.class));
+        verify(caseRepo, never()).save(ragCase);
+        assertEquals(RagMaintenanceCaseStatus.OPEN, ragCase.getStatus());
+    }
+
+    @Test
+    void overdueCaseAlsoRespectsMonitoringGateBeforeCallingAi() {
+        RagMaintenanceCase ragCase = warningCase(93L, Instant.now().minusSeconds(60));
+        when(caseRepo.findTop100ByStatusAndAdminDueAtBeforeOrderByAdminDueAtAsc(
+                eq(RagMaintenanceCaseStatus.OPEN),
+                any(Instant.class)
+        )).thenReturn(List.of(ragCase));
+        when(monitoringAlertService.currentState()).thenReturn(new MonitoringAlertStateDto(
+                false, true, false, false, false,
+                null, Instant.now(), null, null, null
+        ));
+
+        service.scheduledCaseFollowUp();
+
+        verify(advisorService, never()).advise(any(RagMaintenanceCase.class));
+        verify(caseRepo).save(ragCase);
+        assertEquals(RagMaintenanceCaseStatus.OPEN, ragCase.getStatus());
+        assertTrue(ragCase.getAuditLog().contains("IA aplazada por monitoreo degradado: memoryHigh."));
+    }
+
     private void mockCorpusSnapshots(long docs,
                                      long chunks,
                                      long content,
@@ -222,5 +297,29 @@ class RagMaintenanceServiceTest {
         chunk.setTokenCount(6);
         chunk.setSource("api");
         return chunk;
+    }
+
+    private RagMaintenanceCase warningCase(Long id, Instant adminDueAt) {
+        RagMaintenanceCase ragCase = new RagMaintenanceCase();
+        ReflectionTestUtils.setField(ragCase, "id", id);
+        ragCase.setDocumentId(id + 1000);
+        ragCase.setOwner("global");
+        ragCase.setDocumentTitle("Caso " + id);
+        ragCase.setSeverity(RagMaintenanceSeverity.WARNING);
+        ragCase.setIssueType(RagMaintenanceIssueType.BAD_STRUCTURE);
+        ragCase.setStatus(RagMaintenanceCaseStatus.OPEN);
+        ragCase.setRecommendedAction(RagMaintenanceAction.RESTRUCTURE);
+        ragCase.setAdminDueAt(adminDueAt);
+        ragCase.setSummary("Documento util pero mal estructurado.");
+        ragCase.setOriginalSnippet("Texto original");
+        ragCase.setProposedContent("Texto limpio");
+        return ragCase;
+    }
+
+    private MonitoringAlertStateDto healthyMonitoring() {
+        return new MonitoringAlertStateDto(
+                false, false, false, false, false,
+                null, null, null, null, null
+        );
     }
 }

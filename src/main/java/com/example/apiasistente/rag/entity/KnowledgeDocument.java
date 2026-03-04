@@ -20,6 +20,10 @@ import java.time.Instant;
  * - Aqui guardamos la identidad del documento y su metadata estable.
  * - El texto operativo vive en la tabla append-only de chunks.
  * - Los embeddings ya no cuelgan del documento ni del chunk: van al vector store/HNSW.
+ *
+ * Responsabilidad:
+ * - Ser la raiz versionable del conocimiento.
+ * - Delimitar owner, origen y enlazado entre versiones activas e historicas.
  */
 @Entity
 @Table(

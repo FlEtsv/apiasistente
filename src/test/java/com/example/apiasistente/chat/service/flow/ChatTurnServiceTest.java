@@ -43,6 +43,9 @@ class ChatTurnServiceTest {
     private ChatHistoryService historyService;
 
     @Mock
+    private ChatSourceSnapshotService sourceSnapshotService;
+
+    @Mock
     private ChatSessionService sessionService;
 
     @Mock
@@ -60,6 +63,7 @@ class ChatTurnServiceTest {
                 ragFlowService,
                 assistantService,
                 historyService,
+                sourceSnapshotService,
                 sessionService,
                 decisionEngine,
                 telemetryService
@@ -128,6 +132,9 @@ class ChatTurnServiceTest {
         when(ragFlowService.resolve(context)).thenReturn(ragContext);
         when(assistantService.answer(context, ragContext)).thenReturn(outcome);
         when(historyService.saveAssistantMessage(session, "Respuesta final [S1]")).thenReturn(assistantMessage);
+        when(sourceSnapshotService.toSnapshots(scored)).thenReturn(List.of(
+                new ChatSourceSnapshotService.SourceSnapshot(2L, 1L, "Manual", "snippet", 0.91)
+        ));
 
         ChatResponse response = service.chat("user", null, "Que dice el log?", "auto", null, List.of());
 
@@ -138,7 +145,7 @@ class ChatTurnServiceTest {
         assertEquals(1, response.getGroundedSources());
         assertEquals("MEDIUM", response.getReasoningLevel());
 
-        verify(historyService).persistSources(assistantMessage, scored);
+        verify(sourceSnapshotService).persistAfterCommit(eq(12L), eq("sid-77"), org.mockito.ArgumentMatchers.anyList());
         verify(sessionService).touchSession(session);
         verify(historyService).saveAssistantMessage(session, "Respuesta final [S1]");
     }
@@ -229,13 +236,16 @@ class ChatTurnServiceTest {
         when(ragFlowService.resolveForced(context, "respuesta-incompleta")).thenReturn(retriedContext);
         when(assistantService.answer(context, retriedContext)).thenReturn(retriedOutcome);
         when(historyService.saveAssistantMessage(session, "Respuesta con fuentes [S1]")).thenReturn(assistantMessage);
+        when(sourceSnapshotService.toSnapshots(scored)).thenReturn(List.of(
+                new ChatSourceSnapshotService.SourceSnapshot(4L, 3L, "Runbook", "snippet", 0.93)
+        ));
 
         ChatResponse response = service.chat("user", null, "Explica el error del endpoint", "auto", null, List.of());
 
         assertTrue(response.isRagUsed());
         assertTrue(response.isRagNeeded());
         assertEquals("Respuesta con fuentes [S1]", response.getReply());
-        verify(historyService).persistSources(assistantMessage, scored);
+        verify(sourceSnapshotService).persistAfterCommit(eq(22L), eq("sid-88"), org.mockito.ArgumentMatchers.anyList());
     }
 
     @Test
@@ -300,8 +310,11 @@ class ChatTurnServiceTest {
         when(ragFlowService.resolve(context)).thenReturn(ragContext);
         when(assistantService.answer(context, ragContext)).thenReturn(outcome);
         when(historyService.saveAssistantMessage(session, "Respuesta final [S1]")).thenReturn(assistantMessage);
+        when(sourceSnapshotService.toSnapshots(scored)).thenReturn(List.of(
+                new ChatSourceSnapshotService.SourceSnapshot(2L, 1L, "Manual", "snippet", 0.91)
+        ));
         doThrow(new org.springframework.dao.DataIntegrityViolationException("fk chat_message_source"))
-                .when(historyService).persistSources(assistantMessage, scored);
+                .when(sourceSnapshotService).persistAfterCommit(eq(32L), eq("sid-99"), org.mockito.ArgumentMatchers.anyList());
 
         ChatResponse response = service.chat("user", null, "Que dice el documento?", "auto", null, List.of());
 

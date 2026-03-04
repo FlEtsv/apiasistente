@@ -49,5 +49,14 @@ public interface KnowledgeVectorRepository extends JpaRepository<KnowledgeVector
     """)
     Long sumEmbeddingLength();
 
+    @Query("""
+        select count(v)
+        from KnowledgeVector v
+        join v.chunk c
+        join c.document d
+        where d.active = true
+    """)
+    long countActive();
+
     void deleteByChunkIdIn(Collection<Long> chunkIds);
 }

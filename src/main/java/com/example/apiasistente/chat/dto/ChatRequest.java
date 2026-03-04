@@ -14,7 +14,7 @@ public class ChatRequest {
     private String message;
 
     /**
-     * Modelo solicitado por el cliente: "auto", "chat", "fast", "visual" o nombre exacto permitido.
+     * Modelo solicitado por el cliente: "auto", "chat", "fast", "visual", "image" o nombre exacto permitido.
      */
     private String model;
 

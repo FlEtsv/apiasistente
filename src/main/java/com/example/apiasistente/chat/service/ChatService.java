@@ -7,7 +7,9 @@ import com.example.apiasistente.chat.dto.ChatResponse;
 import com.example.apiasistente.chat.dto.SessionDetailsDto;
 import com.example.apiasistente.chat.dto.SessionSummaryDto;
 import com.example.apiasistente.chat.entity.ChatMessage;
+import com.example.apiasistente.chat.service.flow.ChatGeneratedImageStoreService;
 import com.example.apiasistente.chat.service.flow.ChatHistoryService;
+import com.example.apiasistente.chat.service.flow.ChatImageGenerationService;
 import com.example.apiasistente.chat.service.flow.ChatRagTelemetryService;
 import com.example.apiasistente.chat.service.flow.ChatSessionService;
 import com.example.apiasistente.chat.service.flow.ChatTurnService;
@@ -24,15 +26,18 @@ import java.util.List;
 public class ChatService {
 
     private final ChatTurnService turnService;
+    private final ChatImageGenerationService imageGenerationService;
     private final ChatSessionService sessionService;
     private final ChatHistoryService historyService;
     private final ChatRagTelemetryService ragTelemetryService;
 
     public ChatService(ChatTurnService turnService,
+                       ChatImageGenerationService imageGenerationService,
                        ChatSessionService sessionService,
                        ChatHistoryService historyService,
                        ChatRagTelemetryService ragTelemetryService) {
         this.turnService = turnService;
+        this.imageGenerationService = imageGenerationService;
         this.sessionService = sessionService;
         this.historyService = historyService;
         this.ragTelemetryService = ragTelemetryService;
@@ -84,6 +89,15 @@ public class ChatService {
                              String requestedModel,
                              String externalUserId,
                              List<ChatMediaInput> media) {
+        if (ChatModelSelector.isImageGenerationRequest(requestedModel)) {
+            return imageGenerationService.generate(
+                    username,
+                    maybeSessionId,
+                    userText,
+                    requestedModel,
+                    externalUserId
+            );
+        }
         return turnService.chat(username, maybeSessionId, userText, requestedModel, externalUserId, media);
     }
 
@@ -162,6 +176,12 @@ public class ChatService {
      */
     public ChatRagTelemetrySnapshotDto ragTelemetry() {
         return ragTelemetryService.snapshot();
+    }
+
+    public ChatGeneratedImageStoreService.StoredImage loadGeneratedImage(String username,
+                                                                         String sessionId,
+                                                                         String imageId) {
+        return imageGenerationService.loadForUser(username, sessionId, imageId);
     }
 }
 

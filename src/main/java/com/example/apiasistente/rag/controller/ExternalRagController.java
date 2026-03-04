@@ -21,7 +21,11 @@ import java.util.List;
 import java.util.function.Function;
 
 /**
- * Controlador para External RAG.
+ * API externa del RAG para integraciones con API key.
+ *
+ * Responsabilidad:
+ * - Aplicar las reglas de seguridad del canal externo.
+ * - Mantener el mismo flujo canonico de ingesta que la API interna.
  */
 @RestController
 @RequestMapping("/api/ext/rag")
@@ -120,6 +124,7 @@ public class ExternalRagController {
     }
 
     private KnowledgeDocument upsertWithOptionalMetadata(String owner, UpsertDocumentRequest req) {
+        // La compatibilidad legacy se conserva aqui tambien para no romper clientes externos existentes.
         if (!req.hasExplicitChunks()
                 && (req.getSource() == null || req.getSource().isBlank())
                 && (req.getTags() == null || req.getTags().isBlank())

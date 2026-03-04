@@ -21,6 +21,10 @@ import java.time.Instant;
  * - Esta tabla actua como respaldo y base para reconstruir el indice HNSW.
  * - El retrieval normal consulta el indice HNSW, no esta tabla.
  * - La clave primaria coincide con chunk_id para mantener el mapping 1:1 simple.
+ *
+ * Responsabilidad:
+ * - Ser la fuente durable de reconstruccion del indice vectorial.
+ * - Mantener un mapping simple y verificable entre chunk y embedding.
  */
 @Entity
 @Table(

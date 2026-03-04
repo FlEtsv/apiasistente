@@ -469,7 +469,7 @@
             display: flex;
             flex-wrap: wrap;
             gap: 8px;
-            max-height: 112px;
+            max-height: 190px;
             overflow-y: auto;
         }
 
@@ -490,6 +490,15 @@
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+        }
+
+        .media-chip .thumb {
+            width: 52px;
+            height: 52px;
+            object-fit: cover;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            flex: 0 0 auto;
         }
 
         .media-chip .remove {
@@ -814,6 +823,16 @@
             text-underline-offset: 2px;
         }
 
+        .msg-markdown img {
+            max-width: min(100%, 460px);
+            width: auto;
+            height: auto;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            margin-top: 8px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+        }
+
         .msg-markdown code {
             font-family: 'IBM Plex Mono', monospace;
             font-size: 0.86em;
@@ -1081,6 +1100,7 @@
                                 <option value="fast">Rapido (gemma2:9b)</option>
                                 <option value="chat">Complejo/RAG (llama3.1:8b)</option>
                                 <option value="visual">Vision (qwen2.5vl:7b)</option>
+                                <option value="image">Generar imagen (flux)</option>
                             </select>
                             <button id="send" type="button">Enviar</button>
                         </div>
@@ -1091,7 +1111,7 @@
                         <button id="attachBtn" type="button" class="btn">Adjuntar archivo</button>
                         <button id="cameraBtn" type="button" class="btn">Usar camara</button>
                         <button id="clearMediaBtn" type="button" class="btn">Limpiar adjuntos</button>
-                        <span class="media-hint">Puedes enviar imagen, camara o documento y preguntar sobre ello.</span>
+                        <span class="media-hint">Puedes enviar imagen, camara o documento y ver su preview antes de enviar.</span>
                     </div>
                     <div id="mediaPreview" class="media-preview"></div>
                 </div>
@@ -1288,9 +1308,15 @@
                     <div class="stat" sec:authorize="hasAuthority('PERM_RAG')">
                         <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;">
                             <strong>Decisiones RAG</strong>
-                            <button id="btnRagCasesRefresh" class="btn">Refrescar</button>
+                            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                                <label class="sub" style="display:flex; align-items:center; gap:6px;">
+                                    <input id="ragIncludeResolved" type="checkbox" />
+                                    Ver historial
+                                </label>
+                                <button id="btnRagCasesRefresh" class="btn">Refrescar</button>
+                            </div>
                         </div>
-                        <div class="sub">Casos abiertos y revisiones pendientes del corpus.</div>
+                        <div class="sub">Casos abiertos, resueltos opcionales y auditoria persistente de la IA.</div>
                         <div id="ragCaseActionStatus" class="sub">Sin acciones manuales recientes.</div>
                         <div id="ragCaseList" class="event-list">
                             <div class="event-item">

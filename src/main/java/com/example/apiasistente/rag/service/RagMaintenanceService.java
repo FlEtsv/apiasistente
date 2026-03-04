@@ -1,6 +1,8 @@
 package com.example.apiasistente.rag.service;
 
 import com.example.apiasistente.chat.repository.ChatMessageSourceRepository;
+import com.example.apiasistente.monitoring.dto.MonitoringAlertStateDto;
+import com.example.apiasistente.monitoring.service.MonitoringAlertService;
 import com.example.apiasistente.rag.config.RagMaintenanceProperties;
 import com.example.apiasistente.rag.dto.RagMaintenanceCaseDecisionRequest;
 import com.example.apiasistente.rag.dto.RagMaintenanceCaseDto;
@@ -89,6 +91,7 @@ public class RagMaintenanceService {
     private final RagMaintenanceCaseRepository caseRepo;
     private final ChatMessageSourceRepository sourceRepo;
     private final RagMaintenanceAdvisorService advisorService;
+    private final MonitoringAlertService monitoringAlertService;
     private final RagService ragService;
     private final RagVectorIndexService vectorIndexService;
     private final int ragChunkSize;
@@ -114,6 +117,7 @@ public class RagMaintenanceService {
                                  RagMaintenanceCaseRepository caseRepo,
                                  ChatMessageSourceRepository sourceRepo,
                                  RagMaintenanceAdvisorService advisorService,
+                                 MonitoringAlertService monitoringAlertService,
                                  RagVectorIndexService vectorIndexService,
                                  RagService ragService,
                                  @Value("${rag.chunk.size:900}") int ragChunkSize,
@@ -125,6 +129,7 @@ public class RagMaintenanceService {
         this.caseRepo = caseRepo;
         this.sourceRepo = sourceRepo;
         this.advisorService = advisorService;
+        this.monitoringAlertService = monitoringAlertService;
         this.vectorIndexService = vectorIndexService;
         this.ragService = ragService;
         this.ragChunkSize = ragChunkSize;
@@ -408,7 +413,7 @@ public class RagMaintenanceService {
         }
 
         if (assessment.severity() == RagMaintenanceSeverity.CRITICAL) {
-            reviewCaseWithAi(ragCase, true, acc);
+            reviewCaseWithAi(ragCase, true, acc, null);
         }
     }
 
@@ -553,14 +558,22 @@ public class RagMaintenanceService {
     @Transactional
     private void processPendingCases(RunAccumulator acc) {
         Instant now = Instant.now();
+        MonitoringAlertStateDto monitoringState = currentMonitoringState();
 
         List<RagMaintenanceCase> overdueForAi = caseRepo.findTop100ByStatusAndAdminDueAtBeforeOrderByAdminDueAtAsc(
                 RagMaintenanceCaseStatus.OPEN,
                 now
         );
-        for (RagMaintenanceCase ragCase : overdueForAi) {
-            reviewCaseWithAi(ragCase, ragCase.getSeverity() == RagMaintenanceSeverity.CRITICAL, acc);
+        if (!overdueForAi.isEmpty() && !canUseDecisionModel(monitoringState)) {
+            log.info("Se posponen {} decisiones IA del RAG por monitoreo degradado: {}",
+                    overdueForAi.size(),
+                    describeMonitoringState(monitoringState));
         }
+        for (RagMaintenanceCase ragCase : overdueForAi) {
+            reviewCaseWithAi(ragCase, ragCase.getSeverity() == RagMaintenanceSeverity.CRITICAL, acc, monitoringState);
+        }
+
+        accelerateAdminBacklog(now, acc, monitoringState);
 
         List<RagMaintenanceCase> readyToApply = caseRepo.findTop100ByStatusAndAutoApplyAtBeforeOrderByAutoApplyAtAsc(
                 RagMaintenanceCaseStatus.AI_REVIEWED,
@@ -571,11 +584,71 @@ public class RagMaintenanceService {
         }
     }
 
-    private void reviewCaseWithAi(RagMaintenanceCase ragCase,
-                                  boolean autoExecute,
-                                  RunAccumulator acc) {
-        if (ragCase == null || ragCase.getStatus() == RagMaintenanceCaseStatus.EXECUTED || ragCase.getStatus() == RagMaintenanceCaseStatus.RESOLVED) {
+    private void accelerateAdminBacklog(Instant now,
+                                        RunAccumulator acc,
+                                        MonitoringAlertStateDto monitoringState) {
+        long pendingAdminCount = caseRepo.countByStatus(RagMaintenanceCaseStatus.OPEN);
+        int threshold = Math.max(0, properties.getAdminBacklogThreshold());
+        if (pendingAdminCount <= threshold) {
             return;
+        }
+        if (!canUseDecisionModel(monitoringState)) {
+            log.info("La cola admin del RAG tiene {} casos OPEN; se evita consultar IA por monitoreo degradado: {}",
+                    pendingAdminCount,
+                    describeMonitoringState(monitoringState));
+            return;
+        }
+
+        int maxPerPass = Math.max(1, properties.getAdminBacklogAiMaxPerPass());
+        int reviewsToRun = (int) Math.min((long) maxPerPass, pendingAdminCount - threshold);
+        if (reviewsToRun <= 0) {
+            return;
+        }
+
+        List<RagMaintenanceCase> backlogCandidates = caseRepo.findTop100ByStatusOrderByAdminDueAtAscCreatedAtAsc(
+                RagMaintenanceCaseStatus.OPEN
+        );
+        int reviewed = 0;
+        for (RagMaintenanceCase ragCase : backlogCandidates) {
+            if (ragCase == null || ragCase.getStatus() != RagMaintenanceCaseStatus.OPEN) {
+                continue;
+            }
+            if (ragCase.getAdminDueAt() != null && !ragCase.getAdminDueAt().isAfter(now)) {
+                continue;
+            }
+            appendAudit(ragCase, "SYSTEM", "Revision IA adelantada por backlog admin alto (" + pendingAdminCount + " casos OPEN).");
+            if (reviewCaseWithAi(ragCase, false, acc, monitoringState)) {
+                reviewed++;
+            }
+            if (reviewed >= reviewsToRun) {
+                break;
+            }
+        }
+
+        if (reviewed > 0) {
+            recordEvent(
+                    "WARN",
+                    "ADMIN_BACKLOG_AI",
+                    "Cola admin acelerada",
+                    "Habia " + pendingAdminCount + " casos OPEN; la IA adelanto " + reviewed + " decisiones."
+            );
+        }
+    }
+
+    private boolean reviewCaseWithAi(RagMaintenanceCase ragCase,
+                                     boolean autoExecute,
+                                     RunAccumulator acc,
+                                     MonitoringAlertStateDto monitoringState) {
+        if (ragCase == null || ragCase.getStatus() == RagMaintenanceCaseStatus.EXECUTED || ragCase.getStatus() == RagMaintenanceCaseStatus.RESOLVED) {
+            return false;
+        }
+
+        MonitoringAlertStateDto effectiveMonitoringState = monitoringState == null ? currentMonitoringState() : monitoringState;
+        if (!canUseDecisionModel(effectiveMonitoringState)) {
+            if (appendAudit(ragCase, "SYSTEM", "IA aplazada por monitoreo degradado: " + describeMonitoringState(effectiveMonitoringState) + ".")) {
+                caseRepo.save(ragCase);
+            }
+            return false;
         }
 
         RagMaintenanceAdvisorService.Advice advice = advisorService.advise(ragCase);
@@ -586,7 +659,12 @@ public class RagMaintenanceService {
         if (trimToNull(advice.normalizedContent()) != null) {
             ragCase.setProposedContent(advice.normalizedContent().trim());
         }
-        appendAudit(ragCase, "AI", "Decision IA: " + advice.action() + " - " + advice.reason());
+        appendAudit(
+                ragCase,
+                "AI",
+                "Decision IA con modelo " + firstNonBlank(trimToNull(advice.model()), "desconocido")
+                        + ": " + advice.action() + " - " + advice.reason()
+        );
         recordEvent(
                 "INFO",
                 "AI_DECISION",
@@ -600,7 +678,7 @@ public class RagMaintenanceService {
         if (advice.action() == RagMaintenanceAction.KEEP) {
             markResolved(ragCase, RagMaintenanceAction.KEEP, "robot-ai", "La IA decidio conservar el documento.");
             caseRepo.save(ragCase);
-            return;
+            return true;
         }
 
         if (autoExecute) {
@@ -615,8 +693,14 @@ public class RagMaintenanceService {
         } else {
             ragCase.setStatus(RagMaintenanceCaseStatus.AI_REVIEWED);
             ragCase.setAutoApplyAt(Instant.now().plus(Duration.ofHours(Math.max(1, properties.getAiAutoApplyHours()))));
+            appendAudit(
+                    ragCase,
+                    "SYSTEM",
+                    "Caso pendiente de auto-aplicacion tras decision IA hasta " + ragCase.getAutoApplyAt() + "."
+            );
             caseRepo.save(ragCase);
         }
+        return true;
     }
 
     private void autoApplyCase(RagMaintenanceCase ragCase,
@@ -706,6 +790,47 @@ public class RagMaintenanceService {
         ragCase.setResolvedBy(actor);
         ragCase.setAutoApplyAt(null);
         appendAudit(ragCase, actorLabel(actor), message);
+    }
+
+    private MonitoringAlertStateDto currentMonitoringState() {
+        if (!properties.isAiRequireHealthyMonitoring()) {
+            return null;
+        }
+        return monitoringAlertService.currentState();
+    }
+
+    private boolean canUseDecisionModel(MonitoringAlertStateDto monitoringState) {
+        if (!properties.isAiRequireHealthyMonitoring() || monitoringState == null) {
+            return true;
+        }
+        return !monitoringState.cpuHigh()
+                && !monitoringState.memoryHigh()
+                && !monitoringState.diskHigh()
+                && !monitoringState.swapHigh()
+                && !monitoringState.internetDown();
+    }
+
+    private String describeMonitoringState(MonitoringAlertStateDto monitoringState) {
+        if (monitoringState == null) {
+            return "sin restricciones";
+        }
+        List<String> issues = new ArrayList<>();
+        if (monitoringState.cpuHigh()) {
+            issues.add("cpuHigh");
+        }
+        if (monitoringState.memoryHigh()) {
+            issues.add("memoryHigh");
+        }
+        if (monitoringState.diskHigh()) {
+            issues.add("diskHigh");
+        }
+        if (monitoringState.swapHigh()) {
+            issues.add("swapHigh");
+        }
+        if (monitoringState.internetDown()) {
+            issues.add("internetDown");
+        }
+        return issues.isEmpty() ? "saludable" : String.join(", ", issues);
     }
 
     private Optional<RagMaintenanceCase> findActiveCase(Long documentId) {
@@ -994,14 +1119,27 @@ public class RagMaintenanceService {
         }
     }
 
-    private void appendAudit(RagMaintenanceCase ragCase, String actor, String message) {
-        String line = "[" + Instant.now() + "] " + actor + " - " + message;
+    private boolean appendAudit(RagMaintenanceCase ragCase, String actor, String message) {
+        if (ragCase == null) {
+            return false;
+        }
+        String normalizedActor = actorLabel(actor);
+        String normalizedMessage = message == null ? "sin detalle" : message.trim();
+        if (normalizedMessage.isBlank()) {
+            normalizedMessage = "sin detalle";
+        }
+        String latestSignature = normalizedActor + " - " + normalizedMessage;
+        String line = "[" + Instant.now() + "] " + normalizedActor + " - " + normalizedMessage;
         String current = ragCase.getAuditLog();
         if (current == null || current.isBlank()) {
             ragCase.setAuditLog(line);
-            return;
+            return true;
+        }
+        if (current.endsWith(latestSignature)) {
+            return false;
         }
         ragCase.setAuditLog(current + "\n" + line);
+        return true;
     }
 
     private String snippet(String content) {

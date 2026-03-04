@@ -19,6 +19,10 @@ import java.util.Map;
  * - Solo corre si la estructura legacy existe.
  * - Solo migra automatico cuando el nuevo esquema aun no tiene documentos activos.
  * - No borra tablas antiguas; las deja como respaldo hasta que valides la migracion.
+ *
+ * Responsabilidad:
+ * - Absorber datos viejos hacia el modelo `documents/chunks/vectors`.
+ * - Evitar que la logica del resto del sistema tenga que seguir entendiendo el esquema legacy.
  */
 @Service
 public class RagLegacyStructureMigrationService {
@@ -69,6 +73,7 @@ public class RagLegacyStructureMigrationService {
                 continue;
             }
             String owner = asText(row.get("owner"));
+            // Reusa la misma entrada del core para que la migracion respete chunking, vectors e indice.
             ragService.upsertDocumentForOwner(owner, title, content, "legacy-migration", "legacy");
             migrated++;
         }

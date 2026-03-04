@@ -22,8 +22,12 @@ public interface RagMaintenanceCaseRepository extends JpaRepository<RagMaintenan
     List<RagMaintenanceCase> findTop100ByStatusAndAdminDueAtBeforeOrderByAdminDueAtAsc(RagMaintenanceCaseStatus status,
                                                                                         Instant adminDueAt);
 
+    List<RagMaintenanceCase> findTop100ByStatusOrderByAdminDueAtAscCreatedAtAsc(RagMaintenanceCaseStatus status);
+
     List<RagMaintenanceCase> findTop100ByStatusAndAutoApplyAtBeforeOrderByAutoApplyAtAsc(RagMaintenanceCaseStatus status,
                                                                                           Instant autoApplyAt);
+
+    long countByStatus(RagMaintenanceCaseStatus status);
 
     long countByStatusIn(Collection<RagMaintenanceCaseStatus> statuses);
 }

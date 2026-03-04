@@ -20,6 +20,7 @@ import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerMapping;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -104,6 +105,8 @@ public class GlobalExceptionHandler {
                     errorId, status.value(), method, path, query, handler, message);
         }
 
+        List<String> enrichedDetails = enrichDetails(details, ex, status, handler, message);
+
         ApiError body = new ApiError(
                 errorId,
                 status.value(),
@@ -111,7 +114,7 @@ public class GlobalExceptionHandler {
                 message,
                 path,
                 Instant.now(),
-                details == null ? Collections.emptyList() : details
+                enrichedDetails
         );
         return ResponseEntity.status(status).body(body);
     }
@@ -128,6 +131,74 @@ public class GlobalExceptionHandler {
     private String formatFieldError(FieldError err) {
         String code = err.getCode() == null ? "" : err.getCode();
         return err.getField() + ": " + err.getDefaultMessage() + (code.isEmpty() ? "" : " (" + code + ")");
+    }
+
+    private List<String> enrichDetails(List<String> details,
+                                       Exception ex,
+                                       HttpStatus status,
+                                       String handler,
+                                       String message) {
+        List<String> out = new ArrayList<>();
+        if (details != null) {
+            out.addAll(details.stream()
+                    .filter(item -> item != null && !item.isBlank())
+                    .map(String::trim)
+                    .toList());
+        }
+        if (status == null || !status.is5xxServerError() || ex == null) {
+            return out.isEmpty() ? Collections.emptyList() : List.copyOf(out);
+        }
+
+        if (handler != null && !handler.isBlank()) {
+            out.add("handler: " + handler.trim());
+        }
+        out.add("exception: " + ex.getClass().getSimpleName());
+
+        String causeSummary = summarizeThrowable(ex, message);
+        if (!causeSummary.isBlank()) {
+            out.add("cause: " + causeSummary);
+        }
+        return List.copyOf(out);
+    }
+
+    private String summarizeThrowable(Throwable error, String topLevelMessage) {
+        if (error == null) {
+            return "";
+        }
+        Throwable root = error;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+
+        String rootMessage = safeMessage(root);
+        String errorMessage = safeMessage(error);
+        String top = topLevelMessage == null ? "" : topLevelMessage.trim();
+
+        if (!rootMessage.isBlank() && !rootMessage.equals(top) && !rootMessage.equals(errorMessage)) {
+            return clip(root.getClass().getSimpleName() + ": " + rootMessage);
+        }
+        if (!errorMessage.isBlank() && !errorMessage.equals(top)) {
+            return clip(error.getClass().getSimpleName() + ": " + errorMessage);
+        }
+        return clip(root.getClass().getSimpleName());
+    }
+
+    private String safeMessage(Throwable error) {
+        if (error == null || error.getMessage() == null) {
+            return "";
+        }
+        return error.getMessage().replaceAll("\\s+", " ").trim();
+    }
+
+    private String clip(String value) {
+        if (value == null) {
+            return "";
+        }
+        String normalized = value.trim();
+        if (normalized.length() <= 240) {
+            return normalized;
+        }
+        return normalized.substring(0, 240).trim() + "...";
     }
 }
 

@@ -23,11 +23,17 @@ Documentacion tecnica:
 - `docs/flow.md`: flujos de datos por endpoint.
 
 Resumen:
-1. Controllers reciben requests web o externas.
-2. Services aplican reglas de negocio (chat, RAG, monitoreo, seguridad).
-3. Repositories persisten entidades en MySQL.
+1. El codigo esta organizado por feature (`apikey`, `auth`, `chat`, `monitoring`, `prompt`, `rag`, `registration`, `shared`).
+2. Cada feature concentra sus controllers, services, DTOs, entities y repositories cuando aplica.
+3. `shared` contiene solo infraestructura transversal (config, filtros, seguridad comun, cliente Ollama).
 4. Ollama provee chat y embeddings.
-5. MonitoringAlertService genera eventos de salud y los publica via endpoints.
+5. `MonitoringAlertService` genera eventos de salud y los publica via endpoints.
+
+Layout principal:
+- `src/main/java/com/example/apiasistente/chat`: flujo completo de chat y orquestacion por turno.
+- `src/main/java/com/example/apiasistente/rag`: ingesta, retrieval, utilidades vectoriales y endpoints RAG.
+- `src/main/java/com/example/apiasistente/monitoring`: endpoints y servicios de monitoreo.
+- `src/main/java/com/example/apiasistente/shared`: infraestructura transversal.
 
 ## Stack tecnologico
 - Java 21
@@ -55,6 +61,7 @@ Variables principales (definidas en `src/main/resources/application.yml`):
 | `MYSQL_PASSWORD` | Password MySQL | `apipassword` |
 | `OLLAMA_BASE_URL` | URL base de Ollama | `http://localhost:11434/api` |
 | `OLLAMA_RESPONSE_GUARD_MODEL` | Mini-modelo para depurar respuestas | `qwen2.5:3b` |
+| `OLLAMA_IMAGE_MODEL` | Modelo de generación de imágenes en chat | `flux` |
 | `MONITOR_ALERTS_ENABLED` | Habilita alertas | `true` |
 | `MONITOR_ALERTS_INTERVAL_MS` | Frecuencia de chequeo | `15000` |
 | `MONITOR_ALERTS_MAX_EVENTS` | Maximo de eventos en memoria | `200` |
@@ -137,11 +144,24 @@ curl -sG "http://localhost:8080/api/integration/monitor/alerts" \
   - `base64` (imagen/pdf/binario)
   - `text` (documento de texto)
 
+## Generación de imágenes en chat
+- En la UI (`/chat`) selecciona el modelo `Generar imagen (flux)`.
+- El backend genera la imagen, la guarda por sesión y la devuelve embebida en la respuesta del asistente.
+- Endpoint de entrega de imagen generada: `GET /api/chat/sessions/{sessionId}/images/{imageId}`.
+- Configuración:
+  - `ollama.image-model` (alias del modelo de imagen mostrado en chat).
+  - `chat.image-generation.base-url`, `width`, `height`, `timeout-ms`, `storage-dir`.
+
 ## Depurador de respuestas (mini-modelo)
 - Configura `ollama.response-guard-model` (env: `OLLAMA_RESPONSE_GUARD_MODEL`).
 - `chat.response-guard.enabled=true` activa una segunda pasada corta para quitar relleno.
 - `chat.response-guard.strict-mode=true` aplica depuracion mas agresiva (modo estricto).
 - Si la respuesta original trae citas `[S#]` o codigo, se preservan; si la depuracion degrada, se mantiene la salida original.
+
+## Planificador de turno (mini-modelo de enrutado)
+- `ChatTurnPlanner` decide por turno si conviene `ragNeeded=true/false`.
+- Tambien clasifica el `reasoningLevel` (`LOW`, `MEDIUM`, `HIGH`).
+- El backend devuelve ambos campos en `ChatResponse` junto con `ragUsed`, para distinguir plan vs ejecucion real.
 
 ## Permisos por codigo de registro
 - Cada codigo de registro puede llevar permisos por checklist (`CHAT`, `RAG`, `MONITOR`, `API_KEYS`).

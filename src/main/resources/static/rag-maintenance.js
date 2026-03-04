@@ -20,6 +20,7 @@ const ragRobotApplyBtn = document.getElementById('btnRagRobotApply');
 const ragCaseListEl = document.getElementById('ragCaseList');
 const ragCasesRefreshBtn = document.getElementById('btnRagCasesRefresh');
 const ragCaseActionStatusEl = document.getElementById('ragCaseActionStatus');
+const ragIncludeResolvedEl = document.getElementById('ragIncludeResolved');
 
 if (ragRobotStateEl) {
   let ragRobotBusy = false;
@@ -268,9 +269,10 @@ if (ragRobotStateEl) {
         <div class="sub">${item.summary || '-'}</div>
         <div class="sub">Uso: ${item.usageCount || 0} - Ultimo uso: ${formatDateTime(item.lastUsedAt)}</div>
         <div class="sub">Admin hasta: ${formatDateTime(item.adminDueAt)} - Auto: ${formatDateTime(item.autoApplyAt)}</div>
-        <div class="sub">IA: ${(item.aiSuggestedAction || '-')}${item.aiReason ? ` - ${item.aiReason}` : ''}</div>
+        <div class="sub">IA: ${(item.aiSuggestedAction || '-')}${item.aiModel ? ` con ${escapeHtml(item.aiModel)}` : ''}${item.aiReason ? ` - ${escapeHtml(item.aiReason)}` : ''}</div>
         ${isBusyCase ? `<div class="sub" style="color:#7dd3fc;">Procesando decision ${actionLabel(ragCaseBusyAction)} para ${escapeHtml(ragCaseBusyTitle || item.documentTitle || 'el caso')}.</div>` : ''}
         ${item.proposedContent ? `<details style="margin-top:8px;"><summary class="sub" style="cursor:pointer;">Ver propuesta</summary><pre class="sub" style="white-space:pre-wrap; margin-top:6px;">${escapeHtml(item.proposedContent)}</pre></details>` : ''}
+        ${item.auditLog ? `<details style="margin-top:8px;"><summary class="sub" style="cursor:pointer;">Ver auditoria persistente</summary><pre class="sub" style="white-space:pre-wrap; margin-top:6px;">${escapeHtml(item.auditLog)}</pre></details>` : ''}
         ${decisionButtons(item)}
       `;
       ragCaseListEl.appendChild(event);
@@ -307,7 +309,8 @@ if (ragRobotStateEl) {
   async function fetchCases() {
     if (!ragCaseListEl) return;
     try {
-      const data = await fetchJsonOrThrow('/api/rag/maintenance/cases');
+      const includeResolved = ragIncludeResolvedEl?.checked === true;
+      const data = await fetchJsonOrThrow(`/api/rag/maintenance/cases?includeResolved=${includeResolved ? 'true' : 'false'}`);
       renderCases(data);
     } catch (error) {
       ragCaseListEl.innerHTML = `
@@ -379,6 +382,7 @@ if (ragRobotStateEl) {
   ragRobotIntervalInputEl?.addEventListener('keydown', event => {
     if (event.key === 'Enter') ragRobotApplyBtn?.click();
   });
+  ragIncludeResolvedEl?.addEventListener('change', () => fetchCases());
   ragCasesRefreshBtn?.addEventListener('click', () => fetchCases());
 
   fetchStatus();

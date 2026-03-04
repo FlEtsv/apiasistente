@@ -14,6 +14,10 @@ import java.util.Locale;
 
 /**
  * Consulta un modelo ligero para decidir sobre casos pendientes del robot RAG.
+ *
+ * Responsabilidad:
+ * - Convertir un hallazgo tecnico del robot en una accion operativa concreta.
+ * - Encapsular prompts y parsing para que el resto del mantenimiento no dependa del LLM.
  */
 @Service
 public class RagMaintenanceAdvisorService {
@@ -42,6 +46,7 @@ public class RagMaintenanceAdvisorService {
         String userPrompt = buildUserPrompt(ragCase);
 
         try {
+            // El modelo rapido solo decide; la ejecucion real sigue quedando en mantenimiento.
             String raw = ollamaClient.chat(
                     List.of(
                             new OllamaClient.Message("system", systemPrompt),

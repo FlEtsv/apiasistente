@@ -23,6 +23,10 @@ import java.time.Instant;
  * - Cada nueva ingesta crea nuevos chunks.
  * - El texto del chunk es la unidad que consume retrieval.
  * - La metadata aqui permite auditar calidad sin rearmar el documento entero.
+ *
+ * Responsabilidad:
+ * - Conservar el texto canonico que realmente entra en el prompt.
+ * - Hacer visible la calidad del particionado para mantenimiento y depuracion.
  */
 @Entity
 @Table(

@@ -8,6 +8,10 @@ import com.example.apiasistente.chat.dto.RenameSessionRequest;
 import com.example.apiasistente.chat.dto.SessionSummaryDto;
 import com.example.apiasistente.chat.service.ChatQueueService;
 import com.example.apiasistente.chat.service.ChatService;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.CacheControl;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,10 +21,14 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.security.Principal;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
+
+import static org.springframework.http.HttpStatus.BAD_REQUEST;
 
 /**
  * Expone el flujo de chat web y la gestion de sesiones del usuario autenticado.
@@ -129,6 +137,29 @@ public class ChatApiController {
     @GetMapping("/{sessionId}/history")
     public List<ChatMessageDto> history(@PathVariable String sessionId, Principal principal) {
         return chatService.historyDto(principal.getName(), sessionId);
+    }
+
+    @GetMapping("/sessions/{sessionId}/images/{imageId:.+}")
+    public ResponseEntity<ByteArrayResource> generatedImage(@PathVariable String sessionId,
+                                                            @PathVariable String imageId,
+                                                            Principal principal) {
+        var image = chatService.loadGeneratedImage(principal.getName(), sessionId, imageId);
+        MediaType contentType = resolveMediaType(image.mimeType());
+        return ResponseEntity.ok()
+                .contentType(contentType)
+                .cacheControl(CacheControl.maxAge(30, TimeUnit.DAYS).cachePrivate())
+                .body(new ByteArrayResource(image.bytes()));
+    }
+
+    private MediaType resolveMediaType(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return MediaType.APPLICATION_OCTET_STREAM;
+        }
+        try {
+            return MediaType.parseMediaType(raw.trim());
+        } catch (Exception ex) {
+            throw new ResponseStatusException(BAD_REQUEST, "Tipo de imagen invalido: " + raw);
+        }
     }
 }
 

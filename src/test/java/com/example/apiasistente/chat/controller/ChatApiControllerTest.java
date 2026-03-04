@@ -25,6 +25,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -62,6 +64,24 @@ class ChatApiControllerTest {
                 .andExpect(jsonPath("$.ragUsed").value(false))
                 .andExpect(jsonPath("$.ragNeeded").value(false))
                 .andExpect(jsonPath("$.reasoningLevel").value("MEDIUM"));
+    }
+
+    @Test
+    void chatErrorReturnsTraceableDetails() throws Exception {
+        when(chatQueueService.chatAndWait(eq("user"), eq("sid-1"), eq("Hola"), eq("fast"), isNull(), isNull()))
+                .thenThrow(new RuntimeException("fallo chat", new java.net.ConnectException("Connection refused")));
+
+        mockMvc.perform(post("/api/chat")
+                        .principal(() -> "user")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"sessionId":"sid-1","message":"Hola","model":"fast"}
+                                """))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.message").value("Error interno procesando la peticion"))
+                .andExpect(jsonPath("$.details[0]").value("handler: ChatApiController#chat"))
+                .andExpect(jsonPath("$.details[1]").value("exception: RuntimeException"))
+                .andExpect(jsonPath("$.details[2]").value("cause: ConnectException: Connection refused"));
     }
 
     @Test
@@ -200,6 +220,20 @@ class ChatApiControllerTest {
                 .andExpect(jsonPath("$[0].id").value(1L))
                 .andExpect(jsonPath("$[0].role").value("USER"))
                 .andExpect(jsonPath("$[0].content").value("Hola"));
+    }
+
+    @Test
+    void generatedImageEndpointReturnsBinaryPayload() throws Exception {
+        when(chatService.loadGeneratedImage(eq("user"), eq("sid-1"), eq("img-1.png")))
+                .thenReturn(new com.example.apiasistente.chat.service.flow.ChatGeneratedImageStoreService.StoredImage(
+                        "image/png",
+                        new byte[]{1, 2, 3, 4}
+                ));
+
+        mockMvc.perform(get("/api/chat/sessions/sid-1/images/img-1.png").principal(() -> "user"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type", "image/png"))
+                .andExpect(content().bytes(new byte[]{1, 2, 3, 4}));
     }
 }
 

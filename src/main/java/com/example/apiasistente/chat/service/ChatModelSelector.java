@@ -15,6 +15,7 @@ public class ChatModelSelector {
     public static final String CHAT_ALIAS = "chat";
     public static final String FAST_ALIAS = "fast";
     public static final String VISUAL_ALIAS = "visual";
+    public static final String IMAGE_ALIAS = "image";
 
     private final OllamaProperties properties;
 
@@ -149,6 +150,35 @@ public class ChatModelSelector {
             return visualModel;
         }
         return visualModel;
+    }
+
+    /**
+     * Devuelve el modelo de generación de imagen.
+     * Si no hay uno dedicado configurado, cae al visual-model para entornos simples.
+     */
+    public String resolveImageModel(String requested) {
+        String imageModel = normalize(properties.getImageModel());
+        String visualModel = normalize(properties.getVisualModel());
+        String trimmed = requested == null ? "" : requested.trim();
+        String fallback = firstNonBlank(imageModel, visualModel, null);
+
+        if (fallback == null) {
+            throw new IllegalArgumentException("No hay modelo de imagen configurado.");
+        }
+        if (trimmed.isEmpty() || IMAGE_ALIAS.equalsIgnoreCase(trimmed) || DEFAULT_ALIAS.equalsIgnoreCase(trimmed)) {
+            return fallback;
+        }
+        if (imageModel != null && imageModel.equalsIgnoreCase(trimmed)) {
+            return imageModel;
+        }
+        if (visualModel != null && visualModel.equalsIgnoreCase(trimmed)) {
+            return fallback;
+        }
+        return fallback;
+    }
+
+    public static boolean isImageGenerationRequest(String requested) {
+        return IMAGE_ALIAS.equalsIgnoreCase(requested == null ? "" : requested.trim());
     }
 
     /**

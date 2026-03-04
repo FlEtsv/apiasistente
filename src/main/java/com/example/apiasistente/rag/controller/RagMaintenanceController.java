@@ -18,6 +18,10 @@ import java.util.List;
 
 /**
  * API para observar y controlar el robot de mantenimiento del RAG.
+ *
+ * Responsabilidad:
+ * - Exponer el ciclo de saneamiento del corpus.
+ * - Separar control de mantenimiento del resto de operaciones del core RAG.
  */
 @RestController
 @RequestMapping("/api/rag/maintenance")

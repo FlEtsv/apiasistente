@@ -116,7 +116,7 @@ function renderAssistantMarkdown(text) {
     if (window.DOMPurify && typeof window.DOMPurify.sanitize === 'function') {
       return window.DOMPurify.sanitize(html, {
         USE_PROFILES: { html: true },
-        ALLOWED_ATTR: ['href', 'title', 'target', 'rel', 'class']
+        ALLOWED_ATTR: ['href', 'title', 'target', 'rel', 'class', 'src', 'alt', 'width', 'height']
       });
     }
 
@@ -173,6 +173,14 @@ function renderMediaPreview() {
   pendingMedia.forEach((item, idx) => {
     const chip = document.createElement('div');
     chip.className = 'media-chip';
+
+    if ((item.mimeType || '').startsWith('image/') && item.base64) {
+      const thumb = document.createElement('img');
+      thumb.className = 'thumb';
+      thumb.alt = item.name || 'imagen';
+      thumb.src = `data:${item.mimeType || 'image/png'};base64,${item.base64}`;
+      chip.appendChild(thumb);
+    }
 
     const meta = document.createElement('span');
     meta.className = 'meta';
@@ -255,6 +263,34 @@ function withCsrf(headers = {}) {
   const { token, header } = getCsrf();
   if (token && header) headers[header] = token;
   return headers;
+}
+
+async function readResponsePayload(res) {
+  const contentType = res.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    return await res.json().catch(() => null);
+  }
+  return await res.text().catch(() => '');
+}
+
+function extractErrorMessage(payload, res) {
+  const status = res?.status || 0;
+  const requestId = res?.headers?.get('X-Request-Id') || '';
+  if (payload == null) {
+    return requestId ? `HTTP ${status} (requestId ${requestId})` : `HTTP ${status}`;
+  }
+  if (typeof payload === 'string') {
+    const clean = payload.trim();
+    return requestId
+      ? `${clean || `HTTP ${status}`} (requestId ${requestId})`
+      : (clean || `HTTP ${status}`);
+  }
+  const details = Array.isArray(payload.details) && payload.details.length
+    ? ` Detalle: ${payload.details.join(' | ')}`
+    : '';
+  const errorId = payload.errorId || requestId;
+  const base = payload.message || payload.error || `HTTP ${status}`;
+  return `${base}${errorId ? ` [${errorId}]` : ''}${details}`;
 }
 
 function scrollDown() {
@@ -947,9 +983,10 @@ async function send() {
     const typingEl = document.getElementById(typingId);
     if (typingEl) typingEl.remove();
 
-    if (!res.ok) throw new Error(await res.text());
+    const payload = await readResponsePayload(res);
+    if (!res.ok) throw new Error(extractErrorMessage(payload, res));
 
-    const data = await res.json();
+    const data = payload;
     sessionId = data.sessionId;
     setSidLabel(sessionId);
 

@@ -13,11 +13,16 @@ import java.util.List;
  * Compatibilidad:
  * - `content` sigue funcionando para clientes legacy.
  * - `chunks` es la forma preferida para scraper y productores nuevos.
+ *
+ * Responsabilidad:
+ * - Describir un documento canonico de entrada.
+ * - Permitir edicion manual sin mezclar DTOs web con el core del servicio.
  */
 public class UpsertDocumentRequest {
     @NotBlank
     private String title;
 
+    // Cuerpo legacy del documento. Si llega vacio, `chunks` pasa a ser obligatorio.
     private String content;
 
     // Metadata opcional de la nueva estructura canonica.
@@ -25,6 +30,7 @@ public class UpsertDocumentRequest {
     private String tags;
     private String url;
 
+    // Unidad preferida de intercambio para scraper e integraciones modernas.
     @Valid
     private List<UpsertChunkRequest> chunks = new ArrayList<>();
 

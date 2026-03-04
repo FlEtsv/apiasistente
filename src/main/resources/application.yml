@@ -40,6 +40,8 @@ ollama:
   fast-chat-model: qwen2.5:7b
   # Modelo visual para etapa intermedia de imagen/camara/documento.
   visual-model: qwen2.5vl:7b
+  # Modelo dedicado para generación de imágenes desde el chat.
+  image-model: ${OLLAMA_IMAGE_MODEL:flux}
   # Mini-modelo opcional para depurar respuestas y quitar relleno.
   response-guard-model: ${OLLAMA_RESPONSE_GUARD_MODEL:mistral:7b}
   # Modelo para embeddings de RAG.
@@ -123,12 +125,35 @@ rag:
     warning-review-hours: 48
     # Tiempo adicional tras la decision IA antes de auto-aplicar el cambio.
     ai-auto-apply-hours: 24
+    # Si la cola admin supera este numero de casos OPEN, la IA adelanta revisiones.
+    admin-backlog-threshold: 10
+    # Limite de decisiones IA adelantadas por pasada para no saturar el modelo.
+    admin-backlog-ai-max-per-pass: 3
+    # Solo consulta el modelo si el monitoreo no marca CPU/MEM/DISCO/SWAP/NET degradados.
+    ai-require-healthy-monitoring: true
     # Si un documento no se usa durante este tiempo, entra en cola de revision.
     unused-days-threshold: 30
     # Longitud maxima del snippet mostrado en la cola de revision.
     snippet-chars: 600
+  ops:
+    # Cuantos eventos recientes del core RAG se guardan en memoria para la home.
+    max-events: 120
 
 chat:
+  image-generation:
+    # Activa generación de imágenes para el modo "image" del chat.
+    enabled: true
+    # Endpoint proveedor de imagen (prompt en path).
+    base-url: https://image.pollinations.ai/prompt
+    # Tamaño estándar de salida.
+    width: 1024
+    height: 1024
+    # Timeout de red para la generación remota.
+    timeout-ms: 90000
+    # Limite de caracteres de prompt.
+    max-prompt-chars: 600
+    # Carpeta local para cachear imágenes generadas por sesión.
+    storage-dir: data/chat-generated-images
   rag-decision:
     # Motor de decisión híbrido: heurística + modelo ligero + verificación posterior.
     enabled: true

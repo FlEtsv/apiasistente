@@ -33,6 +33,13 @@ public interface KnowledgeDocumentRepository extends JpaRepository<KnowledgeDocu
     Instant findLastUpdateAtByOwners(@Param("owners") Collection<String> owners);
 
     @Query("""
+        select max(coalesce(d.updatedAt, d.createdAt))
+        from KnowledgeDocument d
+        where d.active = true
+    """)
+    Instant findLastActiveUpdateAt();
+
+    @Query("""
         select d
         from KnowledgeDocument d
         where d.active = true
@@ -40,6 +47,14 @@ public interface KnowledgeDocumentRepository extends JpaRepository<KnowledgeDocu
         order by d.id desc
     """)
     List<KnowledgeDocument> findSweepPage(@Param("beforeId") Long beforeId, Pageable pageable);
+
+    @Query("""
+        select d
+        from KnowledgeDocument d
+        where d.active = true
+        order by coalesce(d.createdAt, d.updatedAt) asc, d.id asc
+    """)
+    List<KnowledgeDocument> findOldestActive(Pageable pageable);
 
     @Query("""
         select coalesce(sum(length(d.title) + length(d.owner) + length(d.source) + length(coalesce(d.referenceUrl, ''))), 0)

@@ -11,6 +11,7 @@ public class OllamaProperties {
     private String chatModel;
     private String fastChatModel;
     private String visualModel;
+    private String imageModel;
     private String responseGuardModel;
     private String embedModel;
     private Double temperature;
@@ -27,6 +28,9 @@ public class OllamaProperties {
 
     public String getVisualModel() { return visualModel; }
     public void setVisualModel(String visualModel) { this.visualModel = visualModel; }
+
+    public String getImageModel() { return imageModel; }
+    public void setImageModel(String imageModel) { this.imageModel = imageModel; }
 
     public String getResponseGuardModel() { return responseGuardModel; }
     public void setResponseGuardModel(String responseGuardModel) { this.responseGuardModel = responseGuardModel; }

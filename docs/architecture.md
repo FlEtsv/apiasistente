@@ -60,14 +60,49 @@ flowchart TB
 
 ## 4. Componentes internos
 
-| Capa | Responsabilidad | Ubicacion |
+La base quedo reorganizada por feature para aislar mejor los flujos y reducir acoplamiento transversal.
+
+| Feature | Responsabilidad | Ubicacion |
 | --- | --- | --- |
-| Controllers | Exponer contratos HTTP y validar entrada basica | `src/main/java/com/example/apiasistente/controller` |
-| Services | Reglas de negocio, orquestacion de chat/RAG/monitor | `src/main/java/com/example/apiasistente/service` |
-| Repositories | Acceso a datos via Spring Data JPA | `src/main/java/com/example/apiasistente/repository` |
-| Security | Politicas de autenticacion/autorizacion | `src/main/java/com/example/apiasistente/security` |
-| DTOs/Model | Contratos de request/response y entidades | `src/main/java/com/example/apiasistente/model` |
+| `apikey` | Alta, listado, revocacion y autenticacion de API keys | `src/main/java/com/example/apiasistente/apikey` |
+| `auth` | Login, usuarios, permisos y configuracion de password | `src/main/java/com/example/apiasistente/auth` |
+| `chat` | Controllers, DTOs, entidades, repositorios, cola y orquestacion de turnos | `src/main/java/com/example/apiasistente/chat` |
+| `monitoring` | Endpoints, DTOs y servicios de monitoreo/alertas | `src/main/java/com/example/apiasistente/monitoring` |
+| `prompt` | Gestion de prompts de sistema | `src/main/java/com/example/apiasistente/prompt` |
+| `rag` | Ingesta, retrieval, DTOs, entidades, repositorios y utilidades vectoriales | `src/main/java/com/example/apiasistente/rag` |
+| `registration` | Codigos de registro y bootstrap de permisos | `src/main/java/com/example/apiasistente/registration` |
+| `shared` | Infraestructura comun: seguridad transversal, config, filtros, home/error handlers y cliente Ollama | `src/main/java/com/example/apiasistente/shared` |
 | UI | Vistas y scripts frontend | `src/main/resources/templates`, `src/main/resources/static` |
+
+### 4.1 Subdominio de chat
+
+El flujo de chat se separa ahora en componentes especializados:
+
+| Componente | Rol |
+| --- | --- |
+| `ChatService` | Fachada del dominio de chat para controllers y cola |
+| `ChatTurnService` | Orquestador transaccional del turno y ensamblado de `ChatResponse` |
+| `ChatTurnContextFactory` | Preparacion del turno: sesion, historial inmediato, adjuntos y modo de ejecucion |
+| `ChatRagFlowService` | Retrieval, scoping por usuario externo y decision de grounding/RAG |
+| `ChatAssistantService` | Construccion de mensajes, seleccion de modelo, ejecucion y retry/fallback |
+| `ChatSessionService` | Ciclo de vida de sesiones, ownership y metadata |
+| `ChatHistoryService` | Historial, persistencia de mensajes y enlaces a fuentes |
+| `ChatPromptBuilder` | Construccion de prompts y seleccion de modelo final |
+| `ChatMediaService` | Normalizacion de adjuntos y puente visual/documental |
+| `ChatGroundingService` | Politica de grounding, validacion de citas y response-guard |
+| `ChatTurnPlanner` | Heuristica de enrutado por turno (`ragNeeded`, `reasoningLevel`) |
+
+### 4.2 Criterio de separacion
+
+Cada feature mantiene, en la medida de lo posible, sus propios:
+- `controller`
+- `service`
+- `dto`
+- `entity`
+- `repository`
+- `config`
+
+Solo la infraestructura realmente transversal queda en `shared`.
 
 ## 5. Flujos clave
 
@@ -79,6 +114,7 @@ sequenceDiagram
     participant ChatApiController
     participant ChatQueueService
     participant ChatService
+    participant ChatTurnService
     participant RagService
     participant OllamaClient
     participant Repositories
@@ -86,11 +122,13 @@ sequenceDiagram
     Browser->>ChatApiController: POST /api/chat
     ChatApiController->>ChatQueueService: chatAndWait(user, request)
     ChatQueueService->>ChatService: chat(user, request)
-    ChatService->>RagService: retrieveTopK(...)
+    ChatService->>ChatTurnService: chat(...)
+    ChatTurnService->>RagService: retrieveTopK(...)
     RagService->>OllamaClient: embedOne(query)
     RagService->>Repositories: search chunks
-    ChatService->>OllamaClient: chat(messages, model)
-    ChatService->>Repositories: persist conversation + sources
+    ChatTurnService->>OllamaClient: chat(messages, model)
+    ChatTurnService->>Repositories: persist conversation + sources
+    ChatTurnService-->>ChatService: ChatResponse
     ChatService-->>ChatApiController: ChatResponse
     ChatApiController-->>Browser: JSON
 ```
@@ -102,15 +140,15 @@ sequenceDiagram
     participant Client
     participant ApiKeyAuthFilter
     participant ApiKeyService
-    participant ExternalApiController
+    participant ExternalChatController
     participant ChatQueueService
 
     Client->>ApiKeyAuthFilter: POST /api/ext/chat
     ApiKeyAuthFilter->>ApiKeyService: authenticate(token)
-    ApiKeyService-->>ApiKeyAuthFilter: username/null
-    ApiKeyAuthFilter-->>ExternalApiController: Principal autenticado
-    ExternalApiController->>ChatQueueService: chatAndWait(username, request)
-    ExternalApiController-->>Client: JSON
+    ApiKeyService-->>ApiKeyAuthFilter: ApiKeyAuthResult/null
+    ApiKeyAuthFilter-->>ExternalChatController: Principal + atributos de API key
+    ExternalChatController->>ChatQueueService: chatAndWait(username, request)
+    ExternalChatController-->>Client: JSON
 ```
 
 ### 5.3 Ingesta RAG

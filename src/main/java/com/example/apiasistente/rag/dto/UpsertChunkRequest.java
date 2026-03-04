@@ -7,9 +7,14 @@ import jakarta.validation.constraints.NotBlank;
  *
  * La idea es que el productor ya entregue la unidad canonica del sistema
  * en vez de delegar todo el chunking al endpoint.
+ *
+ * Responsabilidad:
+ * - Representar un fragmento ya preparado para `documents/chunks/vectors`.
+ * - Conservar metadata suficiente para reindexar y auditar despues.
  */
 public class UpsertChunkRequest {
 
+    // Si el cliente no lo envia, el backend reordena y numera de forma estable.
     private Integer chunkIndex;
 
     @NotBlank

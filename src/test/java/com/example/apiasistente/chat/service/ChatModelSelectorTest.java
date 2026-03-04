@@ -19,6 +19,7 @@ class ChatModelSelectorTest {
         props.setChatModel("qwen2.5:32b");
         props.setFastChatModel("qwen3.0:14b");
         props.setVisualModel("qwen-vl:latest");
+        props.setImageModel("flux");
         props.setResponseGuardModel("qwen2.5:3b");
 
         ChatModelSelector selector = new ChatModelSelector(props);
@@ -49,6 +50,7 @@ class ChatModelSelectorTest {
         props.setChatModel("qwen2.5:32b");
         props.setFastChatModel("qwen3.0:14b");
         props.setVisualModel("qwen-vl:latest");
+        props.setImageModel("flux");
         props.setResponseGuardModel("qwen2.5:3b");
 
         ChatModelSelector selector = new ChatModelSelector(props);
@@ -61,10 +63,14 @@ class ChatModelSelectorTest {
         assertEquals("qwen2.5:32b", selector.resolveChatModel("qwen2.5:32b"));
         assertEquals("qwen-vl:latest", selector.resolveVisualModel("visual"));
         assertEquals("qwen-vl:latest", selector.resolveVisualModel("default"));
+        assertEquals("flux", selector.resolveImageModel("image"));
+        assertEquals("flux", selector.resolveImageModel("default"));
         assertEquals("qwen2.5:3b", selector.resolveResponseGuardModel());
         assertEquals("qwen2.5:32b", selector.resolvePrimaryChatModel());
         assertTrue(selector.isPrimaryChatModel("qwen2.5:32b"));
         assertFalse(selector.isPrimaryChatModel("qwen3.0:14b"));
+        assertTrue(ChatModelSelector.isImageGenerationRequest("image"));
+        assertFalse(ChatModelSelector.isImageGenerationRequest("chat"));
         assertThrows(IllegalArgumentException.class, () -> selector.resolveChatModel("otro-modelo"));
     }
 }

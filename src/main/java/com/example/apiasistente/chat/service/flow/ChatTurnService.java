@@ -7,6 +7,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.List;
 
@@ -23,6 +25,7 @@ public class ChatTurnService {
     private final ChatRagFlowService ragFlowService;
     private final ChatAssistantService assistantService;
     private final ChatHistoryService historyService;
+    private final ChatSourceSnapshotService sourceSnapshotService;
     private final ChatSessionService sessionService;
     private final ChatRagDecisionEngine decisionEngine;
     private final ChatRagTelemetryService telemetryService;
@@ -31,6 +34,7 @@ public class ChatTurnService {
                            ChatRagFlowService ragFlowService,
                            ChatAssistantService assistantService,
                            ChatHistoryService historyService,
+                           ChatSourceSnapshotService sourceSnapshotService,
                            ChatSessionService sessionService,
                            ChatRagDecisionEngine decisionEngine,
                            ChatRagTelemetryService telemetryService) {
@@ -38,6 +42,7 @@ public class ChatTurnService {
         this.ragFlowService = ragFlowService;
         this.assistantService = assistantService;
         this.historyService = historyService;
+        this.sourceSnapshotService = sourceSnapshotService;
         this.sessionService = sessionService;
         this.decisionEngine = decisionEngine;
         this.telemetryService = telemetryService;
@@ -53,79 +58,140 @@ public class ChatTurnService {
                              String requestedModel,
                              String externalUserId,
                              List<ChatMediaInput> media) {
-        // 1. Fija sesion, historial, adjuntos y plan heuristico del turno.
-        ChatTurnContext context = contextFactory.create(
-                username,
-                maybeSessionId,
-                userText,
-                requestedModel,
-                externalUserId,
-                media
-        );
-        // 2. Decide si el turno usa RAG y con que fuerza entra al contexto recuperado.
-        ChatRagContext ragContext = ragFlowService.resolve(context);
-        // 3. Genera la respuesta final del asistente aplicando guardrails y retries si corresponden.
-        ChatAssistantOutcome outcome = assistantService.answer(context, ragContext);
-        ChatRagDecisionEngine.AnswerVerification answerVerification = ChatRagDecisionEngine.AnswerVerification.skip("post-check-not-needed");
-
-        if (!ragContext.ragUsed() && !ragContext.missingEvidence()) {
-            answerVerification = decisionEngine.verifyDirectAnswer(
-                    context.userText(),
-                    outcome.assistantText(),
-                    context.turnPlan()
+        String stage = "context";
+        ChatTurnContext context = null;
+        try {
+            log.info(
+                    "chat_turn_start sessionId={} externalUserId={} requestedModel={} mediaCount={} messagePreview={}",
+                    safe(maybeSessionId),
+                    safe(externalUserId),
+                    safe(requestedModel),
+                    media == null ? 0 : media.size(),
+                    preview(userText)
             );
-            telemetryService.recordPostCheck(answerVerification, answerVerification.retryWithRag());
-            logPostAnswerVerification(answerVerification, context);
-            if (answerVerification.retryWithRag()) {
-                ragContext = ragFlowService.resolveForced(context, answerVerification.reason());
-                outcome = assistantService.answer(context, ragContext);
-            }
-        }
 
-        // 4. Persiste la salida del asistente y enlaza fuentes cuando hubo grounding real.
-        ChatMessage assistantMsg = historyService.saveAssistantMessage(context.session(), outcome.assistantText());
-        if (ragContext.ragUsed()) {
-            try {
-                historyService.persistSources(assistantMsg, ragContext.scored());
-            } catch (RuntimeException ex) {
-                log.warn(
-                        "No se pudieron persistir fuentes RAG para sessionId={} messageId={} cause={}",
-                        context.session().getId(),
-                        assistantMsg.getId(),
-                        ex.getMessage(),
-                        ex
+            // 1. Fija sesion, historial, adjuntos y plan heuristico del turno.
+            context = contextFactory.create(
+                    username,
+                    maybeSessionId,
+                    userText,
+                    requestedModel,
+                    externalUserId,
+                    media
+            );
+            log.info(
+                    "chat_turn_stage stage=context_ready sessionId={} route={} ragNeeded={} reasoningLevel={} mediaCount={}",
+                    context.session().getId(),
+                    context.intentRoute(),
+                    context.ragNeeded(),
+                    context.turnPlan().reasoningLevel(),
+                    context.preparedMedia().size()
+            );
+
+            // 2. Decide si el turno usa RAG y con que fuerza entra al contexto recuperado.
+            stage = "rag";
+            ChatRagContext ragContext = ragFlowService.resolve(context);
+            log.info(
+                    "chat_turn_stage stage=rag_resolved sessionId={} ragUsed={} missingEvidence={} route={} sourceCount={} contextTokens={}",
+                    context.session().getId(),
+                    ragContext.ragUsed(),
+                    ragContext.missingEvidence(),
+                    ragContext.ragRoute(),
+                    ragContext.sources().size(),
+                    ragContext.retrievalStats().contextTokens()
+            );
+
+            // 3. Genera la respuesta final del asistente aplicando guardrails y retries si corresponden.
+            stage = "assistant";
+            ChatAssistantOutcome outcome = assistantService.answer(context, ragContext);
+            ChatRagDecisionEngine.AnswerVerification answerVerification = ChatRagDecisionEngine.AnswerVerification.skip("post-check-not-needed");
+
+            if (!ragContext.ragUsed() && !ragContext.missingEvidence()) {
+                stage = "post-check";
+                answerVerification = decisionEngine.verifyDirectAnswer(
+                        context.userText(),
+                        outcome.assistantText(),
+                        context.turnPlan()
                 );
+                telemetryService.recordPostCheck(answerVerification, answerVerification.retryWithRag());
+                logPostAnswerVerification(answerVerification, context);
+                if (answerVerification.retryWithRag()) {
+                    stage = "post-check-rag-retry";
+                    ragContext = ragFlowService.resolveForced(context, answerVerification.reason());
+                    outcome = assistantService.answer(context, ragContext);
+                    log.info(
+                            "chat_turn_stage stage=post_check_retry sessionId={} ragUsed={} route={} sourceCount={}",
+                            context.session().getId(),
+                            ragContext.ragUsed(),
+                            ragContext.ragRoute(),
+                            ragContext.sources().size()
+                    );
+                }
             }
-        }
 
-        // 5. Actualiza metadata operativa de la sesion y resume el resultado para el cliente.
-        sessionService.touchSession(context.session());
-        boolean safe = !ragContext.missingEvidence()
-                && (!ragContext.enforceGrounding() || outcome.answerAssessment().safe());
-        double confidence = ragContext.missingEvidence()
-                ? 0.0
-                : (ragContext.ragUsed()
-                ? ragContext.groundingDecision().confidence()
-                : directAnswerConfidence(context.turnPlan().confidence(), answerVerification));
-        int groundedSources = ragContext.ragUsed() ? Math.max(0, outcome.answerAssessment().groundedSources()) : 0;
-        boolean ragNeeded = context.ragNeeded() || answerVerification.retryWithRag();
-        telemetryService.recordTurnResult(
-                ragContext.ragUsed(),
-                ragNeeded,
-                confidence,
-                context.turnPlan().reasoningLevel()
-        );
-        return new ChatResponse(
-                context.session().getId(),
-                outcome.assistantText(),
-                ragContext.sources(),
-                safe,
-                confidence,
-                groundedSources,
-                ragContext.ragUsed(),
-                ragNeeded,
-                context.turnPlan().reasoningLevel().name()
-        );
+            // 4. Persiste la salida del asistente y enlaza fuentes cuando hubo grounding real.
+            stage = "persist";
+            ChatMessage assistantMsg = historyService.saveAssistantMessage(context.session(), outcome.assistantText());
+            if (ragContext.ragUsed()) {
+                deferSourceSnapshotPersistence(context.session().getId(), assistantMsg.getId(), ragContext.scored());
+            }
+
+            // 5. Actualiza metadata operativa de la sesion y resume el resultado para el cliente.
+            stage = "finalize";
+            sessionService.touchSession(context.session());
+            boolean safe = !ragContext.missingEvidence()
+                    && (!ragContext.enforceGrounding() || outcome.answerAssessment().safe());
+            double confidence = ragContext.missingEvidence()
+                    ? 0.0
+                    : (ragContext.ragUsed()
+                    ? ragContext.groundingDecision().confidence()
+                    : directAnswerConfidence(context.turnPlan().confidence(), answerVerification));
+            int groundedSources = ragContext.ragUsed() ? Math.max(0, outcome.answerAssessment().groundedSources()) : 0;
+            boolean ragNeeded = context.ragNeeded() || answerVerification.retryWithRag();
+            telemetryService.recordTurnResult(
+                    ragContext.ragUsed(),
+                    ragNeeded,
+                    confidence,
+                    context.turnPlan().reasoningLevel()
+            );
+            ChatResponse response = new ChatResponse(
+                    context.session().getId(),
+                    outcome.assistantText(),
+                    ragContext.sources(),
+                    safe,
+                    confidence,
+                    groundedSources,
+                    ragContext.ragUsed(),
+                    ragNeeded,
+                    context.turnPlan().reasoningLevel().name()
+            );
+            log.info(
+                    "chat_turn_done sessionId={} ragUsed={} ragNeeded={} safe={} groundedSources={} confidence={} replyPreview={}",
+                    response.getSessionId(),
+                    response.isRagUsed(),
+                    response.isRagNeeded(),
+                    response.isSafe(),
+                    response.getGroundedSources(),
+                    String.format(java.util.Locale.US, "%.3f", response.getConfidence()),
+                    preview(response.getReply())
+            );
+            return response;
+        } catch (RuntimeException ex) {
+            log.error(
+                    "chat_turn_failed stage={} requestedSessionId={} resolvedSessionId={} externalUserId={} requestedModel={} mediaCount={} messagePreview={} causeType={} cause={}",
+                    stage,
+                    safe(maybeSessionId),
+                    context == null ? "" : safe(context.session().getId()),
+                    safe(externalUserId),
+                    safe(requestedModel),
+                    media == null ? 0 : media.size(),
+                    preview(userText),
+                    ex.getClass().getSimpleName(),
+                    safe(ex.getMessage()),
+                    ex
+            );
+            throw ex;
+        }
     }
 
     private double directAnswerConfidence(double heuristicConfidence,
@@ -153,6 +219,64 @@ public class ChatTurnService {
                 context.intentRoute(),
                 context.turnPlan().ragDecision().mode()
         );
+    }
+
+    private void deferSourceSnapshotPersistence(String sessionId,
+                                                Long assistantMessageId,
+                                                List<com.example.apiasistente.rag.service.RagService.ScoredChunk> scored) {
+        List<ChatSourceSnapshotService.SourceSnapshot> snapshots = sourceSnapshotService.toSnapshots(scored);
+        if (assistantMessageId == null || snapshots.isEmpty()) {
+            return;
+        }
+
+        log.info(
+                "chat_turn_stage stage=sources_deferred sessionId={} messageId={} sourceCount={}",
+                safe(sessionId),
+                assistantMessageId,
+                snapshots.size()
+        );
+
+        Runnable task = () -> {
+            try {
+                sourceSnapshotService.persistAfterCommit(assistantMessageId, sessionId, snapshots);
+            } catch (RuntimeException ex) {
+                log.warn(
+                        "No se pudieron persistir snapshots de fuentes RAG para sessionId={} messageId={} cause={}",
+                        safe(sessionId),
+                        assistantMessageId,
+                        safe(ex.getMessage()),
+                        ex
+                );
+            }
+        };
+
+        if (TransactionSynchronizationManager.isSynchronizationActive()
+                && TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+            return;
+        }
+
+        task.run();
+    }
+
+    private String preview(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        String normalized = value.replaceAll("\\s+", " ").trim();
+        if (normalized.length() <= 140) {
+            return normalized;
+        }
+        return normalized.substring(0, 140).trim() + "...";
+    }
+
+    private String safe(String value) {
+        return value == null ? "" : value;
     }
 }
 

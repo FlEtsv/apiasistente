@@ -22,6 +22,9 @@ public class RagMaintenanceProperties {
     private int maxLineCopies = 1;
     private int warningReviewHours = 48;
     private int aiAutoApplyHours = 24;
+    private int adminBacklogThreshold = 10;
+    private int adminBacklogAiMaxPerPass = 3;
+    private boolean aiRequireHealthyMonitoring = true;
     private int unusedDaysThreshold = 30;
     private int snippetChars = 600;
 
@@ -119,6 +122,30 @@ public class RagMaintenanceProperties {
 
     public void setAiAutoApplyHours(int aiAutoApplyHours) {
         this.aiAutoApplyHours = aiAutoApplyHours;
+    }
+
+    public int getAdminBacklogThreshold() {
+        return adminBacklogThreshold;
+    }
+
+    public void setAdminBacklogThreshold(int adminBacklogThreshold) {
+        this.adminBacklogThreshold = adminBacklogThreshold;
+    }
+
+    public int getAdminBacklogAiMaxPerPass() {
+        return adminBacklogAiMaxPerPass;
+    }
+
+    public void setAdminBacklogAiMaxPerPass(int adminBacklogAiMaxPerPass) {
+        this.adminBacklogAiMaxPerPass = adminBacklogAiMaxPerPass;
+    }
+
+    public boolean isAiRequireHealthyMonitoring() {
+        return aiRequireHealthyMonitoring;
+    }
+
+    public void setAiRequireHealthyMonitoring(boolean aiRequireHealthyMonitoring) {
+        this.aiRequireHealthyMonitoring = aiRequireHealthyMonitoring;
     }
 
     public int getUnusedDaysThreshold() {
