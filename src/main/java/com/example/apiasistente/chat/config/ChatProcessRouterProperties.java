@@ -28,7 +28,7 @@ public class ChatProcessRouterProperties {
     /**
      * Confianza minima exigida al mini-modelo para sobreescribir la decision heuristica.
      */
-    private double llmConfidenceThreshold = 0.72;
+    private double llmConfidenceThreshold = 0.75;
 
     /**
      * Longitud minima del prompt para permitir desambiguacion por mini-modelo.

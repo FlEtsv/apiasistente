@@ -15,12 +15,21 @@ import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
- * Enruta automaticamente un turno a chat normal o generacion de imagen.
+ * Router de proceso del chat.
  *
- * Estrategia:
- * - Respeta selecciones explicitas del cliente.
- * - En modo auto usa heuristicas rapidas.
- * - Si la heuristica no es concluyente, consulta el modelo rapido para desambiguar.
+ * Contrato de rutas:
+ * - CHAT
+ * - RAG
+ * - ACTION
+ * - IMAGE_GENERATE
+ * - IMAGE_EXTRACT
+ * - MIXED_PIPELINE
+ *
+ * Politica:
+ * - Hard rules primero.
+ * - Heuristica segundo.
+ * - Clasificador LLM solo para casos ambiguos.
+ * - Fallback seguro si no hay confianza suficiente.
  */
 @Service
 public class ChatProcessRouter {
@@ -48,7 +57,27 @@ public class ChatProcessRouter {
     );
 
     private static final Pattern VISION_EXTRACT_HINTS = Pattern.compile(
-            "\\b(tabla|extrae(?:r)?|extraer|transcribe(?:r)?|transcripcion|leer|lectura|ocr|campos?|lista|csv|json|estructura|estructurado|datos\\s+en\\s+tabla|dame\\s+estos\\s+datos)\\b",
+            "\\b(tabla|excel|csv|extrae(?:r)?|extraer|transcribe(?:r)?|transcripcion|leer|lectura|ocr|campos?|lista|numeros?|valores?|datos|pasar\\s+a|convertir|json|estructura|estructurado|dame\\s+estos\\s+datos)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
+    );
+
+    private static final Pattern ACTION_HINTS = Pattern.compile(
+            "\\b(envia(?:r)?|manda(?:r)?|borra(?:r)?|elimina(?:r)?|crea(?:r)?\\s+t(?:i|\\u00ed)cket|publica(?:r)?|haz\\s+request|guarda(?:r)?|descarga(?:r)?|sube(?:r)?|ejecuta(?:r)?|llama(?:r)?\\s+api|actualiza(?:r)?|modifica(?:r)?|programa(?:r)?)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
+    );
+
+    private static final Pattern TABLE_HINTS = Pattern.compile(
+            "\\b(tabla|excel|csv|columnas?|filas?)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
+    );
+
+    private static final Pattern JSON_HINTS = Pattern.compile(
+            "\\b(json|objeto\\s+json|estructura\\s+json|formato\\s+json)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
+    );
+
+    private static final Pattern MIXED_HINTS = Pattern.compile(
+            "\\b(y\\s+luego|despues|a\\s+continuacion|then|and\\s+then|primero|segundo|paso\\s+1|paso\\s+2|combina|mezcla|ademas)\\b",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
     );
 
@@ -66,6 +95,8 @@ public class ChatProcessRouter {
             "\\b(4k|8k|ultra\\s*detailed|photorealistic|cinematic|bokeh|dramatic\\s+lighting|high\\s+detail|masterpiece)\\b",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
     );
+
+    private static final double SAFE_FALLBACK_CONFIDENCE = 0.60;
 
     private final ChatModelSelector modelSelector;
     private final OllamaClient ollamaClient;
@@ -89,33 +120,46 @@ public class ChatProcessRouter {
         String requested = normalizeModel(requestedModel);
         String normalizedPrompt = normalizePrompt(userText);
         MediaFlags mediaFlags = mediaFlags(media);
+        PromptSignals signals = analyzePrompt(normalizedPrompt, mediaFlags);
 
         if (ChatModelSelector.isImageGenerationRequest(requested)) {
             return new ProcessDecision(
-                    ProcessRoute.IMAGE,
+                    ProcessRoute.IMAGE_GENERATE,
                     "requested-model",
                     1.0,
                     "Modelo de imagen solicitado explicitamente",
                     false,
                     mediaFlags.hasImageMedia() ? PipelineHint.IMAGE_IMG2IMG : PipelineHint.IMAGE_TXT2IMG,
-                    requested
+                    ChatModelSelector.IMAGE_ALIAS,
+                    false,
+                    false,
+                    "image"
             );
         }
 
         if (!properties.isEnabled() || !isAutoRequest(requested)) {
-            PipelineHint pipeline = classifyChatPipeline(normalizedPrompt, mediaFlags);
-            return new ProcessDecision(
-                    ProcessRoute.CHAT,
+            ProcessRoute route = classifyManualRoute(signals, mediaFlags);
+            PipelineHint pipeline = pipelineForRoute(route, normalizedPrompt, mediaFlags);
+            return enforceGuardrails(new ProcessDecision(
+                    route,
                     "requested-model",
                     1.0,
-                    "Modelo de chat solicitado o enrutado automatico desactivado",
+                    "Modelo solicitado o auto-router desactivado",
                     false,
                     pipeline,
-                    requested
-            );
+                    requested,
+                    signals.ragDecision().enabled() || route == ProcessRoute.RAG || route == ProcessRoute.MIXED_PIPELINE,
+                    route == ProcessRoute.ACTION || route == ProcessRoute.MIXED_PIPELINE,
+                    expectedOutputFromSignals(signals)
+            ), normalizedPrompt, signals, mediaFlags);
         }
 
-        HeuristicAssessment heuristic = assessHeuristically(normalizedPrompt, mediaFlags);
+        ProcessDecision hardRuleDecision = assessHardRules(signals, mediaFlags);
+        if (hardRuleDecision != null) {
+            return enforceGuardrails(hardRuleDecision, normalizedPrompt, signals, mediaFlags);
+        }
+
+        HeuristicAssessment heuristic = assessHeuristically(normalizedPrompt, signals, mediaFlags);
         ProcessDecision heuristicDecision = new ProcessDecision(
                 heuristic.route(),
                 "heuristic",
@@ -123,33 +167,139 @@ public class ChatProcessRouter {
                 heuristic.reason(),
                 false,
                 heuristic.pipeline(),
-                heuristic.recommendedModelAlias()
+                heuristic.recommendedModelAlias(),
+                heuristic.needsRag(),
+                heuristic.needsAction(),
+                heuristic.expectedOutput()
         );
 
         if (!shouldUseLlmAssessment(normalizedPrompt, heuristic, mediaFlags)) {
-            return heuristicDecision;
+            return enforceGuardrails(heuristicDecision, normalizedPrompt, signals, mediaFlags);
         }
 
-        ProcessDecision llmDecision = assessWithSmallModel(normalizedPrompt, mediaFlags, heuristic);
+        ProcessDecision llmDecision = assessWithSmallModel(normalizedPrompt, signals, mediaFlags, heuristic);
         if (llmDecision == null) {
-            return heuristicDecision;
+            return enforceGuardrails(heuristicDecision, normalizedPrompt, signals, mediaFlags);
         }
-        if (llmDecision.confidence() < clamp01(properties.getLlmConfidenceThreshold())) {
+
+        double llmThreshold = clamp01(properties.getLlmConfidenceThreshold());
+        if (llmDecision.confidence() < llmThreshold) {
             if (log.isDebugEnabled()) {
                 log.debug(
                         "process_router_llm_discarded route={} confidence={} threshold={} reason={}",
                         llmDecision.route(),
                         formatConfidence(llmDecision.confidence()),
-                        formatConfidence(properties.getLlmConfidenceThreshold()),
+                        formatConfidence(llmThreshold),
                         llmDecision.reason()
                 );
             }
-            return heuristicDecision;
+            return safeFallbackDecision(mediaFlags, signals, "llm-low-confidence");
         }
-        return llmDecision;
+
+        return enforceGuardrails(llmDecision, normalizedPrompt, signals, mediaFlags);
     }
 
-    private HeuristicAssessment assessHeuristically(String normalizedPrompt, MediaFlags mediaFlags) {
+    /**
+     * Hard rules ejecutadas antes de heuristica y LLM.
+     */
+    private ProcessDecision assessHardRules(PromptSignals signals, MediaFlags mediaFlags) {
+        if (mediaFlags.hasImageMedia() && signals.hasExtractIntent()
+                && (signals.hasImageGenerateIntent() || signals.hasActionIntent() || signals.hasMixedHint())) {
+            return new ProcessDecision(
+                    ProcessRoute.MIXED_PIPELINE,
+                    "hard-rule",
+                    0.99,
+                    "Imagen con extraccion y segunda etapa de accion/generacion",
+                    false,
+                    PipelineHint.MIXED_EXTRACT_THEN_ACTION,
+                    ChatModelSelector.VISUAL_ALIAS,
+                    true,
+                    true,
+                    signals.hasImageGenerateIntent() ? "image" : expectedOutputFromSignals(signals)
+            );
+        }
+
+        if (mediaFlags.hasImageMedia() && signals.hasExtractIntent()) {
+            return new ProcessDecision(
+                    ProcessRoute.IMAGE_EXTRACT,
+                    "hard-rule",
+                    0.99,
+                    "Imagen con solicitud de extraer datos/OCR/tabla",
+                    false,
+                    PipelineHint.VISION_EXTRACT,
+                    ChatModelSelector.VISUAL_ALIAS,
+                    false,
+                    false,
+                    expectedOutputFromSignals(signals)
+            );
+        }
+
+        if (mediaFlags.hasImageMedia() && signals.hasImageGenerateIntent()) {
+            return new ProcessDecision(
+                    ProcessRoute.IMAGE_GENERATE,
+                    "hard-rule",
+                    0.99,
+                    "Imagen de referencia para generar variante",
+                    false,
+                    PipelineHint.IMAGE_IMG2IMG,
+                    ChatModelSelector.IMAGE_ALIAS,
+                    false,
+                    false,
+                    "image"
+            );
+        }
+
+        if (!mediaFlags.hasImageMedia() && signals.hasImageGenerateIntent()) {
+            return new ProcessDecision(
+                    ProcessRoute.IMAGE_GENERATE,
+                    "hard-rule",
+                    0.96,
+                    "Solicitud textual explicita de generar imagen",
+                    false,
+                    PipelineHint.IMAGE_TXT2IMG,
+                    ChatModelSelector.IMAGE_ALIAS,
+                    false,
+                    false,
+                    "image"
+            );
+        }
+
+        if (signals.hasActionIntent() && signals.ragDecision().enabled()) {
+            return new ProcessDecision(
+                    ProcessRoute.MIXED_PIPELINE,
+                    "hard-rule",
+                    0.93,
+                    "Accion con dependencia de contexto interno",
+                    false,
+                    PipelineHint.MIXED_RAG_THEN_ACTION,
+                    ChatModelSelector.CHAT_ALIAS,
+                    true,
+                    true,
+                    "json"
+            );
+        }
+
+        if (signals.hasActionIntent()) {
+            return new ProcessDecision(
+                    ProcessRoute.ACTION,
+                    "hard-rule",
+                    0.90,
+                    "Solicitud operativa detectada",
+                    false,
+                    PipelineHint.ACTION_EXECUTION,
+                    ChatModelSelector.CHAT_ALIAS,
+                    false,
+                    true,
+                    "json"
+            );
+        }
+
+        return null;
+    }
+
+    private HeuristicAssessment assessHeuristically(String normalizedPrompt,
+                                                    PromptSignals signals,
+                                                    MediaFlags mediaFlags) {
         if (normalizedPrompt.isBlank()) {
             return new HeuristicAssessment(
                     ProcessRoute.CHAT,
@@ -157,129 +307,150 @@ public class ChatProcessRouter {
                     false,
                     "Prompt vacio",
                     PipelineHint.CHAT_FAST,
-                    ChatModelSelector.FAST_ALIAS
+                    ChatModelSelector.FAST_ALIAS,
+                    false,
+                    false,
+                    "text"
             );
         }
 
-        String text = normalizedPrompt.toLowerCase(Locale.ROOT);
-        boolean hasActionHint = IMAGE_ACTION_HINTS.matcher(text).find();
-        boolean hasSubjectHint = IMAGE_SUBJECT_HINTS.matcher(text).find();
-        boolean hasEditHint = IMAGE_EDIT_HINTS.matcher(text).find();
-        boolean hasAnalysisHint = IMAGE_ANALYSIS_HINTS.matcher(text).find();
-        boolean hasExtractHint = VISION_EXTRACT_HINTS.matcher(text).find();
-        boolean technicalDebug = TECHNICAL_DEBUG_HINTS.matcher(text).find();
-        boolean questionLike = isQuestionLike(text);
-        boolean promptStyle = PROMPT_STYLE_HINTS.matcher(text).find();
-
-        // Regla dura: imagen + extraer/tabla/OCR siempre va por chat visual, nunca por image-gen.
-        if (mediaFlags.hasImageMedia() && hasExtractHint) {
+        if (mediaFlags.hasImageMedia() && signals.hasExtractIntent()) {
             return new HeuristicAssessment(
-                    ProcessRoute.CHAT,
-                    0.99,
+                    ProcessRoute.IMAGE_EXTRACT,
+                    0.94,
                     false,
                     "Extraccion estructurada desde imagen",
                     PipelineHint.VISION_EXTRACT,
-                    ChatModelSelector.CHAT_ALIAS
+                    ChatModelSelector.VISUAL_ALIAS,
+                    false,
+                    false,
+                    expectedOutputFromSignals(signals)
             );
         }
 
-        if (mediaFlags.hasImageMedia() && hasAnalysisHint && !hasEditHint && !hasActionHint) {
+        if (mediaFlags.hasImageMedia() && signals.hasImageAnalysisIntent() && !signals.hasImageGenerateIntent()) {
             return new HeuristicAssessment(
                     ProcessRoute.CHAT,
-                    0.97,
+                    0.93,
                     false,
-                    "Adjunto visual para analisis",
+                    "Analisis visual no generativo",
                     PipelineHint.VISION_ANALYZE,
-                    ChatModelSelector.CHAT_ALIAS
+                    ChatModelSelector.VISUAL_ALIAS,
+                    false,
+                    false,
+                    "text"
             );
         }
 
-        if (mediaFlags.hasImageMedia() && (hasEditHint || hasActionHint)) {
+        if (mediaFlags.hasImageMedia() && signals.hasImageGenerateIntent()) {
             return new HeuristicAssessment(
-                    ProcessRoute.IMAGE,
+                    ProcessRoute.IMAGE_GENERATE,
                     0.97,
                     false,
                     "Imagen de referencia para img2img",
                     PipelineHint.IMAGE_IMG2IMG,
-                    ChatModelSelector.IMAGE_ALIAS
-            );
-        }
-
-        if (mediaFlags.hasImageMedia() && !hasAnalysisHint && !technicalDebug && !questionLike) {
-            return new HeuristicAssessment(
-                    ProcessRoute.CHAT,
-                    0.66,
-                    true,
-                    "Adjunto visual ambiguo: prioriza analisis seguro",
-                    PipelineHint.VISION_ANALYZE,
-                    ChatModelSelector.CHAT_ALIAS
-            );
-        }
-
-        if (technicalDebug && questionLike) {
-            return new HeuristicAssessment(
-                    ProcessRoute.CHAT,
-                    0.94,
+                    ChatModelSelector.IMAGE_ALIAS,
                     false,
-                    "Consulta tecnica/debug",
-                    PipelineHint.CHAT_RAG,
-                    ChatModelSelector.CHAT_ALIAS
-            );
-        }
-
-        if (questionLike && !hasActionHint) {
-            PipelineHint pipeline = classifyChatPipeline(normalizedPrompt, mediaFlags);
-            return new HeuristicAssessment(
-                    ProcessRoute.CHAT,
-                    0.90,
                     false,
-                    "Consulta explicativa",
-                    pipeline,
-                    recommendedAliasForPipeline(pipeline)
+                    "image"
             );
         }
 
-        if (hasActionHint && hasSubjectHint && !questionLike && !technicalDebug) {
+        if (mediaFlags.hasImageMedia() && signals.hasMixedHint()) {
             return new HeuristicAssessment(
-                    ProcessRoute.IMAGE,
-                    0.93,
-                    false,
-                    "Solicitud explicita de generar imagen",
-                    PipelineHint.IMAGE_TXT2IMG,
-                    ChatModelSelector.IMAGE_ALIAS
-            );
-        }
-
-        if (hasActionHint && promptStyle && !questionLike && !technicalDebug) {
-            return new HeuristicAssessment(
-                    ProcessRoute.IMAGE,
-                    0.74,
-                    true,
-                    "Accion visual ambigua",
-                    PipelineHint.IMAGE_TXT2IMG,
-                    ChatModelSelector.IMAGE_ALIAS
-            );
-        }
-
-        if (hasSubjectHint && promptStyle && !questionLike && !technicalDebug) {
-            return new HeuristicAssessment(
-                    ProcessRoute.IMAGE,
+                    ProcessRoute.MIXED_PIPELINE,
                     0.68,
                     true,
-                    "Prompt visual estilo",
+                    "Imagen con posible flujo multi-etapa",
+                    PipelineHint.MIXED_EXTRACT_THEN_ACTION,
+                    ChatModelSelector.VISUAL_ALIAS,
+                    signals.ragDecision().enabled(),
+                    signals.hasActionIntent(),
+                    expectedOutputFromSignals(signals)
+            );
+        }
+
+        if (mediaFlags.hasImageMedia()) {
+            return new HeuristicAssessment(
+                    ProcessRoute.IMAGE_EXTRACT,
+                    0.64,
+                    true,
+                    "Adjunto visual ambiguo: prioridad a extraccion segura",
+                    PipelineHint.VISION_EXTRACT,
+                    ChatModelSelector.VISUAL_ALIAS,
+                    false,
+                    false,
+                    "text"
+            );
+        }
+
+        if (signals.hasImageGenerateIntent()) {
+            return new HeuristicAssessment(
+                    ProcessRoute.IMAGE_GENERATE,
+                    0.90,
+                    false,
+                    "Solicitud textual de generar imagen",
                     PipelineHint.IMAGE_TXT2IMG,
-                    ChatModelSelector.IMAGE_ALIAS
+                    ChatModelSelector.IMAGE_ALIAS,
+                    false,
+                    false,
+                    "image"
+            );
+        }
+
+        if (signals.hasActionIntent() && signals.ragDecision().enabled()) {
+            return new HeuristicAssessment(
+                    ProcessRoute.MIXED_PIPELINE,
+                    0.84,
+                    true,
+                    "Accion con necesidad de contexto",
+                    PipelineHint.MIXED_RAG_THEN_ACTION,
+                    ChatModelSelector.CHAT_ALIAS,
+                    true,
+                    true,
+                    "json"
+            );
+        }
+
+        if (signals.hasActionIntent()) {
+            return new HeuristicAssessment(
+                    ProcessRoute.ACTION,
+                    0.82,
+                    false,
+                    "Solicitud operativa",
+                    PipelineHint.ACTION_EXECUTION,
+                    ChatModelSelector.CHAT_ALIAS,
+                    false,
+                    true,
+                    "json"
+            );
+        }
+
+        if (signals.ragDecision().enabled()) {
+            return new HeuristicAssessment(
+                    ProcessRoute.RAG,
+                    0.88,
+                    false,
+                    "Consulta dependiente de conocimiento interno",
+                    PipelineHint.CHAT_RAG,
+                    ChatModelSelector.CHAT_ALIAS,
+                    true,
+                    false,
+                    "text"
             );
         }
 
         PipelineHint pipeline = classifyChatPipeline(normalizedPrompt, mediaFlags);
         return new HeuristicAssessment(
                 ProcessRoute.CHAT,
-                0.82,
-                true,
+                signals.isQuestionLike() ? 0.88 : 0.80,
+                !signals.isQuestionLike(),
                 "Chat por defecto",
                 pipeline,
-                recommendedAliasForPipeline(pipeline)
+                recommendedAliasForPipeline(pipeline),
+                false,
+                false,
+                expectedOutputFromSignals(signals)
         );
     }
 
@@ -298,20 +469,18 @@ public class ChatProcessRouter {
         if (!heuristic.ambiguous()) {
             return false;
         }
-        if (heuristic.route() == ProcessRoute.IMAGE
-                && heuristic.confidence() >= clamp01(properties.getHeuristicImageThreshold())
-        ) {
+        if ((heuristic.route() == ProcessRoute.IMAGE_GENERATE || heuristic.route() == ProcessRoute.IMAGE_EXTRACT)
+                && heuristic.confidence() >= clamp01(properties.getHeuristicImageThreshold())) {
             return false;
         }
-        if (heuristic.route() == ProcessRoute.CHAT
-                && heuristic.confidence() >= 0.90
-        ) {
+        if (heuristic.route() == ProcessRoute.CHAT && heuristic.confidence() >= 0.90) {
             return false;
         }
         return true;
     }
 
     private ProcessDecision assessWithSmallModel(String normalizedPrompt,
+                                                 PromptSignals signals,
                                                  MediaFlags mediaFlags,
                                                  HeuristicAssessment heuristic) {
         try {
@@ -319,15 +488,22 @@ public class ChatProcessRouter {
             String raw = ollamaClient.chat(
                     List.of(
                             new OllamaClient.Message("system", buildSystemPrompt()),
-                            new OllamaClient.Message("user", buildUserPrompt(normalizedPrompt, mediaFlags, heuristic))
+                            new OllamaClient.Message("user", buildUserPrompt(normalizedPrompt, signals, mediaFlags, heuristic))
                     ),
                     fastModel
             );
             JsonNode payload = parseJsonPayload(raw);
-            String routeValue = textOr(payload, "route", "chat");
-            ProcessRoute route = "image".equalsIgnoreCase(routeValue) ? ProcessRoute.IMAGE : ProcessRoute.CHAT;
+            ProcessRoute route = parseRoute(textOr(payload, "route", "CHAT"));
             double confidence = clamp01(payload.path("confidence").asDouble(0.0));
+            boolean needsRag = boolOr(payload, "needs_rag", "needsRag", signals.ragDecision().enabled());
+            boolean needsAction = boolOr(payload, "needs_action", "needsAction", signals.hasActionIntent());
+            String expectedOutput = normalizeExpectedOutput(textOr(
+                    payload,
+                    "expected_output",
+                    expectedOutputFromSignals(signals)
+            ));
             String reason = textOr(payload, "reason", "llm-sin-razon");
+
             if (route == heuristic.route()) {
                 return new ProcessDecision(
                         route,
@@ -336,12 +512,15 @@ public class ChatProcessRouter {
                         reason,
                         true,
                         heuristic.pipeline(),
-                        heuristic.recommendedModelAlias()
+                        heuristic.recommendedModelAlias(),
+                        needsRag || heuristic.needsRag(),
+                        needsAction || heuristic.needsAction(),
+                        expectedOutput
                 );
             }
-            PipelineHint pipeline = route == ProcessRoute.IMAGE
-                    ? (mediaFlags.hasImageMedia() ? PipelineHint.IMAGE_IMG2IMG : PipelineHint.IMAGE_TXT2IMG)
-                    : classifyChatPipeline(normalizedPrompt, mediaFlags);
+
+            PipelineHint pipeline = pipelineForRoute(route, normalizedPrompt, mediaFlags);
+            String alias = recommendedAliasForRoute(route, pipeline, mediaFlags);
             return new ProcessDecision(
                     route,
                     "llm-fast",
@@ -349,7 +528,10 @@ public class ChatProcessRouter {
                     reason,
                     true,
                     pipeline,
-                    recommendedAliasForPipeline(pipeline)
+                    alias,
+                    needsRag,
+                    needsAction,
+                    expectedOutput
             );
         } catch (Exception ex) {
             log.warn("process_router_llm_failed cause={}", safe(ex.getMessage()));
@@ -360,22 +542,23 @@ public class ChatProcessRouter {
     private String buildSystemPrompt() {
         return """
                 Eres un router de backend.
-                Tu trabajo es decidir SOLO el proceso:
-                - "image": si el usuario quiere generar o transformar una imagen como resultado final.
-                - "chat": para cualquier otro caso (explicar, depurar, analizar, consultar, configurar, etc).
+                Tu trabajo es decidir SOLO la ruta de proceso.
 
                 Devuelve SOLO JSON valido con este esquema exacto:
-                {"route":"chat|image","confidence":0.0,"reason":"breve"}
+                {"route":"CHAT|RAG|ACTION|IMAGE_GENERATE|IMAGE_EXTRACT|MIXED_PIPELINE","confidence":0.0,"needs_rag":false,"needs_action":false,"expected_output":"text|table|json|image","reason":"breve"}
 
                 Reglas:
-                - Si hay duda entre chat e image, elige "chat".
-                - Si el usuario trae una foto para ANALIZAR/DESCRIBIR/EXTRAER TABLA O TEXTO, elige "chat".
-                - Si el usuario trae una foto para CREAR OTRA VERSION, elige "image".
+                - Si hay imagen y el usuario pide tabla/OCR/extraer/transcribir: IMAGE_EXTRACT.
+                - Si hay imagen y pide crear otra imagen/estilo/transformar: IMAGE_GENERATE.
+                - Si hay mezcla de extraer + accion o extraer + generar: MIXED_PIPELINE.
+                - Nunca uses IMAGE_GENERATE si expected_output es table/json/text.
+                - Si hay duda, usa ruta segura: IMAGE_EXTRACT con imagen, CHAT sin imagen.
                 - Sin markdown, sin texto extra.
                 """;
     }
 
     private String buildUserPrompt(String normalizedPrompt,
+                                   PromptSignals signals,
                                    MediaFlags mediaFlags,
                                    HeuristicAssessment heuristic) {
         int maxChars = Math.max(120, properties.getMaxPromptChars());
@@ -390,14 +573,24 @@ public class ChatProcessRouter {
                 - heuristic_route: %s
                 - heuristic_confidence: %s
                 - heuristic_reason: %s
+                - hint_extract: %s
+                - hint_image_generate: %s
+                - hint_action: %s
+                - hint_rag: %s
+                - expected_output_hint: %s
                 Devuelve SOLO JSON.
                 """.formatted(
                 prompt,
                 mediaFlags.hasImageMedia(),
                 mediaFlags.hasDocumentMedia(),
-                heuristic.route().name().toLowerCase(Locale.ROOT),
+                heuristic.route().name(),
                 formatConfidence(heuristic.confidence()),
-                heuristic.reason()
+                heuristic.reason(),
+                signals.hasExtractIntent(),
+                signals.hasImageGenerateIntent(),
+                signals.hasActionIntent(),
+                signals.ragDecision().enabled(),
+                expectedOutputFromSignals(signals)
         );
     }
 
@@ -409,6 +602,45 @@ public class ChatProcessRouter {
             payload = payload.substring(firstBrace, lastBrace + 1);
         }
         return objectMapper.readTree(payload);
+    }
+
+    private boolean boolOr(JsonNode node, String fieldA, String fieldB, boolean fallback) {
+        if (node == null) {
+            return fallback;
+        }
+        if (node.has(fieldA)) {
+            return node.path(fieldA).asBoolean(fallback);
+        }
+        if (node.has(fieldB)) {
+            return node.path(fieldB).asBoolean(fallback);
+        }
+        return fallback;
+    }
+
+    private ProcessRoute parseRoute(String routeValue) {
+        if (routeValue == null || routeValue.isBlank()) {
+            return ProcessRoute.CHAT;
+        }
+        String normalized = routeValue.trim().toUpperCase(Locale.ROOT);
+        return switch (normalized) {
+            case "RAG" -> ProcessRoute.RAG;
+            case "ACTION" -> ProcessRoute.ACTION;
+            case "IMAGE_GENERATE", "IMAGE", "IMAGE_GEN" -> ProcessRoute.IMAGE_GENERATE;
+            case "IMAGE_EXTRACT", "VISION_EXTRACT", "OCR" -> ProcessRoute.IMAGE_EXTRACT;
+            case "MIXED_PIPELINE", "MIXED", "PIPELINE" -> ProcessRoute.MIXED_PIPELINE;
+            default -> ProcessRoute.CHAT;
+        };
+    }
+
+    private String normalizeExpectedOutput(String value) {
+        if (value == null || value.isBlank()) {
+            return "text";
+        }
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "table", "json", "image" -> normalized;
+            default -> "text";
+        };
     }
 
     private String textOr(JsonNode node, String field, String fallback) {
@@ -441,12 +673,46 @@ public class ChatProcessRouter {
         return new MediaFlags(hasImage, hasDocument);
     }
 
+    private PromptSignals analyzePrompt(String normalizedPrompt, MediaFlags mediaFlags) {
+        String text = normalizedPrompt == null ? "" : normalizedPrompt.toLowerCase(Locale.ROOT);
+        boolean hasActionHint = IMAGE_ACTION_HINTS.matcher(text).find();
+        boolean hasSubjectHint = IMAGE_SUBJECT_HINTS.matcher(text).find();
+        boolean hasEditHint = IMAGE_EDIT_HINTS.matcher(text).find();
+        boolean hasExtractHint = VISION_EXTRACT_HINTS.matcher(text).find();
+        boolean hasAnalysisHint = IMAGE_ANALYSIS_HINTS.matcher(text).find();
+        boolean hasOperationalActionHint = ACTION_HINTS.matcher(text).find();
+        boolean technicalDebug = TECHNICAL_DEBUG_HINTS.matcher(text).find();
+        boolean promptStyle = PROMPT_STYLE_HINTS.matcher(text).find();
+        boolean questionLike = isQuestionLike(text);
+        boolean mixedHint = MIXED_HINTS.matcher(text).find();
+        boolean tableHint = TABLE_HINTS.matcher(text).find();
+        boolean jsonHint = JSON_HINTS.matcher(text).find();
+
+        boolean imageGenerateIntent = ((hasActionHint || hasEditHint)
+                && (hasSubjectHint || hasEditHint || promptStyle || mediaFlags.hasImageMedia()))
+                || (!mediaFlags.hasImageMedia() && hasSubjectHint && promptStyle && !questionLike && !technicalDebug);
+
+        ChatPromptSignals.RagDecision ragDecision = ChatPromptSignals.ragDecision(normalizedPrompt, mediaFlags.hasDocumentMedia());
+        return new PromptSignals(
+                imageGenerateIntent,
+                hasExtractHint,
+                hasAnalysisHint,
+                hasOperationalActionHint,
+                technicalDebug,
+                questionLike,
+                mixedHint,
+                tableHint,
+                jsonHint,
+                promptStyle,
+                ragDecision
+        );
+    }
+
     private boolean isQuestionLike(String text) {
         if (text == null || text.isBlank()) {
             return false;
         }
-        return text.contains("?")
-                || QUESTION_PREFIX_HINTS.matcher(text).find();
+        return text.contains("?") || QUESTION_PREFIX_HINTS.matcher(text).find();
     }
 
     private String normalizePrompt(String value) {
@@ -475,11 +741,6 @@ public class ChatProcessRouter {
 
     /**
      * Clasifica el pipeline interno esperado para turnos de chat no generativos.
-     * Orden de prioridad:
-     * - Vision extract/analyze si hay imagen adjunta.
-     * - Chat con RAG si hay señales de dependencia factual/técnica.
-     * - Chat complejo para consultas largas multi-paso o rendering textual.
-     * - Chat rápido en el resto.
      */
     private PipelineHint classifyChatPipeline(String normalizedPrompt, MediaFlags mediaFlags) {
         if (mediaFlags.hasImageMedia()) {
@@ -504,8 +765,188 @@ public class ChatProcessRouter {
         return PipelineHint.CHAT_FAST;
     }
 
+    private ProcessRoute classifyManualRoute(PromptSignals signals, MediaFlags mediaFlags) {
+        if (mediaFlags.hasImageMedia() && signals.hasExtractIntent()) {
+            return ProcessRoute.IMAGE_EXTRACT;
+        }
+        if (signals.hasActionIntent() && signals.ragDecision().enabled()) {
+            return ProcessRoute.MIXED_PIPELINE;
+        }
+        if (signals.hasActionIntent()) {
+            return ProcessRoute.ACTION;
+        }
+        if (signals.ragDecision().enabled()) {
+            return ProcessRoute.RAG;
+        }
+        return ProcessRoute.CHAT;
+    }
+
+    private PipelineHint pipelineForRoute(ProcessRoute route,
+                                          String normalizedPrompt,
+                                          MediaFlags mediaFlags) {
+        if (route == null) {
+            return PipelineHint.CHAT_FAST;
+        }
+        return switch (route) {
+            case IMAGE_GENERATE -> mediaFlags.hasImageMedia()
+                    ? PipelineHint.IMAGE_IMG2IMG
+                    : PipelineHint.IMAGE_TXT2IMG;
+            case IMAGE_EXTRACT -> VISION_EXTRACT_HINTS.matcher(normalizedPrompt.toLowerCase(Locale.ROOT)).find()
+                    ? PipelineHint.VISION_EXTRACT
+                    : PipelineHint.VISION_ANALYZE;
+            case RAG -> PipelineHint.CHAT_RAG;
+            case ACTION -> PipelineHint.ACTION_EXECUTION;
+            case MIXED_PIPELINE -> mediaFlags.hasImageMedia()
+                    ? PipelineHint.MIXED_EXTRACT_THEN_ACTION
+                    : PipelineHint.MIXED_RAG_THEN_ACTION;
+            case CHAT -> classifyChatPipeline(normalizedPrompt, mediaFlags);
+        };
+    }
+
+    private ProcessDecision safeFallbackDecision(MediaFlags mediaFlags,
+                                                 PromptSignals signals,
+                                                 String reason) {
+        if (mediaFlags.hasImageMedia()) {
+            return new ProcessDecision(
+                    ProcessRoute.IMAGE_EXTRACT,
+                    "fallback",
+                    SAFE_FALLBACK_CONFIDENCE,
+                    reason,
+                    false,
+                    PipelineHint.VISION_EXTRACT,
+                    ChatModelSelector.VISUAL_ALIAS,
+                    false,
+                    false,
+                    expectedOutputFromSignals(signals)
+            );
+        }
+        return new ProcessDecision(
+                ProcessRoute.CHAT,
+                "fallback",
+                SAFE_FALLBACK_CONFIDENCE,
+                reason,
+                false,
+                PipelineHint.CHAT_FAST,
+                ChatModelSelector.FAST_ALIAS,
+                false,
+                false,
+                "text"
+        );
+    }
+
+    private ProcessDecision enforceGuardrails(ProcessDecision candidate,
+                                              String normalizedPrompt,
+                                              PromptSignals signals,
+                                              MediaFlags mediaFlags) {
+        if (candidate == null) {
+            return safeFallbackDecision(mediaFlags, signals, "guardrail-null");
+        }
+
+        String expectedOutput = normalizeExpectedOutput(candidate.expectedOutput());
+        boolean nonImageOutput = "table".equals(expectedOutput)
+                || "json".equals(expectedOutput)
+                || "text".equals(expectedOutput);
+
+        if (candidate.route() == ProcessRoute.IMAGE_GENERATE && nonImageOutput) {
+            if (mediaFlags.hasImageMedia()) {
+                return new ProcessDecision(
+                        ProcessRoute.IMAGE_EXTRACT,
+                        "guardrail",
+                        Math.max(candidate.confidence(), 0.90),
+                        "expected_output_no_es_image",
+                        candidate.usedLlm(),
+                        PipelineHint.VISION_EXTRACT,
+                        ChatModelSelector.VISUAL_ALIAS,
+                        candidate.needsRag(),
+                        candidate.needsAction(),
+                        expectedOutput
+                );
+            }
+            PipelineHint pipeline = classifyChatPipeline(normalizedPrompt, mediaFlags);
+            return new ProcessDecision(
+                    ProcessRoute.CHAT,
+                    "guardrail",
+                    Math.max(candidate.confidence(), 0.90),
+                    "expected_output_no_es_image",
+                    candidate.usedLlm(),
+                    pipeline,
+                    recommendedAliasForPipeline(pipeline),
+                    candidate.needsRag(),
+                    candidate.needsAction(),
+                    expectedOutput
+            );
+        }
+
+        if (candidate.route() == ProcessRoute.IMAGE_EXTRACT && !mediaFlags.hasImageMedia()) {
+            PipelineHint pipeline = classifyChatPipeline(normalizedPrompt, mediaFlags);
+            return new ProcessDecision(
+                    ProcessRoute.CHAT,
+                    "guardrail",
+                    Math.max(candidate.confidence(), 0.88),
+                    "image_extract_requires_image_media",
+                    candidate.usedLlm(),
+                    pipeline,
+                    recommendedAliasForPipeline(pipeline),
+                    candidate.needsRag(),
+                    candidate.needsAction(),
+                    expectedOutput
+            );
+        }
+
+        if (candidate.route() == ProcessRoute.ACTION && candidate.needsRag()) {
+            return new ProcessDecision(
+                    ProcessRoute.MIXED_PIPELINE,
+                    "guardrail",
+                    candidate.confidence(),
+                    "action_requires_context",
+                    candidate.usedLlm(),
+                    PipelineHint.MIXED_RAG_THEN_ACTION,
+                    ChatModelSelector.CHAT_ALIAS,
+                    true,
+                    true,
+                    expectedOutput
+            );
+        }
+
+        PipelineHint pipeline = candidate.pipeline() == null
+                ? pipelineForRoute(candidate.route(), normalizedPrompt, mediaFlags)
+                : candidate.pipeline();
+        String alias = hasText(candidate.recommendedModelAlias())
+                ? candidate.recommendedModelAlias()
+                : recommendedAliasForRoute(candidate.route(), pipeline, mediaFlags);
+
+        return new ProcessDecision(
+                candidate.route(),
+                candidate.source(),
+                candidate.confidence(),
+                candidate.reason(),
+                candidate.usedLlm(),
+                pipeline,
+                alias,
+                candidate.needsRag(),
+                candidate.needsAction(),
+                expectedOutput
+        );
+    }
+
+    private String expectedOutputFromSignals(PromptSignals signals) {
+        if (signals == null) {
+            return "text";
+        }
+        if (signals.hasTableHint()) {
+            return "table";
+        }
+        if (signals.hasJsonHint()) {
+            return "json";
+        }
+        if (signals.hasImageGenerateIntent()) {
+            return "image";
+        }
+        return "text";
+    }
+
     /**
-     * Traduce el pipeline sugerido a un alias de modelo que ya entiende el backend.
+     * Traduce el pipeline sugerido a un alias de modelo soportado por el backend.
      */
     private String recommendedAliasForPipeline(PipelineHint pipeline) {
         if (pipeline == null) {
@@ -513,8 +954,25 @@ public class ChatProcessRouter {
         }
         return switch (pipeline) {
             case IMAGE_TXT2IMG, IMAGE_IMG2IMG -> ChatModelSelector.IMAGE_ALIAS;
-            case VISION_EXTRACT, VISION_ANALYZE, CHAT_COMPLEX, CHAT_RAG -> ChatModelSelector.CHAT_ALIAS;
+            case VISION_EXTRACT, VISION_ANALYZE -> ChatModelSelector.VISUAL_ALIAS;
+            case CHAT_COMPLEX, CHAT_RAG, ACTION_EXECUTION, MIXED_EXTRACT_THEN_ACTION, MIXED_EXTRACT_THEN_RAG,
+                    MIXED_RAG_THEN_ACTION -> ChatModelSelector.CHAT_ALIAS;
             case CHAT_FAST -> ChatModelSelector.FAST_ALIAS;
+        };
+    }
+
+    private String recommendedAliasForRoute(ProcessRoute route, PipelineHint pipeline, MediaFlags mediaFlags) {
+        if (route == null) {
+            return recommendedAliasForPipeline(pipeline);
+        }
+        return switch (route) {
+            case IMAGE_GENERATE -> ChatModelSelector.IMAGE_ALIAS;
+            case IMAGE_EXTRACT -> ChatModelSelector.VISUAL_ALIAS;
+            case MIXED_PIPELINE -> mediaFlags.hasImageMedia()
+                    ? ChatModelSelector.VISUAL_ALIAS
+                    : ChatModelSelector.CHAT_ALIAS;
+            case RAG, ACTION -> ChatModelSelector.CHAT_ALIAS;
+            case CHAT -> recommendedAliasForPipeline(pipeline);
         };
     }
 
@@ -535,18 +993,45 @@ public class ChatProcessRouter {
         return String.format(Locale.US, "%.3f", clamp01(value));
     }
 
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
     private String safe(String value) {
         return value == null ? "" : value;
     }
 
+    /**
+     * Rutas de proceso disponibles para el router.
+     */
     public enum ProcessRoute {
         CHAT,
-        IMAGE
+        RAG,
+        ACTION,
+        IMAGE_GENERATE,
+        IMAGE_EXTRACT,
+        MIXED_PIPELINE
     }
 
     /**
-     * Resultado final del router:
-     * ruta (chat/image), pipeline sugerido y alias recomendado para ejecución.
+     * Pipeline operativo sugerido para ejecucion y trazabilidad.
+     */
+    public enum PipelineHint {
+        IMAGE_TXT2IMG,
+        IMAGE_IMG2IMG,
+        VISION_EXTRACT,
+        VISION_ANALYZE,
+        CHAT_RAG,
+        CHAT_COMPLEX,
+        CHAT_FAST,
+        ACTION_EXECUTION,
+        MIXED_EXTRACT_THEN_ACTION,
+        MIXED_EXTRACT_THEN_RAG,
+        MIXED_RAG_THEN_ACTION
+    }
+
+    /**
+     * Resultado final del router con metadata de ejecucion.
      */
     public record ProcessDecision(ProcessRoute route,
                                   String source,
@@ -554,8 +1039,10 @@ public class ChatProcessRouter {
                                   String reason,
                                   boolean usedLlm,
                                   PipelineHint pipeline,
-                                  String recommendedModelAlias) {
-
+                                  String recommendedModelAlias,
+                                  boolean needsRag,
+                                  boolean needsAction,
+                                  String expectedOutput) {
         public ProcessDecision {
             route = route == null ? ProcessRoute.CHAT : route;
             source = source == null || source.isBlank() ? "heuristic" : source.trim();
@@ -569,20 +1056,19 @@ public class ChatProcessRouter {
             reason = reason == null ? "" : reason.trim();
             pipeline = pipeline == null ? PipelineHint.CHAT_FAST : pipeline;
             recommendedModelAlias = recommendedModelAlias == null ? "" : recommendedModelAlias.trim();
+            expectedOutput = normalizeExpectedOutputValue(expectedOutput);
         }
-    }
 
-    /**
-     * Pipeline operativo sugerido por el router para observabilidad y ejecución estable.
-     */
-    public enum PipelineHint {
-        IMAGE_TXT2IMG,
-        IMAGE_IMG2IMG,
-        VISION_EXTRACT,
-        VISION_ANALYZE,
-        CHAT_RAG,
-        CHAT_COMPLEX,
-        CHAT_FAST
+        private static String normalizeExpectedOutputValue(String value) {
+            if (value == null || value.isBlank()) {
+                return "text";
+            }
+            String normalized = value.trim().toLowerCase(Locale.ROOT);
+            return switch (normalized) {
+                case "table", "json", "image" -> normalized;
+                default -> "text";
+            };
+        }
     }
 
     private record HeuristicAssessment(ProcessRoute route,
@@ -590,9 +1076,25 @@ public class ChatProcessRouter {
                                        boolean ambiguous,
                                        String reason,
                                        PipelineHint pipeline,
-                                       String recommendedModelAlias) {
+                                       String recommendedModelAlias,
+                                       boolean needsRag,
+                                       boolean needsAction,
+                                       String expectedOutput) {
     }
 
     private record MediaFlags(boolean hasImageMedia, boolean hasDocumentMedia) {
+    }
+
+    private record PromptSignals(boolean hasImageGenerateIntent,
+                                 boolean hasExtractIntent,
+                                 boolean hasImageAnalysisIntent,
+                                 boolean hasActionIntent,
+                                 boolean hasTechnicalDebugHint,
+                                 boolean isQuestionLike,
+                                 boolean hasMixedHint,
+                                 boolean hasTableHint,
+                                 boolean hasJsonHint,
+                                 boolean hasPromptStyleHint,
+                                 ChatPromptSignals.RagDecision ragDecision) {
     }
 }

@@ -148,14 +148,14 @@ chat:
     # Longitud maxima de previews guardadas en auditoria.
     max-preview-chars: 220
   process-router:
-    # Si model=auto/default/null, decide proceso (chat vs imagen) sin selección manual.
+    # Si model=auto/default/null, decide proceso (chat/rag/action/image_generate/image_extract/mixed_pipeline).
     enabled: true
     # Usa el modelo rápido para desambiguar prompts dudosos.
     llm-assessment-enabled: true
     # Si la heurística de imagen queda por debajo de este umbral, consulta al mini-modelo.
     heuristic-image-threshold: 0.86
     # Confianza mínima del mini-modelo para sobreescribir heurística.
-    llm-confidence-threshold: 0.72
+    llm-confidence-threshold: 0.75
     # Evita consultas LLM para prompts muy cortos.
     min-prompt-chars-for-llm: 16
     # Recorte máximo del prompt enviado al mini-modelo de routing.

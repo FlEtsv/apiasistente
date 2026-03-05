@@ -39,27 +39,25 @@ class ChatProcessRouterTest {
     }
 
     @Test
-    void routesAutoPromptToImageWhenRequestIsExplicitlyGenerative() {
+    void routesAutoPromptToImageGenerateWhenRequestIsExplicitlyGenerative() {
         ChatProcessRouter.ProcessDecision decision = router.decide(
                 "Genera una imagen de un gato astronauta en marte",
                 "auto",
                 List.of()
         );
 
-        assertEquals(ChatProcessRouter.ProcessRoute.IMAGE, decision.route());
-        assertEquals("heuristic", decision.source());
+        assertEquals(ChatProcessRouter.ProcessRoute.IMAGE_GENERATE, decision.route());
+        assertEquals("hard-rule", decision.source());
         assertFalse(decision.usedLlm());
         assertEquals(ChatProcessRouter.PipelineHint.IMAGE_TXT2IMG, decision.pipeline());
         assertEquals(ChatModelSelector.IMAGE_ALIAS, decision.recommendedModelAlias());
+        assertEquals("image", decision.expectedOutput());
         verifyNoInteractions(ollamaClient, modelSelector);
     }
 
     @Test
     void keepsCameraAnalysisInChatFlow() {
-        ChatMediaInput cameraPhoto = new ChatMediaInput();
-        cameraPhoto.setName("camera.jpg");
-        cameraPhoto.setMimeType("image/jpeg");
-        cameraPhoto.setBase64("ZmFrZS1iYXNlNjQ=");
+        ChatMediaInput cameraPhoto = imageInput();
 
         ChatProcessRouter.ProcessDecision decision = router.decide(
                 "Analiza esta imagen y dime que ves",
@@ -70,16 +68,13 @@ class ChatProcessRouterTest {
         assertEquals(ChatProcessRouter.ProcessRoute.CHAT, decision.route());
         assertFalse(decision.usedLlm());
         assertEquals(ChatProcessRouter.PipelineHint.VISION_ANALYZE, decision.pipeline());
-        assertEquals(ChatModelSelector.CHAT_ALIAS, decision.recommendedModelAlias());
+        assertEquals(ChatModelSelector.VISUAL_ALIAS, decision.recommendedModelAlias());
         verifyNoInteractions(ollamaClient, modelSelector);
     }
 
     @Test
     void routesCameraEditIntentToImageGenerationFlow() {
-        ChatMediaInput cameraPhoto = new ChatMediaInput();
-        cameraPhoto.setName("camera.jpg");
-        cameraPhoto.setMimeType("image/jpeg");
-        cameraPhoto.setBase64("ZmFrZS1iYXNlNjQ=");
+        ChatMediaInput cameraPhoto = imageInput();
 
         ChatProcessRouter.ProcessDecision decision = router.decide(
                 "Mejora esta foto con estilo cinematic",
@@ -87,7 +82,7 @@ class ChatProcessRouterTest {
                 List.of(cameraPhoto)
         );
 
-        assertEquals(ChatProcessRouter.ProcessRoute.IMAGE, decision.route());
+        assertEquals(ChatProcessRouter.ProcessRoute.IMAGE_GENERATE, decision.route());
         assertFalse(decision.usedLlm());
         assertEquals(ChatProcessRouter.PipelineHint.IMAGE_IMG2IMG, decision.pipeline());
         assertEquals(ChatModelSelector.IMAGE_ALIAS, decision.recommendedModelAlias());
@@ -95,11 +90,8 @@ class ChatProcessRouterTest {
     }
 
     @Test
-    void routesImageTableExtractionIntentToChatFlow() {
-        ChatMediaInput cameraPhoto = new ChatMediaInput();
-        cameraPhoto.setName("camera.jpg");
-        cameraPhoto.setMimeType("image/jpeg");
-        cameraPhoto.setBase64("ZmFrZS1iYXNlNjQ=");
+    void routesImageTableExtractionIntentToImageExtractFlow() {
+        ChatMediaInput cameraPhoto = imageInput();
 
         ChatProcessRouter.ProcessDecision decision = router.decide(
                 "Dame estos datos en una tabla",
@@ -107,88 +99,111 @@ class ChatProcessRouterTest {
                 List.of(cameraPhoto)
         );
 
-        assertEquals(ChatProcessRouter.ProcessRoute.CHAT, decision.route());
+        assertEquals(ChatProcessRouter.ProcessRoute.IMAGE_EXTRACT, decision.route());
         assertFalse(decision.usedLlm());
         assertEquals(ChatProcessRouter.PipelineHint.VISION_EXTRACT, decision.pipeline());
-        assertEquals(ChatModelSelector.CHAT_ALIAS, decision.recommendedModelAlias());
+        assertEquals(ChatModelSelector.VISUAL_ALIAS, decision.recommendedModelAlias());
+        assertEquals("table", decision.expectedOutput());
         verifyNoInteractions(ollamaClient, modelSelector);
     }
 
     @Test
-    void routesSimpleTextToFastChatPipeline() {
+    void routesActionPromptToAction() {
         ChatProcessRouter.ProcessDecision decision = router.decide(
-                "Hola, que tal",
+                "Guarda esto",
                 "auto",
                 List.of()
         );
 
-        assertEquals(ChatProcessRouter.ProcessRoute.CHAT, decision.route());
-        assertEquals(ChatProcessRouter.PipelineHint.CHAT_FAST, decision.pipeline());
-        assertEquals(ChatModelSelector.FAST_ALIAS, decision.recommendedModelAlias());
+        assertEquals(ChatProcessRouter.ProcessRoute.ACTION, decision.route());
+        assertTrue(decision.needsAction());
+        assertEquals(ChatProcessRouter.PipelineHint.ACTION_EXECUTION, decision.pipeline());
     }
 
     @Test
-    void routesComplexTextToComplexChatPipeline() {
-        ChatProcessRouter.ProcessDecision decision = router.decide(
-                "Compara estrategias de migracion paso a paso con riesgos y trade-offs",
-                "auto",
-                List.of()
-        );
-
-        assertEquals(ChatProcessRouter.ProcessRoute.CHAT, decision.route());
-        assertEquals(ChatProcessRouter.PipelineHint.CHAT_RAG, decision.pipeline());
-        assertEquals(ChatModelSelector.CHAT_ALIAS, decision.recommendedModelAlias());
-    }
-
-    @Test
-    void routesRepositorySpecificQuestionToRagPipeline() {
+    void routesRepositorySpecificQuestionToRagRoute() {
         ChatProcessRouter.ProcessDecision decision = router.decide(
                 "Cual es el endpoint de esta API para crear una api key?",
                 "auto",
                 List.of()
         );
 
-        assertEquals(ChatProcessRouter.ProcessRoute.CHAT, decision.route());
+        assertEquals(ChatProcessRouter.ProcessRoute.RAG, decision.route());
+        assertTrue(decision.needsRag());
         assertEquals(ChatProcessRouter.PipelineHint.CHAT_RAG, decision.pipeline());
         assertEquals(ChatModelSelector.CHAT_ALIAS, decision.recommendedModelAlias());
     }
 
     @Test
-    void routesTextRenderingToComplexChatPipeline() {
+    void routesMixedImagePipelineWhenPromptRequiresExtractAndThenGenerate() {
+        ChatMediaInput cameraPhoto = imageInput();
+
         ChatProcessRouter.ProcessDecision decision = router.decide(
-                "Dibuja un girasol con caracteres ascii",
+                "Saca datos de esta imagen y luego genera un grafico",
                 "auto",
-                List.of()
+                List.of(cameraPhoto)
         );
 
-        assertEquals(ChatProcessRouter.ProcessRoute.CHAT, decision.route());
-        assertEquals(ChatProcessRouter.PipelineHint.CHAT_COMPLEX, decision.pipeline());
-        assertEquals(ChatModelSelector.CHAT_ALIAS, decision.recommendedModelAlias());
+        assertEquals(ChatProcessRouter.ProcessRoute.MIXED_PIPELINE, decision.route());
+        assertTrue(decision.needsAction());
+        assertEquals(ChatProcessRouter.PipelineHint.MIXED_EXTRACT_THEN_ACTION, decision.pipeline());
     }
 
     @Test
     void usesFastLlmWhenHeuristicIsAmbiguous() {
         properties.setLlmAssessmentEnabled(true);
-        properties.setHeuristicImageThreshold(0.95);
+        properties.setHeuristicImageThreshold(0.99);
         properties.setLlmConfidenceThreshold(0.60);
         properties.setMinPromptCharsForLlm(6);
         router = new ChatProcessRouter(modelSelector, ollamaClient, properties);
 
         when(modelSelector.resolveChatModel(ChatModelSelector.FAST_ALIAS)).thenReturn("qwen2.5:7b");
         when(ollamaClient.chat(anyList(), anyString())).thenReturn("""
-                {"route":"image","confidence":0.91,"reason":"peticion visual explicita"}
+                {"route":"IMAGE_GENERATE","confidence":0.91,"needs_rag":false,"needs_action":false,"expected_output":"image","reason":"peticion visual explicita"}
                 """);
 
         ChatProcessRouter.ProcessDecision decision = router.decide(
-                "Haz algo visual estilo cinematic 4k",
+                "algo visual cinematic 4k",
                 "auto",
                 List.of()
         );
 
-        assertEquals(ChatProcessRouter.ProcessRoute.IMAGE, decision.route());
+        assertEquals(ChatProcessRouter.ProcessRoute.IMAGE_GENERATE, decision.route());
         assertTrue(decision.usedLlm());
         assertEquals("llm-fast", decision.source());
         assertEquals(ChatProcessRouter.PipelineHint.IMAGE_TXT2IMG, decision.pipeline());
         assertEquals(ChatModelSelector.IMAGE_ALIAS, decision.recommendedModelAlias());
+    }
+
+    @Test
+    void fallsBackSafelyWhenLlmConfidenceIsLow() {
+        properties.setLlmAssessmentEnabled(true);
+        properties.setHeuristicImageThreshold(0.99);
+        properties.setLlmConfidenceThreshold(0.80);
+        properties.setMinPromptCharsForLlm(6);
+        router = new ChatProcessRouter(modelSelector, ollamaClient, properties);
+
+        when(modelSelector.resolveChatModel(ChatModelSelector.FAST_ALIAS)).thenReturn("qwen2.5:7b");
+        when(ollamaClient.chat(anyList(), anyString())).thenReturn("""
+                {"route":"IMAGE_GENERATE","confidence":0.40,"needs_rag":false,"needs_action":false,"expected_output":"image","reason":"dudoso"}
+                """);
+
+        ChatProcessRouter.ProcessDecision decision = router.decide(
+                "haz algo bonito",
+                "auto",
+                List.of()
+        );
+
+        assertEquals(ChatProcessRouter.ProcessRoute.CHAT, decision.route());
+        assertEquals("fallback", decision.source());
+        assertFalse(decision.usedLlm());
+    }
+
+    private ChatMediaInput imageInput() {
+        ChatMediaInput cameraPhoto = new ChatMediaInput();
+        cameraPhoto.setName("camera.jpg");
+        cameraPhoto.setMimeType("image/jpeg");
+        cameraPhoto.setBase64("ZmFrZS1iYXNlNjQ=");
+        return cameraPhoto;
     }
 }

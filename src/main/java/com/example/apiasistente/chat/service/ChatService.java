@@ -134,7 +134,7 @@ public class ChatService {
 
         try {
             ChatResponse response;
-            if (processDecision.route() == ChatProcessRouter.ProcessRoute.IMAGE) {
+            if (processDecision.route() == ChatProcessRouter.ProcessRoute.IMAGE_GENERATE) {
                 response = imageGenerationService.generate(
                         username,
                         maybeSessionId,
@@ -303,6 +303,9 @@ public class ChatService {
         payload.put("route", processDecision.route().name());
         payload.put("pipeline", processDecision.pipeline().name());
         payload.put("recommendedModelAlias", safe(processDecision.recommendedModelAlias()));
+        payload.put("needsRag", processDecision.needsRag());
+        payload.put("needsAction", processDecision.needsAction());
+        payload.put("expectedOutput", safe(processDecision.expectedOutput()));
         payload.put("routeSource", processDecision.source());
         payload.put("routeConfidence", String.format(java.util.Locale.US, "%.3f", processDecision.confidence()));
         payload.put("usedLlmRouter", processDecision.usedLlm());
@@ -318,6 +321,9 @@ public class ChatService {
         LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
         payload.put("route", processDecision.route().name());
         payload.put("pipeline", processDecision.pipeline().name());
+        payload.put("needsRag", processDecision.needsRag());
+        payload.put("needsAction", processDecision.needsAction());
+        payload.put("expectedOutput", safe(processDecision.expectedOutput()));
         payload.put("routeSource", processDecision.source());
         payload.put("routeConfidence", String.format(java.util.Locale.US, "%.3f", processDecision.confidence()));
         payload.put("resolvedSessionId", response == null ? "" : safe(response.getSessionId()));
@@ -347,6 +353,9 @@ public class ChatService {
         payload.put("route", processDecision.route().name());
         payload.put("pipeline", processDecision.pipeline().name());
         payload.put("recommendedModelAlias", safe(processDecision.recommendedModelAlias()));
+        payload.put("needsRag", processDecision.needsRag());
+        payload.put("needsAction", processDecision.needsAction());
+        payload.put("expectedOutput", safe(processDecision.expectedOutput()));
         payload.put("routeSource", processDecision.source());
         payload.put("routeConfidence", String.format(java.util.Locale.US, "%.3f", processDecision.confidence()));
         payload.put("usedLlmRouter", processDecision.usedLlm());
