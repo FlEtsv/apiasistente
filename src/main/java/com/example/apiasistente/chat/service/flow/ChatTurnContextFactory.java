@@ -114,6 +114,15 @@ public class ChatTurnContextFactory {
                     ragDecision.reason()
             );
         }
+        log.info(
+                "chat_turn_matrix hasImageMedia={} hasDocumentMedia={} intent={} ragMode={} reasoningLevel={} expectedPath={}",
+                hasImageMedia,
+                hasDocumentMedia,
+                intentRoute,
+                ragDecision.mode(),
+                turnPlan.reasoningLevel(),
+                hasImageMedia ? "visual-detection+chat" : "text-chat"
+        );
 
         return new ChatTurnContext(
                 username,

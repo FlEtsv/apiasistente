@@ -64,6 +64,8 @@ const MONITOR_MAX_SEC = 3600;
 const MAX_MEDIA_ITEMS = 4;
 const MAX_MEDIA_BYTES = 6 * 1024 * 1024;
 const MAX_MEDIA_TEXT_CHARS = 18000;
+const MAX_IMAGE_EDGE_PX = 1536;
+const IMAGE_UPLOAD_QUALITY = 0.9;
 let monitorTimer = null;
 let pendingMedia = [];
 
@@ -152,6 +154,33 @@ function fileToText(file) {
   });
 }
 
+function loadImageElement(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('No se pudo decodificar la imagen.'));
+    image.src = dataUrl;
+  });
+}
+
+async function normalizeImageDataUrl(dataUrl, maxEdgePx = MAX_IMAGE_EDGE_PX, quality = IMAGE_UPLOAD_QUALITY) {
+  const image = await loadImageElement(dataUrl);
+  const width = image.naturalWidth || image.width || 0;
+  const height = image.naturalHeight || image.height || 0;
+  if (width <= 0 || height <= 0) return dataUrl;
+
+  const scale = Math.min(1, maxEdgePx / Math.max(width, height));
+  const targetWidth = Math.max(1, Math.round(width * scale));
+  const targetHeight = Math.max(1, Math.round(height * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return dataUrl;
+  ctx.drawImage(image, 0, 0, targetWidth, targetHeight);
+  return canvas.toDataURL('image/jpeg', quality);
+}
+
 function isTextLikeFile(file) {
   const type = (file?.type || '').toLowerCase();
   if (type.startsWith('text/')) return true;
@@ -224,8 +253,17 @@ async function pushMediaFile(file) {
   };
 
   if (mimeType.startsWith('image/')) {
+    if (mimeType.includes('heic') || mimeType.includes('heif')) {
+      throw new Error('La foto en formato HEIC/HEIF no es compatible. Usa JPG/PNG en la camara del movil.');
+    }
     const dataUrl = await fileToDataUrl(file);
-    media.base64 = sanitizeBase64(dataUrl);
+    try {
+      const normalizedDataUrl = await normalizeImageDataUrl(dataUrl);
+      media.base64 = sanitizeBase64(normalizedDataUrl);
+      media.mimeType = 'image/jpeg';
+    } catch (e) {
+      media.base64 = sanitizeBase64(dataUrl);
+    }
   } else if (isTextLikeFile(file)) {
     const text = await fileToText(file);
     media.text = (text || '').slice(0, MAX_MEDIA_TEXT_CHARS);
@@ -303,7 +341,38 @@ function clearWelcomeIfNeeded() {
   if (chatEl.querySelector('.opacity-50')) chatEl.innerHTML = '';
 }
 
-function addMsg(who, text, sources = [], meta = null) {
+function renderInlineMedia(media = []) {
+  const list = Array.isArray(media) ? media : [];
+  if (!list.length) return null;
+
+  const container = document.createElement('div');
+  container.className = 'inline-media';
+
+  list.forEach((item) => {
+    if (!item || (!item.base64 && !item.text)) return;
+    const mime = String(item.mimeType || '').toLowerCase();
+    const chip = document.createElement('div');
+    chip.className = 'inline-media-chip';
+
+    if (mime.startsWith('image/') && item.base64) {
+      const img = document.createElement('img');
+      img.className = 'inline-media-thumb';
+      img.alt = item.name || 'adjunto';
+      img.src = `data:${mime || 'image/png'};base64,${item.base64}`;
+      chip.appendChild(img);
+    }
+
+    const label = document.createElement('span');
+    label.className = 'inline-media-name';
+    label.textContent = item.name || inferMediaLabel(item);
+    chip.appendChild(label);
+    container.appendChild(chip);
+  });
+
+  return container.childElementCount ? container : null;
+}
+
+function addMsg(who, text, sources = [], meta = null, media = []) {
   clearWelcomeIfNeeded();
 
   const wrapper = document.createElement('div');
@@ -331,6 +400,13 @@ function addMsg(who, text, sources = [], meta = null) {
     });
   }
   div.appendChild(content);
+
+  if (isUser) {
+    const inlineMedia = renderInlineMedia(media);
+    if (inlineMedia) {
+      div.appendChild(inlineMedia);
+    }
+  }
 
   if (!isUser && ragUsed && sources && sources.length > 0) {
     const sourcesDiv = document.createElement('div');
@@ -949,8 +1025,11 @@ async function deleteSessionPrompt(id, currentTitle) {
 
 async function send() {
   let text = inputEl.value.trim();
+  const selectedModel = modelSelectEl?.value || null;
   if (!text && pendingMedia.length > 0) {
-    text = 'Analiza el adjunto y responde a mi consulta.';
+    text = selectedModel && (selectedModel === 'image' || selectedModel === 'image-hq' || selectedModel.endsWith('.safetensors'))
+      ? 'Genera una nueva version basada en esta imagen.'
+      : 'Analiza el adjunto y responde a mi consulta.';
   }
   if (!text) return;
 
@@ -963,7 +1042,7 @@ async function send() {
 
   inputEl.value = '';
   syncComposerHeight();
-  addMsg('user', pendingMedia.length ? `${text}\n\n[Adjuntos: ${pendingMedia.length}]` : text);
+  addMsg('user', text, [], null, mediaPayload);
 
   const typingId = showTyping();
   sendBtn.disabled = true;
@@ -975,7 +1054,7 @@ async function send() {
       body: JSON.stringify({
         sessionId,
         message: text,
-        model: modelSelectEl?.value || null,
+        model: selectedModel,
         media: mediaPayload
       })
     });

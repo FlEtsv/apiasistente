@@ -10,6 +10,8 @@ import com.example.apiasistente.chat.service.ChatQueueService;
 import com.example.apiasistente.chat.service.ChatService;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.CacheControl;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import jakarta.validation.Valid;
@@ -20,10 +22,12 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.security.Principal;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -142,13 +146,20 @@ public class ChatApiController {
     @GetMapping("/sessions/{sessionId}/images/{imageId:.+}")
     public ResponseEntity<ByteArrayResource> generatedImage(@PathVariable String sessionId,
                                                             @PathVariable String imageId,
+                                                            @RequestParam(name = "download", defaultValue = "false") boolean download,
                                                             Principal principal) {
         var image = chatService.loadGeneratedImage(principal.getName(), sessionId, imageId);
         MediaType contentType = resolveMediaType(image.mimeType());
-        return ResponseEntity.ok()
+        ResponseEntity.BodyBuilder response = ResponseEntity.ok()
                 .contentType(contentType)
-                .cacheControl(CacheControl.maxAge(30, TimeUnit.DAYS).cachePrivate())
-                .body(new ByteArrayResource(image.bytes()));
+                .cacheControl(CacheControl.maxAge(30, TimeUnit.DAYS).cachePrivate());
+        if (download) {
+            response.header(
+                    HttpHeaders.CONTENT_DISPOSITION,
+                    ContentDisposition.attachment().filename(imageId, StandardCharsets.UTF_8).build().toString()
+            );
+        }
+        return response.body(new ByteArrayResource(image.bytes()));
     }
 
     private MediaType resolveMediaType(String raw) {

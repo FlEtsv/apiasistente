@@ -247,12 +247,15 @@ public class ChatAssistantService {
      * Registra por que modelo termino usando el turno.
      */
     private void logModelSelection(ChatTurnContext context, ChatRagContext ragContext, String model) {
-        if (!log.isDebugEnabled()) {
-            return;
-        }
-        log.debug(
-                "Model routing selected='{}' requested='{}' route={} ragUsed={} ragContext={} directExecution={} textRender={} complex={} multiStep={}",
+        String primary = promptBuilder.resolvePrimaryChatModel();
+        String modelTier = hasText(primary) && primary.equalsIgnoreCase(model) ? "complex" : "fast-or-custom";
+        boolean hasImageMedia = context.preparedMedia().stream().anyMatch(item -> hasText(item.imageBase64()));
+        boolean hasDocumentMedia = context.preparedMedia().stream().anyMatch(item -> hasText(item.documentText()));
+
+        log.info(
+                "chat_model_route selected={} tier={} requested={} route={} ragUsed={} ragContext={} directExecution={} textRender={} complex={} multiStep={} hasImageMedia={} hasDocumentMedia={}",
                 model,
+                modelTier,
                 context.requestedModel(),
                 context.intentRoute(),
                 ragContext.ragUsed(),
@@ -260,7 +263,9 @@ public class ChatAssistantService {
                 context.directExecutionMode(),
                 context.textRenderMode(),
                 context.complexQuery(),
-                context.multiStepQuery()
+                context.multiStepQuery(),
+                hasImageMedia,
+                hasDocumentMedia
         );
     }
 

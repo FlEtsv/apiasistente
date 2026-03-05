@@ -65,11 +65,14 @@ class ChatModelSelectorTest {
         assertEquals("qwen-vl:latest", selector.resolveVisualModel("default"));
         assertEquals("flux", selector.resolveImageModel("image"));
         assertEquals("flux", selector.resolveImageModel("default"));
+        assertEquals("flux1-dev-fp8.safetensors", selector.resolveImageModel("flux1-dev-fp8.safetensors"));
         assertEquals("qwen2.5:3b", selector.resolveResponseGuardModel());
         assertEquals("qwen2.5:32b", selector.resolvePrimaryChatModel());
         assertTrue(selector.isPrimaryChatModel("qwen2.5:32b"));
         assertFalse(selector.isPrimaryChatModel("qwen3.0:14b"));
         assertTrue(ChatModelSelector.isImageGenerationRequest("image"));
+        assertTrue(ChatModelSelector.isImageGenerationRequest("image-hq"));
+        assertTrue(ChatModelSelector.isImageGenerationRequest("flux1-dev-fp8.safetensors"));
         assertFalse(ChatModelSelector.isImageGenerationRequest("chat"));
         assertThrows(IllegalArgumentException.class, () -> selector.resolveChatModel("otro-modelo"));
     }

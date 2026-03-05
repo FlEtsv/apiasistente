@@ -140,18 +140,56 @@ rag:
     max-events: 120
 
 chat:
+  audit:
+    # Trail persistente JSONL con decisiones y errores del pipeline de chat.
+    enabled: true
+    # Archivo append-only para trazabilidad operativa (no se borra entre requests).
+    file-path: data/audit/chat-trace.jsonl
+    # Longitud maxima de previews guardadas en auditoria.
+    max-preview-chars: 220
+  process-router:
+    # Si model=auto/default/null, decide proceso (chat vs imagen) sin selección manual.
+    enabled: true
+    # Usa el modelo rápido para desambiguar prompts dudosos.
+    llm-assessment-enabled: true
+    # Si la heurística de imagen queda por debajo de este umbral, consulta al mini-modelo.
+    heuristic-image-threshold: 0.86
+    # Confianza mínima del mini-modelo para sobreescribir heurística.
+    llm-confidence-threshold: 0.72
+    # Evita consultas LLM para prompts muy cortos.
+    min-prompt-chars-for-llm: 16
+    # Recorte máximo del prompt enviado al mini-modelo de routing.
+    max-prompt-chars: 500
   image-generation:
     # Activa generación de imágenes para el modo "image" del chat.
     enabled: true
-    # Endpoint proveedor de imagen (prompt en path).
-    base-url: https://image.pollinations.ai/prompt
+    # Base URL del servidor ComfyUI API.
+    base-url: ${CHAT_IMAGE_BASE_URL:http://192.168.1.61:8083}
+    # Endpoint de ejecución de workflow (ComfyUI API).
+    prompt-path: /prompt
     # Tamaño estándar de salida.
     width: 1024
     height: 1024
     # Timeout de red para la generación remota.
-    timeout-ms: 90000
+    timeout-ms: 120000
     # Limite de caracteres de prompt.
     max-prompt-chars: 600
+    # Checkpoint FLUX cargado por el workflow.
+    checkpoint: ${CHAT_IMAGE_CHECKPOINT:flux1-schnell-fp8.safetensors}
+    # Parámetros de muestreo para FLUX.
+    steps: 4
+    cfg-scale: 1.0
+    sampler-name: euler
+    scheduler: simple
+    denoise: 1.0
+    img2img-denoise: 0.8
+    # Seed fija (>=0) o aleatoria (-1).
+    seed: -1
+    # Prompt negativo opcional para el nodo negativo.
+    negative-prompt: ""
+    # Si está vacío, ComfyUI devuelve PNG por defecto.
+    convert-format: ""
+    convert-quality: 85
     # Carpeta local para cachear imágenes generadas por sesión.
     storage-dir: data/chat-generated-images
   rag-decision:

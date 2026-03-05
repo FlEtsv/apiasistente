@@ -5,6 +5,7 @@ import com.example.apiasistente.rag.dto.SourceDto;
 import com.example.apiasistente.chat.entity.ChatMessage;
 import com.example.apiasistente.chat.entity.ChatSession;
 import com.example.apiasistente.prompt.entity.SystemPrompt;
+import com.example.apiasistente.chat.service.ChatAuditTrailService;
 import com.example.apiasistente.chat.service.ChatPromptSignals;
 import com.example.apiasistente.chat.service.ChatTurnPlanner;
 import com.example.apiasistente.rag.service.RagService;
@@ -54,6 +55,9 @@ class ChatTurnServiceTest {
     @Mock
     private ChatRagTelemetryService telemetryService;
 
+    @Mock
+    private ChatAuditTrailService auditTrailService;
+
     private ChatTurnService service;
 
     @BeforeEach
@@ -66,7 +70,8 @@ class ChatTurnServiceTest {
                 sourceSnapshotService,
                 sessionService,
                 decisionEngine,
-                telemetryService
+                telemetryService,
+                auditTrailService
         );
     }
 

@@ -16,6 +16,7 @@ public class ChatModelSelector {
     public static final String FAST_ALIAS = "fast";
     public static final String VISUAL_ALIAS = "visual";
     public static final String IMAGE_ALIAS = "image";
+    public static final String IMAGE_HQ_ALIAS = "image-hq";
 
     private final OllamaProperties properties;
 
@@ -165,8 +166,14 @@ public class ChatModelSelector {
         if (fallback == null) {
             throw new IllegalArgumentException("No hay modelo de imagen configurado.");
         }
-        if (trimmed.isEmpty() || IMAGE_ALIAS.equalsIgnoreCase(trimmed) || DEFAULT_ALIAS.equalsIgnoreCase(trimmed)) {
+        if (trimmed.isEmpty()
+                || IMAGE_ALIAS.equalsIgnoreCase(trimmed)
+                || IMAGE_HQ_ALIAS.equalsIgnoreCase(trimmed)
+                || DEFAULT_ALIAS.equalsIgnoreCase(trimmed)) {
             return fallback;
+        }
+        if (looksLikeCheckpoint(trimmed)) {
+            return trimmed;
         }
         if (imageModel != null && imageModel.equalsIgnoreCase(trimmed)) {
             return imageModel;
@@ -178,7 +185,10 @@ public class ChatModelSelector {
     }
 
     public static boolean isImageGenerationRequest(String requested) {
-        return IMAGE_ALIAS.equalsIgnoreCase(requested == null ? "" : requested.trim());
+        String normalized = requested == null ? "" : requested.trim();
+        return IMAGE_ALIAS.equalsIgnoreCase(normalized)
+                || IMAGE_HQ_ALIAS.equalsIgnoreCase(normalized)
+                || looksLikeCheckpoint(normalized);
     }
 
     /**
@@ -225,6 +235,10 @@ public class ChatModelSelector {
         if (value == null) return null;
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private static boolean looksLikeCheckpoint(String value) {
+        return value != null && value.toLowerCase().endsWith(".safetensors");
     }
 
     /**

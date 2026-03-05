@@ -3,6 +3,7 @@ package com.example.apiasistente.chat.service.flow;
 import com.example.apiasistente.chat.dto.ChatMediaInput;
 import com.example.apiasistente.chat.dto.ChatResponse;
 import com.example.apiasistente.chat.entity.ChatMessage;
+import com.example.apiasistente.chat.service.ChatAuditTrailService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -11,6 +12,8 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * Orquesta un turno completo de chat dentro de una transaccion.
@@ -29,6 +32,7 @@ public class ChatTurnService {
     private final ChatSessionService sessionService;
     private final ChatRagDecisionEngine decisionEngine;
     private final ChatRagTelemetryService telemetryService;
+    private final ChatAuditTrailService auditTrailService;
 
     public ChatTurnService(ChatTurnContextFactory contextFactory,
                            ChatRagFlowService ragFlowService,
@@ -37,7 +41,8 @@ public class ChatTurnService {
                            ChatSourceSnapshotService sourceSnapshotService,
                            ChatSessionService sessionService,
                            ChatRagDecisionEngine decisionEngine,
-                           ChatRagTelemetryService telemetryService) {
+                           ChatRagTelemetryService telemetryService,
+                           ChatAuditTrailService auditTrailService) {
         this.contextFactory = contextFactory;
         this.ragFlowService = ragFlowService;
         this.assistantService = assistantService;
@@ -46,6 +51,7 @@ public class ChatTurnService {
         this.sessionService = sessionService;
         this.decisionEngine = decisionEngine;
         this.telemetryService = telemetryService;
+        this.auditTrailService = auditTrailService;
     }
 
     /**
@@ -69,6 +75,13 @@ public class ChatTurnService {
                     media == null ? 0 : media.size(),
                     preview(userText)
             );
+            auditTrailService.record("chat.turn.start", turnStartPayload(
+                    maybeSessionId,
+                    externalUserId,
+                    requestedModel,
+                    media == null ? 0 : media.size(),
+                    userText
+            ));
 
             // 1. Fija sesion, historial, adjuntos y plan heuristico del turno.
             context = contextFactory.create(
@@ -87,6 +100,7 @@ public class ChatTurnService {
                     context.turnPlan().reasoningLevel(),
                     context.preparedMedia().size()
             );
+            auditTrailService.record("chat.turn.context_ready", turnContextPayload(context));
 
             // 2. Decide si el turno usa RAG y con que fuerza entra al contexto recuperado.
             stage = "rag";
@@ -100,6 +114,7 @@ public class ChatTurnService {
                     ragContext.sources().size(),
                     ragContext.retrievalStats().contextTokens()
             );
+            auditTrailService.record("chat.turn.rag_resolved", turnRagPayload(context, ragContext));
 
             // 3. Genera la respuesta final del asistente aplicando guardrails y retries si corresponden.
             stage = "assistant";
@@ -175,6 +190,7 @@ public class ChatTurnService {
                     String.format(java.util.Locale.US, "%.3f", response.getConfidence()),
                     preview(response.getReply())
             );
+            auditTrailService.record("chat.turn.done", turnDonePayload(response));
             return response;
         } catch (RuntimeException ex) {
             log.error(
@@ -190,6 +206,15 @@ public class ChatTurnService {
                     safe(ex.getMessage()),
                     ex
             );
+            auditTrailService.record("chat.turn.failed", turnFailedPayload(
+                    stage,
+                    maybeSessionId,
+                    externalUserId,
+                    requestedModel,
+                    media == null ? 0 : media.size(),
+                    userText,
+                    ex
+            ));
             throw ex;
         }
     }
@@ -277,6 +302,73 @@ public class ChatTurnService {
 
     private String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private Map<String, Object> turnStartPayload(String maybeSessionId,
+                                                 String externalUserId,
+                                                 String requestedModel,
+                                                 int mediaCount,
+                                                 String userText) {
+        LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+        payload.put("requestedSessionId", safe(maybeSessionId));
+        payload.put("externalUserId", safe(externalUserId));
+        payload.put("requestedModel", safe(requestedModel));
+        payload.put("mediaCount", mediaCount);
+        payload.put("messagePreview", auditTrailService.preview(userText));
+        return payload;
+    }
+
+    private Map<String, Object> turnContextPayload(ChatTurnContext context) {
+        LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+        payload.put("sessionId", safe(context.session().getId()));
+        payload.put("intentRoute", context.intentRoute().name());
+        payload.put("ragNeeded", context.ragNeeded());
+        payload.put("reasoningLevel", context.turnPlan().reasoningLevel().name());
+        payload.put("mediaCount", context.preparedMedia().size());
+        return payload;
+    }
+
+    private Map<String, Object> turnRagPayload(ChatTurnContext context, ChatRagContext ragContext) {
+        LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+        payload.put("sessionId", safe(context.session().getId()));
+        payload.put("ragUsed", ragContext.ragUsed());
+        payload.put("ragRoute", ragContext.ragRoute().name());
+        payload.put("missingEvidence", ragContext.missingEvidence());
+        payload.put("sourceCount", ragContext.sources().size());
+        payload.put("contextTokens", ragContext.retrievalStats().contextTokens());
+        return payload;
+    }
+
+    private Map<String, Object> turnDonePayload(ChatResponse response) {
+        LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+        payload.put("sessionId", response == null ? "" : safe(response.getSessionId()));
+        payload.put("ragUsed", response != null && response.isRagUsed());
+        payload.put("ragNeeded", response != null && response.isRagNeeded());
+        payload.put("safe", response != null && response.isSafe());
+        payload.put("groundedSources", response == null ? 0 : response.getGroundedSources());
+        payload.put("confidence", response == null ? 0.0 : response.getConfidence());
+        payload.put("reasoningLevel", response == null ? "" : safe(response.getReasoningLevel()));
+        payload.put("replyPreview", response == null ? "" : auditTrailService.preview(response.getReply()));
+        return payload;
+    }
+
+    private Map<String, Object> turnFailedPayload(String stage,
+                                                  String maybeSessionId,
+                                                  String externalUserId,
+                                                  String requestedModel,
+                                                  int mediaCount,
+                                                  String userText,
+                                                  RuntimeException ex) {
+        LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+        payload.put("stage", safe(stage));
+        payload.put("requestedSessionId", safe(maybeSessionId));
+        payload.put("externalUserId", safe(externalUserId));
+        payload.put("requestedModel", safe(requestedModel));
+        payload.put("mediaCount", mediaCount);
+        payload.put("messagePreview", auditTrailService.preview(userText));
+        payload.put("errorType", ex == null ? "" : ex.getClass().getSimpleName());
+        payload.put("errorMessage", ex == null ? "" : safe(ex.getMessage()));
+        return payload;
     }
 }
 

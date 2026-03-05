@@ -235,6 +235,21 @@ class ChatApiControllerTest {
                 .andExpect(header().string("Content-Type", "image/png"))
                 .andExpect(content().bytes(new byte[]{1, 2, 3, 4}));
     }
+
+    @Test
+    void generatedImageEndpointSupportsDownloadHeader() throws Exception {
+        when(chatService.loadGeneratedImage(eq("user"), eq("sid-1"), eq("img-1.png")))
+                .thenReturn(new com.example.apiasistente.chat.service.flow.ChatGeneratedImageStoreService.StoredImage(
+                        "image/png",
+                        new byte[]{1, 2, 3, 4}
+                ));
+
+        mockMvc.perform(get("/api/chat/sessions/sid-1/images/img-1.png?download=true").principal(() -> "user"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type", "image/png"))
+                .andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.containsString("attachment")))
+                .andExpect(content().bytes(new byte[]{1, 2, 3, 4}));
+    }
 }
 
 

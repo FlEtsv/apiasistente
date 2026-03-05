@@ -8,6 +8,9 @@ import com.example.apiasistente.chat.entity.ChatSession;
 import com.example.apiasistente.prompt.entity.SystemPrompt;
 import com.example.apiasistente.prompt.service.SystemPromptService;
 import com.example.apiasistente.auth.repository.AppUserRepository;
+import com.example.apiasistente.chat.config.ChatProcessRouterProperties;
+import com.example.apiasistente.chat.dto.ChatMediaInput;
+import com.example.apiasistente.chat.config.ChatAuditProperties;
 import com.example.apiasistente.chat.repository.ChatMessageRepository;
 import com.example.apiasistente.chat.repository.ChatMessageSourceRepository;
 import com.example.apiasistente.chat.repository.ChatSessionRepository;
@@ -102,6 +105,12 @@ class ChatServiceTest {
         props.setResponseGuardModel("");
 
         ChatModelSelector modelSelector = new ChatModelSelector(props);
+        ChatProcessRouterProperties processRouterProperties = new ChatProcessRouterProperties();
+        processRouterProperties.setLlmAssessmentEnabled(false);
+        ChatProcessRouter processRouter = new ChatProcessRouter(modelSelector, ollama, processRouterProperties);
+        ChatAuditProperties auditProperties = new ChatAuditProperties();
+        auditProperties.setEnabled(false);
+        ChatAuditTrailService auditTrailService = new ChatAuditTrailService(auditProperties);
         ChatSessionService sessionService = new ChatSessionService(sessionRepo, promptService, userRepo);
         ChatHistoryService historyService = new ChatHistoryService(messageRepo, sourceRepo, sessionService);
         ChatPromptBuilder promptBuilder = new ChatPromptBuilder(modelSelector);
@@ -140,12 +149,15 @@ class ChatServiceTest {
                 sourceSnapshotService,
                 sessionService,
                 decisionEngine,
-                ragTelemetryService
+                ragTelemetryService,
+                auditTrailService
         );
 
         service = new ChatService(
                 turnService,
                 imageGenerationService,
+                processRouter,
+                auditTrailService,
                 sessionService,
                 historyService,
                 ragTelemetryService
@@ -323,14 +335,108 @@ class ChatServiceTest {
     @Test
     void routesImageAliasToImageGenerationService() {
         ChatResponse imageResponse = new ChatResponse("sid-img", "Imagen lista", List.of());
-        when(imageGenerationService.generate("user", null, "gato astronauta", "image", null))
+        when(imageGenerationService.generate("user", null, "gato astronauta", "image", null, List.of()))
                 .thenReturn(imageResponse);
 
         ChatResponse response = service.chat("user", null, "gato astronauta", "image");
 
         assertEquals("sid-img", response.getSessionId());
         assertEquals("Imagen lista", response.getReply());
-        verify(imageGenerationService).generate("user", null, "gato astronauta", "image", null);
+        verify(imageGenerationService).generate("user", null, "gato astronauta", "image", null, List.of());
+    }
+
+    @Test
+    void routesAutoImagePromptToImageGenerationService() {
+        ChatResponse imageResponse = new ChatResponse("sid-img", "Imagen auto", List.of());
+        when(imageGenerationService.generate(
+                "user",
+                null,
+                "Genera una imagen de un gato astronauta en marte",
+                "image",
+                null,
+                List.of()
+        )).thenReturn(imageResponse);
+
+        ChatResponse response = service.chat(
+                "user",
+                null,
+                "Genera una imagen de un gato astronauta en marte",
+                "auto"
+        );
+
+        assertEquals("sid-img", response.getSessionId());
+        assertEquals("Imagen auto", response.getReply());
+        verify(imageGenerationService).generate(
+                "user",
+                null,
+                "Genera una imagen de un gato astronauta en marte",
+                "image",
+                null,
+                List.of()
+        );
+    }
+
+    @Test
+    void routesCheckpointModelToImageGenerationService() {
+        ChatResponse imageResponse = new ChatResponse("sid-img", "Imagen HQ lista", List.of());
+        when(imageGenerationService.generate(
+                "user",
+                null,
+                "retrato cinematografico",
+                "flux1-dev-fp8.safetensors",
+                null,
+                List.of()
+        )).thenReturn(imageResponse);
+
+        ChatResponse response = service.chat("user", null, "retrato cinematografico", "flux1-dev-fp8.safetensors");
+
+        assertEquals("sid-img", response.getSessionId());
+        assertEquals("Imagen HQ lista", response.getReply());
+        verify(imageGenerationService).generate(
+                "user",
+                null,
+                "retrato cinematografico",
+                "flux1-dev-fp8.safetensors",
+                null,
+                List.of()
+        );
+    }
+
+    @Test
+    void routesImageToImageWhenAutoAndCameraPhotoIsUsedForTransformation() {
+        ChatMediaInput cameraPhoto = new ChatMediaInput();
+        cameraPhoto.setName("camera.jpg");
+        cameraPhoto.setMimeType("image/jpeg");
+        cameraPhoto.setBase64("ZmFrZS1pbWFnZS1iYXNlNjQ=");
+
+        ChatResponse imageResponse = new ChatResponse("sid-img", "Imagen transformada", List.of());
+        when(imageGenerationService.generate(
+                "user",
+                null,
+                "Crea otra version basada en esta imagen",
+                "image",
+                null,
+                List.of(cameraPhoto)
+        )).thenReturn(imageResponse);
+
+        ChatResponse response = service.chat(
+                "user",
+                null,
+                "Crea otra version basada en esta imagen",
+                "auto",
+                List.of(cameraPhoto)
+        );
+
+        assertEquals("sid-img", response.getSessionId());
+        assertEquals("Imagen transformada", response.getReply());
+        verify(imageGenerationService).generate(
+                "user",
+                null,
+                "Crea otra version basada en esta imagen",
+                "image",
+                null,
+                List.of(cameraPhoto)
+        );
     }
 }
 

@@ -833,6 +833,42 @@
             box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
         }
 
+        .inline-media {
+            margin-top: 10px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .inline-media-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            max-width: 100%;
+            padding: 6px 8px;
+            border-radius: 10px;
+            border: 1px solid rgba(191, 219, 254, 0.28);
+            background: rgba(15, 23, 42, 0.28);
+        }
+
+        .inline-media-thumb {
+            width: 54px;
+            height: 54px;
+            object-fit: cover;
+            border-radius: 8px;
+            border: 1px solid rgba(191, 219, 254, 0.32);
+            flex: 0 0 auto;
+        }
+
+        .inline-media-name {
+            font-size: 11px;
+            color: #dbeafe;
+            max-width: 220px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
         .msg-markdown code {
             font-family: 'IBM Plex Mono', monospace;
             font-size: 0.86em;
@@ -1100,18 +1136,19 @@
                                 <option value="fast">Rapido (gemma2:9b)</option>
                                 <option value="chat">Complejo/RAG (llama3.1:8b)</option>
                                 <option value="visual">Vision (qwen2.5vl:7b)</option>
-                                <option value="image">Generar imagen (flux)</option>
+                                <option value="image">Generar imagen (flux schnell)</option>
+                                <option value="flux1-dev-fp8.safetensors">Generar imagen PRO 3090 (flux dev)</option>
                             </select>
                             <button id="send" type="button">Enviar</button>
                         </div>
                     </div>
                     <div class="composer-tools">
                         <input id="mediaInput" type="file" accept="image/*,.txt,.md,.json,.csv,.pdf" multiple class="hidden" />
-                        <input id="cameraInput" type="file" accept="image/*" capture="environment" class="hidden" />
+                        <input id="cameraInput" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" class="hidden" />
                         <button id="attachBtn" type="button" class="btn">Adjuntar archivo</button>
                         <button id="cameraBtn" type="button" class="btn">Usar camara</button>
                         <button id="clearMediaBtn" type="button" class="btn">Limpiar adjuntos</button>
-                        <span class="media-hint">Puedes enviar imagen, camara o documento y ver su preview antes de enviar.</span>
+                        <span class="media-hint">Puedes enviar imagen, camara o documento. En modo imagen, si adjuntas una foto se usa como referencia (img2img). Recomendado: JPG/PNG.</span>
                     </div>
                     <div id="mediaPreview" class="media-preview"></div>
                 </div>
@@ -1485,7 +1522,7 @@
 <!-- IMPORTANTE: cache-busting para que NO uses un chat.js viejo -->
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-<script src="/chat.js?v=9"></script>
+<script src="/chat.js?v=12"></script>
 <script src="/api-keys.js?v=2"></script>
 <script src="/rag-maintenance.js?v=2"></script>
 <script src="/rag-ops.js?v=1"></script>

@@ -117,6 +117,8 @@ public class ChatMediaService {
         if (images.isEmpty()) {
             return "";
         }
+        long documentCount = media.stream().filter(item -> hasText(item.documentText())).count();
+        String visualModel = "";
 
         StringBuilder prompt = new StringBuilder();
         prompt.append("Analiza el material visual/documental y extrae hechos verificables.\n");
@@ -141,7 +143,15 @@ public class ChatMediaService {
         prompt.append("Pregunta del usuario: ").append(userText);
 
         try {
-            String visualModel = modelSelector.resolveVisualModel(requestedModel);
+            visualModel = modelSelector.resolveVisualModel(requestedModel);
+            log.info(
+                    "visual_bridge_start model={} requestedModel={} imageCount={} documentCount={} promptPreview={}",
+                    visualModel,
+                    requestedModel == null ? "" : requestedModel,
+                    images.size(),
+                    documentCount,
+                    preview(userText)
+            );
             // El puente visual no responde al usuario: solo resume hechos reutilizables por el turno final.
             String bridge = ollama.chat(
                     List.of(new OllamaClient.Message("user", prompt.toString(), images)),
@@ -155,9 +165,22 @@ public class ChatMediaService {
             if (clean.length() > MAX_VISUAL_CONTEXT_CHARS) {
                 clean = clean.substring(0, MAX_VISUAL_CONTEXT_CHARS);
             }
+            log.info(
+                    "visual_bridge_done model={} imageCount={} documentCount={} bridgeChars={}",
+                    visualModel,
+                    images.size(),
+                    documentCount,
+                    clean.length()
+            );
             return clean;
         } catch (Exception ex) {
-            log.warn("No se pudo completar analisis visual intermedio: {}", ex.getMessage());
+            log.warn(
+                    "visual_bridge_failed model={} imageCount={} documentCount={} cause={}",
+                    hasText(visualModel) ? visualModel : "unresolved",
+                    images.size(),
+                    documentCount,
+                    ex.getMessage()
+            );
             return "";
         }
     }
@@ -290,6 +313,17 @@ public class ChatMediaService {
      */
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private String preview(String value) {
+        if (!hasText(value)) {
+            return "";
+        }
+        String clean = value.replaceAll("\\s+", " ").trim();
+        if (clean.length() <= 120) {
+            return clean;
+        }
+        return clean.substring(0, 120).trim() + "...";
     }
 
     /**
