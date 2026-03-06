@@ -90,6 +90,23 @@ class ChatProcessRouterTest {
     }
 
     @Test
+    void routesImperativeImageEditPromptToImageGeneration() {
+        ChatMediaInput cameraPhoto = imageInput();
+
+        ChatProcessRouter.ProcessDecision decision = router.decide(
+                "haz mejor la cara y añade otra patita",
+                "auto",
+                List.of(cameraPhoto)
+        );
+
+        assertEquals(ChatProcessRouter.ProcessRoute.IMAGE_GENERATE, decision.route());
+        assertEquals("hard-rule", decision.source());
+        assertEquals(ChatProcessRouter.PipelineHint.IMAGE_IMG2IMG, decision.pipeline());
+        assertEquals(ChatModelSelector.IMAGE_ALIAS, decision.recommendedModelAlias());
+        assertEquals("image", decision.expectedOutput());
+    }
+
+    @Test
     void routesImageTableExtractionIntentToImageExtractFlow() {
         ChatMediaInput cameraPhoto = imageInput();
 

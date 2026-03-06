@@ -47,7 +47,7 @@ public class ChatProcessRouter {
     );
 
     private static final Pattern IMAGE_EDIT_HINTS = Pattern.compile(
-            "\\b(basad[oa]\\s+en|a\\s+partir\\s+de|con\\s+esta\\s+imagen|usa(?:ndo)?\\s+esta\\s+imagen|transforma(?:r)?|edita(?:r)?|retoca(?:r)?|mejora(?:r)?|convierte(?:r)?|cambia(?:r)?|version|variacion|estilo|style|stylize|inpaint|outpaint)\\b",
+            "\\b(basad[oa]\\s+en|a\\s+partir\\s+de|con\\s+esta\\s+imagen|usa(?:ndo)?\\s+esta\\s+imagen|transforma(?:r)?|edita(?:r)?|retoca(?:r)?|mejora(?:r)?|mejor\\w*|convierte(?:r)?|cambia(?:r)?|modifica(?:r)?|corrige(?:r)?|arregla(?:r)?|anade(?:r)?|añade(?:r)?|agrega(?:r)?|quita(?:r)?|elimina(?:r)?|version|variacion|estilo|style|stylize|inpaint|outpaint)\\b",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
     );
 
@@ -93,6 +93,11 @@ public class ChatProcessRouter {
 
     private static final Pattern PROMPT_STYLE_HINTS = Pattern.compile(
             "\\b(4k|8k|ultra\\s*detailed|photorealistic|cinematic|bokeh|dramatic\\s+lighting|high\\s+detail|masterpiece)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
+    );
+
+    private static final Pattern IMAGE_IMPERATIVE_HINTS = Pattern.compile(
+            "\\b(mejor\\w*|anade(?:r)?|añade(?:r)?|agrega(?:r)?|quita(?:r)?|elimina(?:r)?|cambia(?:r)?|modifica(?:r)?|retoca(?:r)?|corrige(?:r)?|arregla(?:r)?|mas\\s+realista|más\\s+realista|otra\\s+pata|otra\\s+patita)\\b",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
     );
 
@@ -687,9 +692,10 @@ public class ChatProcessRouter {
         boolean mixedHint = MIXED_HINTS.matcher(text).find();
         boolean tableHint = TABLE_HINTS.matcher(text).find();
         boolean jsonHint = JSON_HINTS.matcher(text).find();
+        boolean hasImperativeImageHint = IMAGE_IMPERATIVE_HINTS.matcher(text).find();
 
-        boolean imageGenerateIntent = ((hasActionHint || hasEditHint)
-                && (hasSubjectHint || hasEditHint || promptStyle || mediaFlags.hasImageMedia()))
+        boolean imageGenerateIntent = ((hasActionHint || hasEditHint || (mediaFlags.hasImageMedia() && hasImperativeImageHint))
+                && (hasSubjectHint || hasEditHint || promptStyle || hasImperativeImageHint || mediaFlags.hasImageMedia()))
                 || (!mediaFlags.hasImageMedia() && hasSubjectHint && promptStyle && !questionLike && !technicalDebug);
 
         ChatPromptSignals.RagDecision ragDecision = ChatPromptSignals.ragDecision(normalizedPrompt, mediaFlags.hasDocumentMedia());
