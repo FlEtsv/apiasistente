@@ -61,7 +61,7 @@ class ChatImageGeneratorClientTest {
             JsonNode request = mapper.readTree(capturedBody.get());
             assertNotNull(request.path("id").asText());
             assertFalse(request.path("id").asText().isBlank());
-            assertEquals("flux1-schnell-fp8.safetensors",
+            assertEquals("dreamshaper8.safetensors",
                     request.path("prompt").path("30").path("inputs").path("ckpt_name").asText());
             assertEquals("gato astronauta",
                     request.path("prompt").path("6").path("inputs").path("text").asText());
@@ -146,11 +146,11 @@ class ChatImageGeneratorClientTest {
             ChatImageGenerationProperties properties = baseProperties(server);
             properties.setImg2imgDenoise(0.8);
             ChatImageGeneratorClient client = new ChatImageGeneratorClient(properties);
-            client.generate("hazlo estilo anime", "flux1-dev-fp8.safetensors", "data:image/png;base64," + ONE_PIXEL_PNG_BASE64);
+            client.generate("hazlo estilo anime", "dreamshaper8-xl.safetensors", "data:image/png;base64," + ONE_PIXEL_PNG_BASE64);
 
             JsonNode request = mapper.readTree(capturedBody.get());
             JsonNode prompt = request.path("prompt");
-            assertEquals("flux1-dev-fp8.safetensors", prompt.path("30").path("inputs").path("ckpt_name").asText());
+            assertEquals("dreamshaper8-xl.safetensors", prompt.path("30").path("inputs").path("ckpt_name").asText());
             assertEquals(ONE_PIXEL_PNG_BASE64, prompt.path("37").path("inputs").path("image").asText());
             assertEquals("image", prompt.path("37").path("inputs").path("upload").asText());
             assertTrue(prompt.path("40").isMissingNode() || prompt.path("40").isNull());
@@ -198,28 +198,28 @@ class ChatImageGeneratorClientTest {
 
         try {
             ChatImageGenerationProperties properties = baseProperties(server);
-            properties.setCheckpoint("flux1-schnell-fp8.safetensors");
+            properties.setCheckpoint("dreamshaper8.safetensors");
             ChatImageGeneratorClient client = new ChatImageGeneratorClient(properties);
 
             ChatImageGeneratorClient.GeneratedImage image = client.generate(
                     "retrato editorial",
-                    "flux1-dev-fp8.safetensors",
+                    "dreamshaper8-xl.safetensors",
                     null
             );
 
             assertEquals(2, calls.get());
             assertTrue(image.fallbackApplied());
-            assertEquals("flux1-dev-fp8.safetensors", image.requestedCheckpoint());
-            assertEquals("flux1-schnell-fp8.safetensors", image.checkpoint());
+            assertEquals("dreamshaper8-xl.safetensors", image.requestedCheckpoint());
+            assertEquals("dreamshaper8.safetensors", image.checkpoint());
 
             JsonNode firstReq = mapper.readTree(firstBody.get());
             JsonNode secondReq = mapper.readTree(secondBody.get());
             assertEquals(
-                    "flux1-dev-fp8.safetensors",
+                    "dreamshaper8-xl.safetensors",
                     firstReq.path("prompt").path("30").path("inputs").path("ckpt_name").asText()
             );
             assertEquals(
-                    "flux1-schnell-fp8.safetensors",
+                    "dreamshaper8.safetensors",
                     secondReq.path("prompt").path("30").path("inputs").path("ckpt_name").asText()
             );
         } finally {
@@ -232,7 +232,7 @@ class ChatImageGeneratorClientTest {
         properties.setBaseUrl("http://127.0.0.1:" + server.getAddress().getPort());
         properties.setPromptPath("/prompt");
         properties.setTimeoutMs(10_000);
-        properties.setCheckpoint("flux1-schnell-fp8.safetensors");
+        properties.setCheckpoint("dreamshaper8.safetensors");
         return properties;
     }
 

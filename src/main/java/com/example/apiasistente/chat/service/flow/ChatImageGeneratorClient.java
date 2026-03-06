@@ -158,7 +158,7 @@ public class ChatImageGeneratorClient {
                                                   String referenceImageDataUri) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("id", requestId);
-        body.put("prompt", buildFluxPrompt(prompt, checkpoint, referenceImageDataUri));
+        body.put("prompt", buildPromptGraph(prompt, checkpoint, referenceImageDataUri));
 
         String convertFormat = normalize(properties.getConvertFormat());
         if (convertFormat != null) {
@@ -172,7 +172,7 @@ public class ChatImageGeneratorClient {
         return body;
     }
 
-    private Map<String, Object> buildFluxPrompt(String prompt, String checkpoint, String referenceImageDataUri) {
+    private Map<String, Object> buildPromptGraph(String prompt, String checkpoint, String referenceImageDataUri) {
         String referenceInput = normalizeReferenceImageInput(referenceImageDataUri);
         boolean img2img = hasText(referenceInput);
         long seed = resolveSeed(properties.getSeed());
@@ -181,11 +181,12 @@ public class ChatImageGeneratorClient {
         int steps = clampInt(properties.getSteps(), 1, 100);
         double cfgScale = clampDouble(properties.getCfgScale(), 0.0d, 20.0d, 1.0d);
         double denoise = img2img
-                ? clampDouble(properties.getImg2imgDenoise(), 0.0d, 1.0d, 0.8d)
+                ? clampDouble(properties.getImg2imgDenoise(), 0.0d, 1.0d, 0.75d)
                 : clampDouble(properties.getDenoise(), 0.0d, 1.0d, 1.0d);
         String samplerName = firstNonBlank(properties.getSamplerName(), "euler");
         String scheduler = firstNonBlank(properties.getScheduler(), "simple");
         String negativePrompt = properties.getNegativePrompt() == null ? "" : properties.getNegativePrompt().trim();
+        String latentClassType = usesSd3LatentNode(checkpoint) ? "EmptySD3LatentImage" : "EmptyLatentImage";
 
         Map<String, Object> promptGraph = new LinkedHashMap<>();
         promptGraph.put("6", node(
@@ -205,7 +206,7 @@ public class ChatImageGeneratorClient {
         promptGraph.put("9", node(
                 "SaveImage",
                 Map.of(
-                        "filename_prefix", "Flux",
+                        "filename_prefix", "ChatImage",
                         "images", List.of("8", 0)
                 )
         ));
@@ -231,7 +232,7 @@ public class ChatImageGeneratorClient {
             ));
         } else {
             promptGraph.put("27", node(
-                    "EmptySD3LatentImage",
+                    latentClassType,
                     Map.of(
                             "width", width,
                             "height", height,
@@ -261,6 +262,15 @@ public class ChatImageGeneratorClient {
                 )
         ));
         return promptGraph;
+    }
+
+    private boolean usesSd3LatentNode(String checkpoint) {
+        String ckpt = normalize(checkpoint);
+        if (ckpt == null) {
+            return false;
+        }
+        String lower = ckpt.toLowerCase(Locale.ROOT);
+        return lower.contains("flux") || lower.contains("sd3");
     }
 
     private Map<String, Object> node(String classType, Map<String, Object> inputs) {

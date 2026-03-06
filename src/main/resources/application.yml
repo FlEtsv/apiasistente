@@ -40,8 +40,8 @@ ollama:
   fast-chat-model: qwen2.5:7b
   # Modelo visual para etapa intermedia de imagen/camara/documento.
   visual-model: qwen2.5vl:7b
-  # Modelo dedicado para generación de imágenes desde el chat.
-  image-model: ${OLLAMA_IMAGE_MODEL:flux}
+  # Alias de modelo para generación de imágenes desde el chat (ComfyUI checkpoint resolver).
+  image-model: ${OLLAMA_IMAGE_MODEL:dreamshaper8}
   # Mini-modelo opcional para depurar respuestas y quitar relleno.
   response-guard-model: ${OLLAMA_RESPONSE_GUARD_MODEL:mistral:7b}
   # Modelo para embeddings de RAG.
@@ -174,15 +174,15 @@ chat:
     timeout-ms: 120000
     # Limite de caracteres de prompt.
     max-prompt-chars: 600
-    # Checkpoint FLUX cargado por el workflow.
-    checkpoint: ${CHAT_IMAGE_CHECKPOINT:flux1-schnell-fp8.safetensors}
-    # Parámetros de muestreo para FLUX.
-    steps: 4
-    cfg-scale: 1.0
-    sampler-name: euler
-    scheduler: simple
+    # Checkpoint por defecto para DreamShaper8 en ComfyUI.
+    checkpoint: ${CHAT_IMAGE_CHECKPOINT:dreamshaper8.safetensors}
+    # Parámetros recomendados para DreamShaper8 (RTX 3090).
+    steps: 28
+    cfg-scale: 7.0
+    sampler-name: dpmpp_2m_sde
+    scheduler: karras
     denoise: 1.0
-    img2img-denoise: 0.8
+    img2img-denoise: 0.75
     # Seed fija (>=0) o aleatoria (-1).
     seed: -1
     # Prompt negativo opcional para el nodo negativo.

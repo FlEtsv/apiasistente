@@ -19,7 +19,7 @@ class ChatModelSelectorTest {
         props.setChatModel("qwen2.5:32b");
         props.setFastChatModel("qwen3.0:14b");
         props.setVisualModel("qwen-vl:latest");
-        props.setImageModel("flux");
+        props.setImageModel("dreamshaper8");
         props.setResponseGuardModel("qwen2.5:3b");
 
         ChatModelSelector selector = new ChatModelSelector(props);
@@ -50,7 +50,7 @@ class ChatModelSelectorTest {
         props.setChatModel("qwen2.5:32b");
         props.setFastChatModel("qwen3.0:14b");
         props.setVisualModel("qwen-vl:latest");
-        props.setImageModel("flux");
+        props.setImageModel("dreamshaper8");
         props.setResponseGuardModel("qwen2.5:3b");
 
         ChatModelSelector selector = new ChatModelSelector(props);
@@ -63,8 +63,8 @@ class ChatModelSelectorTest {
         assertEquals("qwen2.5:32b", selector.resolveChatModel("qwen2.5:32b"));
         assertEquals("qwen-vl:latest", selector.resolveVisualModel("visual"));
         assertEquals("qwen-vl:latest", selector.resolveVisualModel("default"));
-        assertEquals("flux", selector.resolveImageModel("image"));
-        assertEquals("flux", selector.resolveImageModel("default"));
+        assertEquals("dreamshaper8", selector.resolveImageModel("image"));
+        assertEquals("dreamshaper8", selector.resolveImageModel("default"));
         assertEquals("flux1-dev-fp8.safetensors", selector.resolveImageModel("flux1-dev-fp8.safetensors"));
         assertEquals("qwen2.5:3b", selector.resolveResponseGuardModel());
         assertEquals("qwen2.5:32b", selector.resolvePrimaryChatModel());
