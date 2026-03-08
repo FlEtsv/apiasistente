@@ -4,6 +4,7 @@ import com.example.apiasistente.rag.dto.MemoryRequest;
 import com.example.apiasistente.rag.dto.RagContextStatsDto;
 import com.example.apiasistente.rag.dto.UpsertDocumentRequest;
 import com.example.apiasistente.rag.dto.UpsertDocumentResponse;
+import com.example.apiasistente.rag.service.RagIngestionService;
 import com.example.apiasistente.rag.service.RagService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -25,37 +26,51 @@ import java.security.Principal;
 public class RagApiController {
 
     private final RagService ragService;
+    private final RagIngestionService ragIngestionService;
 
-    public RagApiController(RagService ragService) {
+    public RagApiController(RagService ragService, RagIngestionService ragIngestionService) {
         this.ragService = ragService;
+        this.ragIngestionService = ragIngestionService;
     }
 
+    /**
+     * Inserta o actualiza documento global.
+     */
     @PostMapping("/documents")
     public UpsertDocumentResponse upsert(@Valid @RequestBody UpsertDocumentRequest req) {
-        var doc = upsertWithOptionalMetadata(RagService.GLOBAL_OWNER, req);
+        var doc = ragIngestionService.upsert(RagService.GLOBAL_OWNER, req);
         return new UpsertDocumentResponse(doc.getId(), doc.getTitle());
     }
 
+    /**
+     * Inserta o actualiza lote de documentos globales.
+     */
     @PostMapping("/documents/batch")
     public List<UpsertDocumentResponse> upsertBatch(@Valid @RequestBody List<UpsertDocumentRequest> reqs) {
         return reqs.stream()
                 .map(r -> {
-                    var doc = upsertWithOptionalMetadata(RagService.GLOBAL_OWNER, r);
+                    var doc = ragIngestionService.upsert(RagService.GLOBAL_OWNER, r);
                     return new UpsertDocumentResponse(doc.getId(), doc.getTitle());
                 })
                 .toList();
     }
 
+    /**
+     * Inserta/actualiza documento privado para un usuario autenticado.
+     */
     @PostMapping("/users/{username}/documents")
     public UpsertDocumentResponse upsertForUser(@PathVariable String username,
                                                 @Valid @RequestBody UpsertDocumentRequest req,
                                                 Principal principal) {
         String target = normalizePathUser(username);
         enforceSameUser(principal, target);
-        var doc = upsertWithOptionalMetadata(target, req);
+        var doc = ragIngestionService.upsert(target, req);
         return new UpsertDocumentResponse(doc.getId(), doc.getTitle());
     }
 
+    /**
+     * Inserta/actualiza lote de documentos privados para usuario autenticado.
+     */
     @PostMapping("/users/{username}/documents/batch")
     public List<UpsertDocumentResponse> upsertBatchForUser(@PathVariable String username,
                                                            @Valid @RequestBody List<UpsertDocumentRequest> reqs,
@@ -64,73 +79,28 @@ public class RagApiController {
         enforceSameUser(principal, target);
         return reqs.stream()
                 .map(r -> {
-                    var doc = upsertWithOptionalMetadata(target, r);
+                    var doc = ragIngestionService.upsert(target, r);
                     return new UpsertDocumentResponse(doc.getId(), doc.getTitle());
                 })
                 .toList();
     }
 
+    /**
+     * Devuelve estadisticas de corpus visible para el usuario autenticado.
+     */
     @GetMapping("/stats")
     public RagContextStatsDto stats(Principal principal) {
         String owner = (principal != null && principal.getName() != null) ? principal.getName() : RagService.GLOBAL_OWNER;
         return ragService.contextStatsForOwnerOrGlobal(owner);
     }
 
+    /**
+     * Persiste memoria de usuario.
+     */
     @PostMapping("/memory")
     public UpsertDocumentResponse storeMemory(@Valid @RequestBody MemoryRequest req, Principal principal) {
-        var doc = storeMemoryWithOptionalMetadata(principal.getName(), req);
+        var doc = ragIngestionService.storeMemory(principal.getName(), req);
         return new UpsertDocumentResponse(doc.getId(), doc.getTitle());
-    }
-
-    private com.example.apiasistente.rag.entity.KnowledgeDocument upsertWithOptionalMetadata(String owner,
-                                                                                              UpsertDocumentRequest req) {
-        // Si el cliente sigue hablando el contrato viejo, mantenemos el camino simple.
-        if (!req.hasExplicitChunks()
-                && (req.getSource() == null || req.getSource().isBlank())
-                && (req.getTags() == null || req.getTags().isBlank())
-                && (req.getUrl() == null || req.getUrl().isBlank())) {
-            return RagService.GLOBAL_OWNER.equals(owner)
-                    ? ragService.upsertDocument(req.getTitle(), req.getContent())
-                    : ragService.upsertDocumentForOwner(owner, req.getTitle(), req.getContent());
-        }
-        return ragService.upsertStructuredDocumentForOwner(
-                owner,
-                req.getTitle(),
-                req.getContent(),
-                req.getSource(),
-                req.getTags(),
-                req.getUrl(),
-                mapChunks(req)
-        );
-    }
-
-    private com.example.apiasistente.rag.entity.KnowledgeDocument storeMemoryWithOptionalMetadata(String owner,
-                                                                                                  MemoryRequest req) {
-        if ((req.getSource() == null || req.getSource().isBlank()) && (req.getTags() == null || req.getTags().isBlank())) {
-            return ragService.storeMemory(owner, req.getTitle(), req.getContent());
-        }
-        String source = req.getSource() == null || req.getSource().isBlank() ? "memory" : req.getSource();
-        return ragService.upsertDocumentForOwner(owner, req.getTitle(), req.getContent(), source, req.getTags());
-    }
-
-    /**
-     * Traduce el payload HTTP al formato interno del servicio sin mezclar DTOs web dentro del core.
-     */
-    private List<RagService.IncomingChunk> mapChunks(UpsertDocumentRequest req) {
-        if (req.getChunks() == null || req.getChunks().isEmpty()) {
-            return List.of();
-        }
-        return req.getChunks().stream()
-                .filter(chunk -> chunk != null)
-                .map(chunk -> new RagService.IncomingChunk(
-                        chunk.getChunkIndex(),
-                        chunk.getText(),
-                        chunk.getHash(),
-                        chunk.getTokenCount(),
-                        chunk.getSource(),
-                        chunk.getTags()
-                ))
-                .toList();
     }
 
     private void enforceSameUser(Principal principal, String targetUsername) {

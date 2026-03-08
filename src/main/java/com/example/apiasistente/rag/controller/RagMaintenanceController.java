@@ -33,36 +33,59 @@ public class RagMaintenanceController {
         this.ragMaintenanceService = ragMaintenanceService;
     }
 
+    /**
+     * Obtiene estado de scheduler y ultimo barrido de mantenimiento.
+     */
     @GetMapping("/status")
     public RagMaintenanceStatusDto status() {
         return ragMaintenanceService.status();
     }
 
+    /**
+     * Lista casos detectados por el robot de mantenimiento.
+     *
+     * @param includeResolved incluye casos ya resueltos si es true
+     */
     @GetMapping("/cases")
     public List<RagMaintenanceCaseDto> cases(@RequestParam(name = "includeResolved", defaultValue = "false") boolean includeResolved) {
         return ragMaintenanceService.listCases(includeResolved);
     }
 
+    /**
+     * Ejecuta barrido manual inmediato.
+     */
     @PostMapping("/run")
     public RagMaintenanceStatusDto runNow() {
         return ragMaintenanceService.runManualSweep();
     }
 
+    /**
+     * Pausa el scheduler de mantenimiento.
+     */
     @PostMapping("/pause")
     public RagMaintenanceStatusDto pause() {
         return ragMaintenanceService.pause();
     }
 
+    /**
+     * Reanuda el scheduler de mantenimiento.
+     */
     @PostMapping("/resume")
     public RagMaintenanceStatusDto resume() {
         return ragMaintenanceService.resume();
     }
 
+    /**
+     * Actualiza configuracion runtime del robot de mantenimiento.
+     */
     @PostMapping("/config")
     public RagMaintenanceStatusDto updateConfig(@RequestBody(required = false) RagMaintenanceConfigRequest request) {
         return ragMaintenanceService.updateConfig(request);
     }
 
+    /**
+     * Registra decision manual sobre un caso de mantenimiento.
+     */
     @PostMapping("/cases/{caseId}/decision")
     public RagMaintenanceCaseDto decide(@PathVariable Long caseId,
                                         @RequestBody RagMaintenanceCaseDecisionRequest request,

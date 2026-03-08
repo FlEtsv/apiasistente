@@ -2,6 +2,7 @@ package com.example.apiasistente.rag.controller;
 
 import com.example.apiasistente.rag.dto.RagContextStatsDto;
 import com.example.apiasistente.rag.entity.KnowledgeDocument;
+import com.example.apiasistente.rag.service.RagIngestionService;
 import com.example.apiasistente.rag.service.RagService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,7 +15,6 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.time.Instant;
 import java.util.List;
 
-import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -34,6 +34,9 @@ class RagApiControllerTest {
 
     @MockitoBean
     private RagService ragService;
+
+    @MockitoBean
+    private RagIngestionService ragIngestionService;
 
     @Test
     void statsReturnsAggregatedContext() throws Exception {
@@ -71,7 +74,7 @@ class RagApiControllerTest {
         KnowledgeDocument doc = new KnowledgeDocument();
         doc.setOwner("user-a");
         doc.setTitle("Doc privado");
-        when(ragService.upsertDocumentForOwner(eq("user-a"), eq("Doc privado"), eq("Contenido privado")))
+        when(ragIngestionService.upsert(eq("user-a"), org.mockito.ArgumentMatchers.any()))
                 .thenReturn(doc);
 
         mockMvc.perform(post("/api/rag/users/user-a/documents")
@@ -89,7 +92,7 @@ class RagApiControllerTest {
         KnowledgeDocument doc = new KnowledgeDocument();
         doc.setOwner(RagService.GLOBAL_OWNER);
         doc.setTitle("Doc global");
-        when(ragService.upsertDocument(eq("Doc global"), eq("Contenido global"))).thenReturn(doc);
+        when(ragIngestionService.upsert(eq(RagService.GLOBAL_OWNER), org.mockito.ArgumentMatchers.any())).thenReturn(doc);
 
         mockMvc.perform(post("/api/rag/documents")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -105,15 +108,7 @@ class RagApiControllerTest {
         KnowledgeDocument doc = new KnowledgeDocument();
         doc.setOwner(RagService.GLOBAL_OWNER);
         doc.setTitle("Doc scrapeado");
-        when(ragService.upsertStructuredDocumentForOwner(
-                eq(RagService.GLOBAL_OWNER),
-                eq("Doc scrapeado"),
-                eq("Contenido legacy opcional"),
-                eq("scraper"),
-                eq("web,faq"),
-                eq("https://acme.test/docs/faq"),
-                anyList()
-        )).thenReturn(doc);
+        when(ragIngestionService.upsert(eq(RagService.GLOBAL_OWNER), org.mockito.ArgumentMatchers.any())).thenReturn(doc);
 
         mockMvc.perform(post("/api/rag/documents")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -140,8 +135,8 @@ class RagApiControllerTest {
         first.setTitle("Doc 1");
         KnowledgeDocument second = new KnowledgeDocument();
         second.setTitle("Doc 2");
-        when(ragService.upsertDocument(eq("Doc 1"), eq("Contenido 1"))).thenReturn(first);
-        when(ragService.upsertDocument(eq("Doc 2"), eq("Contenido 2"))).thenReturn(second);
+        when(ragIngestionService.upsert(eq(RagService.GLOBAL_OWNER), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(first, second);
 
         mockMvc.perform(post("/api/rag/documents/batch")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -162,8 +157,8 @@ class RagApiControllerTest {
         first.setTitle("Doc 1");
         KnowledgeDocument second = new KnowledgeDocument();
         second.setTitle("Doc 2");
-        when(ragService.upsertDocumentForOwner(eq("user-a"), eq("Doc 1"), eq("Contenido 1"))).thenReturn(first);
-        when(ragService.upsertDocumentForOwner(eq("user-a"), eq("Doc 2"), eq("Contenido 2"))).thenReturn(second);
+        when(ragIngestionService.upsert(eq("user-a"), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(first, second);
 
         mockMvc.perform(post("/api/rag/users/user-a/documents/batch")
                         .principal(() -> "user-a")
@@ -183,7 +178,7 @@ class RagApiControllerTest {
     void memoryStoresDocumentForPrincipal() throws Exception {
         KnowledgeDocument doc = new KnowledgeDocument();
         doc.setTitle("Memoria");
-        when(ragService.storeMemory(eq("user-a"), eq("Memoria"), eq("Hecho importante"))).thenReturn(doc);
+        when(ragIngestionService.storeMemory(eq("user-a"), org.mockito.ArgumentMatchers.any())).thenReturn(doc);
 
         mockMvc.perform(post("/api/rag/memory")
                         .principal(() -> "user-a")

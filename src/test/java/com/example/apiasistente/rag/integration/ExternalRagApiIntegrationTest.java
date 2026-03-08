@@ -2,7 +2,7 @@ package com.example.apiasistente.rag.integration;
 
 import com.example.apiasistente.apikey.service.ApiKeyService;
 import com.example.apiasistente.rag.entity.KnowledgeDocument;
-import com.example.apiasistente.rag.service.RagService;
+import com.example.apiasistente.rag.service.RagIngestionService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -32,7 +32,7 @@ class ExternalRagApiIntegrationTest {
     private ApiKeyService apiKeyService;
 
     @MockitoBean
-    private RagService ragService;
+    private RagIngestionService ragIngestionService;
 
     @Test
     void ragPerExternalUserRejectsGenericApiKey() throws Exception {
@@ -54,11 +54,7 @@ class ExternalRagApiIntegrationTest {
         KnowledgeDocument doc = new KnowledgeDocument();
         doc.setOwner("key:99|user:cliente-9");
         doc.setTitle("Doc user");
-        when(ragService.upsertDocumentForOwner(
-                eq("key:99|user:cliente-9"),
-                eq("Doc user"),
-                eq("Contenido privado")
-        )).thenReturn(doc);
+        when(ragIngestionService.upsert(eq("key:99|user:cliente-9"), org.mockito.ArgumentMatchers.any())).thenReturn(doc);
 
         mockMvc.perform(post("/api/ext/rag/users/cliente-9/documents")
                         .header("X-API-KEY", "special-token")
@@ -69,11 +65,7 @@ class ExternalRagApiIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.title").value("Doc user"));
 
-        verify(ragService).upsertDocumentForOwner(
-                eq("key:99|user:cliente-9"),
-                eq("Doc user"),
-                eq("Contenido privado")
-        );
+        verify(ragIngestionService).upsert(eq("key:99|user:cliente-9"), org.mockito.ArgumentMatchers.any());
     }
 
     private void stubApiKey(String token, long keyId, boolean specialModeEnabled) {

@@ -1,6 +1,7 @@
 package com.example.apiasistente.rag.controller;
 
 import com.example.apiasistente.rag.entity.KnowledgeDocument;
+import com.example.apiasistente.rag.service.RagIngestionService;
 import com.example.apiasistente.rag.service.RagService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -10,7 +11,6 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -29,14 +29,14 @@ class ExternalRagControllerTest {
     private MockMvc mockMvc;
 
     @MockitoBean
-    private RagService ragService;
+    private RagIngestionService ragIngestionService;
 
     @Test
     void ragDocumentsEndpointStoresGlobalContext() throws Exception {
         KnowledgeDocument doc = new KnowledgeDocument();
         doc.setOwner(RagService.GLOBAL_OWNER);
         doc.setTitle("Doc global");
-        when(ragService.upsertDocument(eq("Doc global"), eq("Contenido global"))).thenReturn(doc);
+        when(ragIngestionService.upsert(eq(RagService.GLOBAL_OWNER), org.mockito.ArgumentMatchers.any())).thenReturn(doc);
 
         mockMvc.perform(post("/api/ext/rag/documents")
                         .principal(() -> "ext-user")
@@ -47,7 +47,7 @@ class ExternalRagControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.title").value("Doc global"));
 
-        verify(ragService).upsertDocument(eq("Doc global"), eq("Contenido global"));
+        verify(ragIngestionService).upsert(eq(RagService.GLOBAL_OWNER), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -66,11 +66,7 @@ class ExternalRagControllerTest {
         KnowledgeDocument doc = new KnowledgeDocument();
         doc.setOwner("key:99|user:cliente-42");
         doc.setTitle("Doc user");
-        when(ragService.upsertDocumentForOwner(
-                eq("key:99|user:cliente-42"),
-                eq("Doc user"),
-                eq("Contenido privado")
-        )).thenReturn(doc);
+        when(ragIngestionService.upsert(eq("key:99|user:cliente-42"), org.mockito.ArgumentMatchers.any())).thenReturn(doc);
 
         mockMvc.perform(post("/api/ext/rag/users/cliente-42/documents")
                         .principal(() -> "ext-user")
@@ -83,11 +79,7 @@ class ExternalRagControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.title").value("Doc user"));
 
-        verify(ragService).upsertDocumentForOwner(
-                eq("key:99|user:cliente-42"),
-                eq("Doc user"),
-                eq("Contenido privado")
-        );
+        verify(ragIngestionService).upsert(eq("key:99|user:cliente-42"), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
@@ -95,15 +87,7 @@ class ExternalRagControllerTest {
         KnowledgeDocument doc = new KnowledgeDocument();
         doc.setOwner(RagService.GLOBAL_OWNER);
         doc.setTitle("Doc scrapeado");
-        when(ragService.upsertStructuredDocumentForOwner(
-                eq(RagService.GLOBAL_OWNER),
-                eq("Doc scrapeado"),
-                eq("fallback opcional"),
-                eq("scraper"),
-                eq("web"),
-                eq("https://externo.test/page"),
-                anyList()
-        )).thenReturn(doc);
+        when(ragIngestionService.upsert(eq(RagService.GLOBAL_OWNER), org.mockito.ArgumentMatchers.any())).thenReturn(doc);
 
         mockMvc.perform(post("/api/ext/rag/documents")
                         .principal(() -> "ext-user")

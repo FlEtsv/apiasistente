@@ -24,6 +24,16 @@ Regla: controller no normaliza ni persiste directamente; service no parsea HTTP;
 
 Regla: las tres superficies de monitor consumen la misma fachada de lectura para garantizar consistencia.
 
+### Chat y RAG (orquestacion conversacional)
+- `ChatService`: fachada de alto nivel para controladores/cola.
+- `ChatTurnService`: orquestador transaccional de cada turno.
+- `ChatRagFlowService`: fase de retrieval y decision de grounding.
+- `RagService`: core de almacenamiento/retrieval vectorial.
+- `RagIngestionService`: adaptador de ingesta desde DTOs HTTP al core RAG.
+- `RagApiController` y `ExternalRagController`: reglas HTTP/autorizacion y delegacion.
+
+Regla: la logica de compatibilidad de payload de ingesta vive en `RagIngestionService`, no en controladores.
+
 ### Scripts instalables (Windows/macOS)
 - `check-prerequisites.*`: solo verifica prerequisitos.
 - `run-mysql-container.*`: solo gestiona infraestructura de MySQL.
@@ -59,4 +69,3 @@ Regla: cada script hace una sola fase; el orquestador decide el orden.
 - Lectura de monitor centralizada en una sola fachada.
 - Scripts particionados por fase de lifecycle (preflight/provision/orquestacion/empaquetado).
 - Endpoints y servicios con contratos documentados via Javadoc.
-

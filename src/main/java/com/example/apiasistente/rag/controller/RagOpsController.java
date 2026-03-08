@@ -25,21 +25,35 @@ public class RagOpsController {
         this.ragOpsService = ragOpsService;
     }
 
+    /**
+     * Devuelve estado operativo del pipeline RAG.
+     */
     @GetMapping("/status")
     public RagOpsStatusDto status() {
         return ragOpsService.status();
     }
 
+    /**
+     * Fuerza reconstruccion de indice vectorial.
+     */
     @PostMapping("/index/rebuild")
     public RagOpsStatusDto rebuildIndex() {
         return ragOpsService.rebuildIndex("manual-ui");
     }
 
+    /**
+     * Limpia buffer de eventos recientes de operaciones RAG.
+     */
     @PostMapping("/logs/clear")
     public RagOpsStatusDto clearLogs() {
         return ragOpsService.clearRecentEvents();
     }
 
+    /**
+     * Purga documentos antiguos para control de crecimiento del corpus.
+     *
+     * @param count numero de documentos a purgar
+     */
     @PostMapping("/documents/purge-oldest")
     public RagOpsStatusDto purgeOldestDocuments(@RequestParam(name = "count", defaultValue = "25") int count) {
         return ragOpsService.purgeOldestDocuments(count);
