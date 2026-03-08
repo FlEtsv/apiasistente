@@ -40,11 +40,17 @@ Layout principal:
 - `docs/installation-architecture.md`: flujo de preflight + provisioning antes de abrir la web.
 - Scripts:
   - `scripts/check-prerequisites.ps1`
+  - `scripts/check-prerequisites.sh`
   - `scripts/run-mysql-container.ps1`
+  - `scripts/run-mysql-container.sh`
   - `scripts/run-app-container.ps1`
+  - `scripts/run-app-container.sh`
   - `scripts/install-guided.ps1`
+  - `scripts/install-guided.sh`
+  - `scripts/install-guided.command`
   - `scripts/install-guided.cmd`
   - `scripts/package-distribution.ps1`
+  - `scripts/package-distribution.sh`
 
 ## Stack tecnologico
 - Java 21
@@ -94,7 +100,7 @@ docker compose up -d --build
 ./gradlew bootRun
 ```
 
-### Instalacion guiada por scripts (recomendada en Windows)
+### Instalacion guiada por scripts (Windows)
 ```powershell
 pwsh ./scripts/install-guided.ps1
 ```
@@ -116,9 +122,32 @@ Empaquetado para distribuir:
 ```powershell
 pwsh ./scripts/package-distribution.ps1
 ```
+
+### Instalacion guiada por scripts (macOS/Linux)
+```bash
+chmod +x ./scripts/*.sh ./scripts/*.command
+./scripts/install-guided.sh
+```
+
+Modo no interactivo:
+```bash
+./scripts/install-guided.sh --non-interactive --ollama-base-url "http://host.docker.internal:11434/api" --recreate-app-container
+```
+
+Scripts individuales:
+```bash
+./scripts/check-prerequisites.sh --ollama-base-url "http://localhost:11434/api"
+./scripts/run-mysql-container.sh --use-existing-container "mysql-prod" --skip-db-init
+./scripts/run-app-container.sh --recreate
+```
+
+Empaquetado para distribuir:
+```bash
+./scripts/package-distribution.sh
+```
 Genera `dist/apiasistente-installer.zip` con:
 - `app/apiasistente.jar`
-- instalador guiado (`scripts/install-guided.cmd`)
+- instalador guiado (`scripts/install-guided.cmd` y `scripts/install-guided.command`)
 - scripts de provisioning
 - docs de arquitectura de instalacion
 - no requiere Java instalado en cliente final (el JAR corre dentro de contenedor `eclipse-temurin:21-jre`)
