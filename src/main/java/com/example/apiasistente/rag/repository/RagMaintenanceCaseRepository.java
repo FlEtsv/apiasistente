@@ -2,7 +2,10 @@ package com.example.apiasistente.rag.repository;
 
 import com.example.apiasistente.rag.entity.RagMaintenanceCase;
 import com.example.apiasistente.rag.entity.RagMaintenanceCaseStatus;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
 import java.util.Collection;
@@ -30,4 +33,27 @@ public interface RagMaintenanceCaseRepository extends JpaRepository<RagMaintenan
     long countByStatus(RagMaintenanceCaseStatus status);
 
     long countByStatusIn(Collection<RagMaintenanceCaseStatus> statuses);
+
+    @Query("""
+            select count(c)
+            from RagMaintenanceCase c
+            where c.status = :status
+              and (c.adminDueAt is null or c.adminDueAt > :now)
+            """)
+    long countEligibleForBacklogAcceleration(@Param("status") RagMaintenanceCaseStatus status,
+                                             @Param("now") Instant now);
+
+    @Query("""
+            select c
+            from RagMaintenanceCase c
+            where c.status = :status
+              and (c.adminDueAt is null or c.adminDueAt > :now)
+            order by
+              case when c.adminDueAt is null then 0 else 1 end,
+              c.adminDueAt asc,
+              c.createdAt asc
+            """)
+    List<RagMaintenanceCase> findEligibleForBacklogAcceleration(@Param("status") RagMaintenanceCaseStatus status,
+                                                                @Param("now") Instant now,
+                                                                Pageable pageable);
 }

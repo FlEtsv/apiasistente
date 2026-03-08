@@ -1,0 +1,13 @@
+.git
+.github
+.idea
+.gradle
+build
+out
+node_modules
+data
+reusable-components
+scripts
+*.log
+*.tmp
+*.swp

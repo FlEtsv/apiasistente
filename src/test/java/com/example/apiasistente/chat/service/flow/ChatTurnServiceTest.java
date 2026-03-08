@@ -50,7 +50,7 @@ class ChatTurnServiceTest {
     private ChatSessionService sessionService;
 
     @Mock
-    private ChatRagDecisionEngine decisionEngine;
+    private ChatRagPostCheckFlowService postCheckFlowService;
 
     @Mock
     private ChatRagTelemetryService telemetryService;
@@ -69,7 +69,7 @@ class ChatTurnServiceTest {
                 historyService,
                 sourceSnapshotService,
                 sessionService,
-                decisionEngine,
+                postCheckFlowService,
                 telemetryService,
                 auditTrailService
         );
@@ -136,6 +136,13 @@ class ChatTurnServiceTest {
         when(contextFactory.create("user", null, "Que dice el log?", "auto", null, List.of())).thenReturn(context);
         when(ragFlowService.resolve(context)).thenReturn(ragContext);
         when(assistantService.answer(context, ragContext)).thenReturn(outcome);
+        when(postCheckFlowService.run(context, ragContext, outcome)).thenReturn(
+                new ChatRagPostCheckFlowService.PostCheckResult(
+                        ragContext,
+                        outcome,
+                        ChatRagDecisionEngine.AnswerVerification.skip("post-check-not-needed")
+                )
+        );
         when(historyService.saveAssistantMessage(session, "Respuesta final [S1]")).thenReturn(assistantMessage);
         when(sourceSnapshotService.toSnapshots(scored)).thenReturn(List.of(
                 new ChatSourceSnapshotService.SourceSnapshot(2L, 1L, "Manual", "snippet", 0.91)
@@ -236,10 +243,13 @@ class ChatTurnServiceTest {
         when(contextFactory.create("user", null, "Explica el error del endpoint", "auto", null, List.of())).thenReturn(context);
         when(ragFlowService.resolve(context)).thenReturn(directContext);
         when(assistantService.answer(context, directContext)).thenReturn(directOutcome);
-        when(decisionEngine.verifyDirectAnswer("Explica el error del endpoint", "Respuesta apresurada", turnPlan))
-                .thenReturn(new ChatRagDecisionEngine.AnswerVerification(true, 0.41, "respuesta-incompleta", true));
-        when(ragFlowService.resolveForced(context, "respuesta-incompleta")).thenReturn(retriedContext);
-        when(assistantService.answer(context, retriedContext)).thenReturn(retriedOutcome);
+        when(postCheckFlowService.run(context, directContext, directOutcome)).thenReturn(
+                new ChatRagPostCheckFlowService.PostCheckResult(
+                        retriedContext,
+                        retriedOutcome,
+                        new ChatRagDecisionEngine.AnswerVerification(true, 0.41, "respuesta-incompleta", true)
+                )
+        );
         when(historyService.saveAssistantMessage(session, "Respuesta con fuentes [S1]")).thenReturn(assistantMessage);
         when(sourceSnapshotService.toSnapshots(scored)).thenReturn(List.of(
                 new ChatSourceSnapshotService.SourceSnapshot(4L, 3L, "Runbook", "snippet", 0.93)
@@ -314,6 +324,13 @@ class ChatTurnServiceTest {
         when(contextFactory.create("user", null, "Que dice el documento?", "auto", null, List.of())).thenReturn(context);
         when(ragFlowService.resolve(context)).thenReturn(ragContext);
         when(assistantService.answer(context, ragContext)).thenReturn(outcome);
+        when(postCheckFlowService.run(context, ragContext, outcome)).thenReturn(
+                new ChatRagPostCheckFlowService.PostCheckResult(
+                        ragContext,
+                        outcome,
+                        ChatRagDecisionEngine.AnswerVerification.skip("post-check-not-needed")
+                )
+        );
         when(historyService.saveAssistantMessage(session, "Respuesta final [S1]")).thenReturn(assistantMessage);
         when(sourceSnapshotService.toSnapshots(scored)).thenReturn(List.of(
                 new ChatSourceSnapshotService.SourceSnapshot(2L, 1L, "Manual", "snippet", 0.91)

@@ -70,6 +70,7 @@ class IntegrationMonitoringControllerIntegrationTest {
                 new ServerStatsDto.ThreadInfo(20, 30, 10),
                 new ServerStatsDto.GcInfo(3, 200),
                 new ServerStatsDto.NetworkInfo(true, 50, "https://www.gstatic.com/generate_204"),
+                new ServerStatsDto.GpuInfo(true, 0.33, 0.44, 8000, 24576, "RTX 3090"),
                 8
         );
         when(monitorService.snapshot()).thenReturn(dto);

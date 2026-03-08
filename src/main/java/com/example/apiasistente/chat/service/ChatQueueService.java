@@ -3,9 +3,11 @@ package com.example.apiasistente.chat.service;
 import com.example.apiasistente.chat.config.ChatQueueProperties;
 import com.example.apiasistente.chat.dto.ChatMediaInput;
 import com.example.apiasistente.chat.dto.ChatResponse;
+import com.example.apiasistente.monitoring.service.AppMetricsService;
 import com.example.apiasistente.shared.util.RequestIdHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PreDestroy;
@@ -34,11 +36,18 @@ public class ChatQueueService {
     private final ChatQueueProperties properties;
     private final ExecutorService executor;
     private final Map<String, SessionQueue> sessionQueues = new ConcurrentHashMap<>();
+    private AppMetricsService metricsService;
 
     public ChatQueueService(ChatService chatService, ChatQueueProperties properties) {
         this.chatService = chatService;
         this.properties = properties;
         this.executor = Executors.newVirtualThreadPerTaskExecutor();
+    }
+
+    @Autowired(required = false)
+    void setMetricsService(AppMetricsService metricsService) {
+        this.metricsService = metricsService;
+        refreshQueueMetrics();
     }
 
     /**
@@ -140,6 +149,10 @@ public class ChatQueueService {
 
         // La cola por sesion garantiza que dos turnos del mismo contexto no compitan por historial o persistencia.
         queue.enqueue(queued);
+        if (metricsService != null) {
+            metricsService.recordQueueEnqueued(media != null && !media.isEmpty());
+            refreshQueueMetrics();
+        }
         startProcessingIfNeeded(queueKey, queue);
 
         return queued.response();
@@ -206,6 +219,9 @@ public class ChatQueueService {
                             response == null ? "" : preview(response.getReply())
                     );
                     next.response().complete(response);
+                    if (metricsService != null) {
+                        metricsService.recordQueueCompleted(next.elapsedMs());
+                    }
                 } catch (Exception ex) {
                     log.error(
                             "chat_queue_failed requestId={} queueKey={} sessionId={} externalUserId={} model={} mediaCount={} messagePreview={} causeType={} cause={}",
@@ -221,8 +237,12 @@ public class ChatQueueService {
                             ex
                     );
                     next.response().completeExceptionally(ex);
+                    if (metricsService != null) {
+                        metricsService.recordQueueFailed(ex.getClass().getSimpleName(), next.elapsedMs());
+                    }
                 } finally {
                     RequestIdHolder.clear();
+                    refreshQueueMetrics();
                 }
             }
         } finally {
@@ -252,6 +272,16 @@ public class ChatQueueService {
         if (queue.isIdle()) {
             sessionQueues.remove(queueKey, queue);
         }
+        refreshQueueMetrics();
+    }
+
+    private void refreshQueueMetrics() {
+        if (metricsService == null) {
+            return;
+        }
+        int activeSessions = sessionQueues.size();
+        int pendingMessages = sessionQueues.values().stream().mapToInt(SessionQueue::pendingCount).sum();
+        metricsService.setChatQueueStats(activeSessions, pendingMessages);
     }
 
     private String preview(String value) {
@@ -343,6 +373,10 @@ public class ChatQueueService {
         synchronized boolean isIdle() {
             return !processing && queue.isEmpty();
         }
+
+        synchronized int pendingCount() {
+            return queue.size();
+        }
     }
 
     /**
@@ -356,14 +390,15 @@ public class ChatQueueService {
             String externalUserId,
             List<ChatMediaInput> media,
             String requestId,
+            long enqueuedAtNanos,
             CompletableFuture<ChatResponse> response
     ) {
         QueuedChat(String username, String sessionId, String message, String model) {
-            this(username, sessionId, message, model, null, List.of(), RequestIdHolder.ensure(), new CompletableFuture<>());
+            this(username, sessionId, message, model, null, List.of(), RequestIdHolder.ensure(), System.nanoTime(), new CompletableFuture<>());
         }
 
         QueuedChat(String username, String sessionId, String message, String model, String requestId) {
-            this(username, sessionId, message, model, null, List.of(), requestId, new CompletableFuture<>());
+            this(username, sessionId, message, model, null, List.of(), requestId, System.nanoTime(), new CompletableFuture<>());
         }
 
         QueuedChat(String username,
@@ -381,8 +416,13 @@ public class ChatQueueService {
                     externalUserId,
                     media == null ? List.of() : Collections.unmodifiableList(List.copyOf(media)),
                     requestId,
+                    System.nanoTime(),
                     new CompletableFuture<>()
             );
+        }
+
+        long elapsedMs() {
+            return Math.max(0L, (System.nanoTime() - enqueuedAtNanos) / 1_000_000L);
         }
     }
 }

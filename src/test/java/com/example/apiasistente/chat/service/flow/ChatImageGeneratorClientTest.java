@@ -61,7 +61,7 @@ class ChatImageGeneratorClientTest {
             JsonNode request = mapper.readTree(capturedBody.get());
             assertNotNull(request.path("id").asText());
             assertFalse(request.path("id").asText().isBlank());
-            assertEquals("dreamshaper8.safetensors",
+            assertEquals("dreamshaper_8.safetensors",
                     request.path("prompt").path("30").path("inputs").path("ckpt_name").asText());
             assertEquals("gato astronauta",
                     request.path("prompt").path("6").path("inputs").path("text").asText());
@@ -198,7 +198,7 @@ class ChatImageGeneratorClientTest {
 
         try {
             ChatImageGenerationProperties properties = baseProperties(server);
-            properties.setCheckpoint("dreamshaper8.safetensors");
+            properties.setCheckpoint("dreamshaper_8.safetensors");
             ChatImageGeneratorClient client = new ChatImageGeneratorClient(properties);
 
             ChatImageGeneratorClient.GeneratedImage image = client.generate(
@@ -210,7 +210,7 @@ class ChatImageGeneratorClientTest {
             assertEquals(2, calls.get());
             assertTrue(image.fallbackApplied());
             assertEquals("dreamshaper8-xl.safetensors", image.requestedCheckpoint());
-            assertEquals("dreamshaper8.safetensors", image.checkpoint());
+            assertEquals("dreamshaper_8.safetensors", image.checkpoint());
 
             JsonNode firstReq = mapper.readTree(firstBody.get());
             JsonNode secondReq = mapper.readTree(secondBody.get());
@@ -219,8 +219,45 @@ class ChatImageGeneratorClientTest {
                     firstReq.path("prompt").path("30").path("inputs").path("ckpt_name").asText()
             );
             assertEquals(
-                    "dreamshaper8.safetensors",
+                    "dreamshaper_8.safetensors",
                     secondReq.path("prompt").path("30").path("inputs").path("ckpt_name").asText()
+            );
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void generateMapsLegacyCheckpointNameAgainstProviderCatalog() throws Exception {
+        AtomicReference<String> capturedBody = new AtomicReference<>();
+        HttpServer server = startServer(
+                exchange -> {
+                    capturedBody.set(readBody(exchange));
+                    writeJson(exchange, 200, """
+                            {
+                              "images": ["%s"],
+                              "filenames": ["output.png"]
+                            }
+                            """.formatted(ONE_PIXEL_PNG_BASE64));
+                },
+                """
+                        {
+                          "checkpoints": ["dreamshaper_8.safetensors"]
+                        }
+                        """
+        );
+
+        try {
+            ChatImageGenerationProperties properties = baseProperties(server);
+            properties.setCheckpoint("dreamshaper8.safetensors");
+            ChatImageGeneratorClient client = new ChatImageGeneratorClient(properties);
+
+            client.generate("mejora el retrato", "image", null);
+
+            JsonNode request = mapper.readTree(capturedBody.get());
+            assertEquals(
+                    "dreamshaper_8.safetensors",
+                    request.path("prompt").path("30").path("inputs").path("ckpt_name").asText()
             );
         } finally {
             server.stop(0);
@@ -232,11 +269,15 @@ class ChatImageGeneratorClientTest {
         properties.setBaseUrl("http://127.0.0.1:" + server.getAddress().getPort());
         properties.setPromptPath("/prompt");
         properties.setTimeoutMs(10_000);
-        properties.setCheckpoint("dreamshaper8.safetensors");
+        properties.setCheckpoint("dreamshaper_8.safetensors");
         return properties;
     }
 
     private HttpServer startServer(ExchangeHandler handler) throws IOException {
+        return startServer(handler, null);
+    }
+
+    private HttpServer startServer(ExchangeHandler handler, String modelsPayload) throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/prompt", exchange -> {
             try {
@@ -245,6 +286,15 @@ class ChatImageGeneratorClientTest {
                 exchange.close();
             }
         });
+        if (modelsPayload != null && !modelsPayload.isBlank()) {
+            server.createContext("/models", exchange -> {
+                try {
+                    writeJson(exchange, 200, modelsPayload);
+                } finally {
+                    exchange.close();
+                }
+            });
+        }
         server.start();
         return server;
     }

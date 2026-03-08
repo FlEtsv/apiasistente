@@ -1,5 +1,6 @@
 package com.example.apiasistente.shared.controller;
 
+import com.example.apiasistente.setup.service.SetupConfigService;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.stereotype.Controller;
@@ -14,10 +15,20 @@ import java.util.stream.Collectors;
 @Controller
 public class HomeController {
 
+    private final SetupConfigService setupConfigService;
+
+    public HomeController(SetupConfigService setupConfigService) {
+        this.setupConfigService = setupConfigService;
+    }
+
     @GetMapping("/")
     public String home(Authentication authentication) {
         if (authentication == null || !authentication.isAuthenticated()) {
             return "redirect:/login";
+        }
+
+        if (!setupConfigService.isConfigured()) {
+            return "redirect:/setup";
         }
 
         Set<String> auths = authentication.getAuthorities()

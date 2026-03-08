@@ -57,6 +57,7 @@ class ExternalMonitoringControllerTest {
                 new ServerStatsDto.ThreadInfo(10, 12, 5),
                 new ServerStatsDto.GcInfo(1, 10),
                 new ServerStatsDto.NetworkInfo(true, 40, "https://example.test"),
+                new ServerStatsDto.GpuInfo(false, 0.0, 0.0, 0, 0, ""),
                 8
         ));
 

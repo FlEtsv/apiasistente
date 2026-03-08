@@ -13,8 +13,11 @@ import com.example.apiasistente.chat.service.flow.ChatImageGenerationService;
 import com.example.apiasistente.chat.service.flow.ChatRagTelemetryService;
 import com.example.apiasistente.chat.service.flow.ChatSessionService;
 import com.example.apiasistente.chat.service.flow.ChatTurnService;
+import com.example.apiasistente.monitoring.service.AppMetricsService;
+import com.example.apiasistente.setup.service.SetupConfigService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
@@ -38,6 +41,8 @@ public class ChatService {
     private final ChatSessionService sessionService;
     private final ChatHistoryService historyService;
     private final ChatRagTelemetryService ragTelemetryService;
+    private SetupConfigService setupConfigService;
+    private AppMetricsService metricsService;
 
     public ChatService(ChatTurnService turnService,
                        ChatImageGenerationService imageGenerationService,
@@ -53,6 +58,16 @@ public class ChatService {
         this.sessionService = sessionService;
         this.historyService = historyService;
         this.ragTelemetryService = ragTelemetryService;
+    }
+
+    @Autowired(required = false)
+    void setSetupConfigService(SetupConfigService setupConfigService) {
+        this.setupConfigService = setupConfigService;
+    }
+
+    @Autowired(required = false)
+    void setMetricsService(AppMetricsService metricsService) {
+        this.metricsService = metricsService;
     }
 
     /**
@@ -101,6 +116,7 @@ public class ChatService {
                              String requestedModel,
                              String externalUserId,
                              List<ChatMediaInput> media) {
+        ensureSetupConfigured();
         ChatProcessRouter.ProcessDecision processDecision = processRouter.decide(userText, requestedModel, media);
         String effectiveRequestedModel = resolveRequestedModelForExecution(requestedModel, processDecision);
         boolean hasImageMedia = hasImageMedia(media);
@@ -119,6 +135,14 @@ public class ChatService {
                 media == null ? 0 : media.size(),
                 preview(userText)
         );
+        if (metricsService != null) {
+            metricsService.recordChatRoute(
+                    processDecision,
+                    media == null ? 0 : media.size(),
+                    hasImageMedia,
+                    hasDocumentMedia
+            );
+        }
         auditTrailService.record("chat.process.route", routePayload(
                 username,
                 maybeSessionId,
@@ -382,6 +406,15 @@ public class ChatService {
             return requestedModel;
         }
         return processDecision.recommendedModelAlias();
+    }
+
+    private void ensureSetupConfigured() {
+        if (setupConfigService == null) {
+            return;
+        }
+        if (!setupConfigService.isConfigured()) {
+            throw new IllegalStateException("Debes completar la configuracion inicial en /setup antes de usar el chat.");
+        }
     }
 
     private boolean isAutoRequest(String requestedModel) {

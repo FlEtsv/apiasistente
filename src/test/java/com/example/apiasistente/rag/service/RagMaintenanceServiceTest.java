@@ -117,9 +117,12 @@ class RagMaintenanceServiceTest {
                 .thenReturn(List.of());
         lenient().when(caseRepo.findTop100ByStatusOrderByAdminDueAtAscCreatedAtAsc(any()))
                 .thenReturn(List.of());
+        lenient().when(caseRepo.findEligibleForBacklogAcceleration(any(), any(), any(Pageable.class)))
+                .thenReturn(List.of());
         lenient().when(caseRepo.findTop100ByStatusAndAutoApplyAtBeforeOrderByAutoApplyAtAsc(any(), any()))
                 .thenReturn(List.of());
         lenient().when(caseRepo.countByStatus(any())).thenReturn(0L);
+        lenient().when(caseRepo.countEligibleForBacklogAcceleration(any(), any())).thenReturn(0L);
         lenient().when(monitoringAlertService.currentState()).thenReturn(healthyMonitoring());
     }
 
@@ -207,8 +210,9 @@ class RagMaintenanceServiceTest {
     @Test
     void backlogAboveThresholdTriggersAiReviewWhenMonitoringIsHealthy() {
         RagMaintenanceCase ragCase = warningCase(91L, Instant.now().plusSeconds(3600));
-        when(caseRepo.countByStatus(RagMaintenanceCaseStatus.OPEN)).thenReturn(11L);
-        when(caseRepo.findTop100ByStatusOrderByAdminDueAtAscCreatedAtAsc(RagMaintenanceCaseStatus.OPEN))
+        when(caseRepo.countEligibleForBacklogAcceleration(eq(RagMaintenanceCaseStatus.OPEN), any(Instant.class)))
+                .thenReturn(11L);
+        when(caseRepo.findEligibleForBacklogAcceleration(eq(RagMaintenanceCaseStatus.OPEN), any(Instant.class), any(Pageable.class)))
                 .thenReturn(List.of(ragCase));
         when(advisorService.advise(ragCase))
                 .thenReturn(new RagMaintenanceAdvisorService.Advice(
@@ -232,7 +236,8 @@ class RagMaintenanceServiceTest {
     @Test
     void backlogAboveThresholdSkipsAiReviewWhenMonitoringIsDegraded() {
         RagMaintenanceCase ragCase = warningCase(92L, Instant.now().plusSeconds(3600));
-        when(caseRepo.countByStatus(RagMaintenanceCaseStatus.OPEN)).thenReturn(11L);
+        when(caseRepo.countEligibleForBacklogAcceleration(eq(RagMaintenanceCaseStatus.OPEN), any(Instant.class)))
+                .thenReturn(11L);
         when(monitoringAlertService.currentState()).thenReturn(new MonitoringAlertStateDto(
                 true, false, false, false, false,
                 Instant.now(), null, null, null, null

@@ -4,8 +4,11 @@ import com.example.apiasistente.chat.dto.ChatMediaInput;
 import com.example.apiasistente.chat.dto.ChatResponse;
 import com.example.apiasistente.chat.entity.ChatMessage;
 import com.example.apiasistente.chat.service.ChatAuditTrailService;
+import com.example.apiasistente.chat.service.ChatRuntimeAdaptationService;
+import com.example.apiasistente.monitoring.service.AppMetricsService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -30,9 +33,11 @@ public class ChatTurnService {
     private final ChatHistoryService historyService;
     private final ChatSourceSnapshotService sourceSnapshotService;
     private final ChatSessionService sessionService;
-    private final ChatRagDecisionEngine decisionEngine;
+    private final ChatRagPostCheckFlowService postCheckFlowService;
     private final ChatRagTelemetryService telemetryService;
     private final ChatAuditTrailService auditTrailService;
+    private ChatRuntimeAdaptationService runtimeAdaptationService;
+    private AppMetricsService metricsService;
 
     public ChatTurnService(ChatTurnContextFactory contextFactory,
                            ChatRagFlowService ragFlowService,
@@ -40,7 +45,7 @@ public class ChatTurnService {
                            ChatHistoryService historyService,
                            ChatSourceSnapshotService sourceSnapshotService,
                            ChatSessionService sessionService,
-                           ChatRagDecisionEngine decisionEngine,
+                           ChatRagPostCheckFlowService postCheckFlowService,
                            ChatRagTelemetryService telemetryService,
                            ChatAuditTrailService auditTrailService) {
         this.contextFactory = contextFactory;
@@ -49,9 +54,19 @@ public class ChatTurnService {
         this.historyService = historyService;
         this.sourceSnapshotService = sourceSnapshotService;
         this.sessionService = sessionService;
-        this.decisionEngine = decisionEngine;
+        this.postCheckFlowService = postCheckFlowService;
         this.telemetryService = telemetryService;
         this.auditTrailService = auditTrailService;
+    }
+
+    @Autowired(required = false)
+    void setRuntimeAdaptationService(ChatRuntimeAdaptationService runtimeAdaptationService) {
+        this.runtimeAdaptationService = runtimeAdaptationService;
+    }
+
+    @Autowired(required = false)
+    void setMetricsService(AppMetricsService metricsService) {
+        this.metricsService = metricsService;
     }
 
     /**
@@ -64,6 +79,7 @@ public class ChatTurnService {
                              String requestedModel,
                              String externalUserId,
                              List<ChatMediaInput> media) {
+        long turnStartNanos = System.nanoTime();
         String stage = "context";
         ChatTurnContext context = null;
         try {
@@ -119,30 +135,11 @@ public class ChatTurnService {
             // 3. Genera la respuesta final del asistente aplicando guardrails y retries si corresponden.
             stage = "assistant";
             ChatAssistantOutcome outcome = assistantService.answer(context, ragContext);
-            ChatRagDecisionEngine.AnswerVerification answerVerification = ChatRagDecisionEngine.AnswerVerification.skip("post-check-not-needed");
-
-            if (!ragContext.ragUsed() && !ragContext.missingEvidence()) {
-                stage = "post-check";
-                answerVerification = decisionEngine.verifyDirectAnswer(
-                        context.userText(),
-                        outcome.assistantText(),
-                        context.turnPlan()
-                );
-                telemetryService.recordPostCheck(answerVerification, answerVerification.retryWithRag());
-                logPostAnswerVerification(answerVerification, context);
-                if (answerVerification.retryWithRag()) {
-                    stage = "post-check-rag-retry";
-                    ragContext = ragFlowService.resolveForced(context, answerVerification.reason());
-                    outcome = assistantService.answer(context, ragContext);
-                    log.info(
-                            "chat_turn_stage stage=post_check_retry sessionId={} ragUsed={} route={} sourceCount={}",
-                            context.session().getId(),
-                            ragContext.ragUsed(),
-                            ragContext.ragRoute(),
-                            ragContext.sources().size()
-                    );
-                }
-            }
+            stage = "post-check";
+            ChatRagPostCheckFlowService.PostCheckResult postCheck = postCheckFlowService.run(context, ragContext, outcome);
+            ragContext = postCheck.ragContext();
+            outcome = postCheck.outcome();
+            ChatRagDecisionEngine.AnswerVerification answerVerification = postCheck.answerVerification();
 
             // 4. Persiste la salida del asistente y enlaza fuentes cuando hubo grounding real.
             stage = "persist";
@@ -191,6 +188,9 @@ public class ChatTurnService {
                     preview(response.getReply())
             );
             auditTrailService.record("chat.turn.done", turnDonePayload(response));
+            if (metricsService != null) {
+                metricsService.recordChatTurnSuccess(response, elapsedMillis(turnStartNanos));
+            }
             return response;
         } catch (RuntimeException ex) {
             log.error(
@@ -215,7 +215,16 @@ public class ChatTurnService {
                     userText,
                     ex
             ));
+            if (metricsService != null) {
+                metricsService.recordChatTurnFailure(
+                        stage,
+                        ex.getClass().getSimpleName(),
+                        elapsedMillis(turnStartNanos)
+                );
+            }
             throw ex;
+        } finally {
+            recordTurnLatency(turnStartNanos);
         }
     }
 
@@ -228,22 +237,6 @@ public class ChatTurnService {
             return heuristicConfidence;
         }
         return Math.min(heuristicConfidence, answerVerification.confidence());
-    }
-
-    private void logPostAnswerVerification(ChatRagDecisionEngine.AnswerVerification verification,
-                                           ChatTurnContext context) {
-        if (verification == null) {
-            return;
-        }
-        log.info(
-                "rag_post_check reviewed={} retry_with_rag={} confidence={} reason={} intent={} rag_mode={}",
-                verification.reviewed(),
-                verification.retryWithRag(),
-                String.format(java.util.Locale.US, "%.3f", verification.confidence()),
-                verification.reason(),
-                context.intentRoute(),
-                context.turnPlan().ragDecision().mode()
-        );
     }
 
     private void deferSourceSnapshotPersistence(String sessionId,
@@ -369,6 +362,18 @@ public class ChatTurnService {
         payload.put("errorType", ex == null ? "" : ex.getClass().getSimpleName());
         payload.put("errorMessage", ex == null ? "" : safe(ex.getMessage()));
         return payload;
+    }
+
+    private void recordTurnLatency(long turnStartNanos) {
+        if (runtimeAdaptationService == null) {
+            return;
+        }
+        long elapsedMs = elapsedMillis(turnStartNanos);
+        runtimeAdaptationService.recordTurnLatency(elapsedMs);
+    }
+
+    private long elapsedMillis(long startNanos) {
+        return Math.max(0L, (System.nanoTime() - startNanos) / 1_000_000L);
     }
 }
 

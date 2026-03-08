@@ -1,0 +1,55 @@
+rag:
+  log-learning:
+    enabled: true
+    tick-ms: 60000
+    initial-delay-ms: 20000
+    owner: global
+    source: app-log
+    tags: logs,incident,runtime
+    tail-bytes: 262144
+    max-lines: 800
+    max-chars: 32000
+    include-only-problematic: true
+    context-lines: 2
+    redact-secrets: true
+    paths:
+      - data/audit/chat-trace.jsonl
+      - data/logs/apiasistente.log
+  code-learning:
+    enabled: true
+    tick-ms: 180000
+    initial-delay-ms: 45000
+    owner: global
+    source: code-learning
+    tags: code,review,architecture
+    root-path: .
+    scan-paths:
+      - src/main/java
+      - src/main/resources/static
+      - src/main/resources/templates
+      - src/main/resources
+    exclude-directories:
+      - .git
+      - .idea
+      - .gradle
+      - build
+      - data
+      - node_modules
+      - target
+    include-extensions:
+      - .java
+      - .js
+      - .ts
+      - .tsx
+      - .html
+      - .css
+      - .yml
+      - .yaml
+      - .properties
+      - .md
+    max-files-per-run: 25
+    max-file-size-bytes: 196608
+    max-chars-per-file: 22000
+    max-method-lines: 90
+    max-line-length: 180
+    max-recommendations: 6

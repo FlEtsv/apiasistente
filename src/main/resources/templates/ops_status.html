@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <title>Estado de Monitoreo</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="_csrf" th:content="${_csrf != null ? _csrf.token : ''}">
+    <meta name="_csrf_header" th:content="${_csrf != null ? _csrf.headerName : ''}">
     <style>
         * { box-sizing: border-box; }
         body { font-family: Arial, sans-serif; margin: 0; background: #f5f7fb; color: #111; min-height: 100vh; min-height: 100dvh; overflow-x: hidden; }
@@ -18,7 +20,7 @@
         .status-down { color: #b00020; font-weight: 700; }
         .small { font-size: 12px; color: #666; word-break: break-word; }
         .actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
-        .btn { display: inline-block; padding: 6px 10px; border-radius: 6px; border: 1px solid #d2d7e0; text-decoration: none; color: #111; background: #f7f9fc; white-space: nowrap; }
+        .btn { display: inline-block; padding: 6px 10px; border-radius: 6px; border: 1px solid #d2d7e0; text-decoration: none; color: #111; background: #f7f9fc; white-space: nowrap; cursor: pointer; font: inherit; }
         .btn:hover { background: #eef2f8; }
         .error { color: #b00020; font-size: 12px; margin-top: 6px; }
 
@@ -47,7 +49,8 @@
         <div class="small">HTTP: <span id="grafana-http">-</span> · <span id="grafana-latency">-</span> ms</div>
         <div class="error" id="grafana-error"></div>
         <div class="actions">
-            <a class="btn" href="/ops/grafana" target="_blank" rel="noopener">Abrir Grafana</a>
+            <a class="btn" href="/ops/grafana" target="_blank" rel="noopener"
+               th:text="'Abrir Grafana (' + ${grafanaBaseUrl} + ')'">Abrir Grafana</a>
             <a class="btn" href="/ops/grafana/config" target="_blank" rel="noopener">Config</a>
         </div>
     </div>
@@ -58,14 +61,45 @@
         <div class="small">HTTP: <span id="prometheus-http">-</span> · <span id="prometheus-latency">-</span> ms</div>
         <div class="error" id="prometheus-error"></div>
         <div class="actions">
-            <a class="btn" href="/ops/prometheus" target="_blank" rel="noopener">Abrir Prometheus</a>
+            <a class="btn" href="/ops/prometheus" target="_blank" rel="noopener"
+               th:text="'Abrir Prometheus (' + ${prometheusBaseUrl} + ')'">Abrir Prometheus</a>
             <a class="btn" href="/ops/prometheus/config" target="_blank" rel="noopener">Config</a>
+            <a class="btn" href="/actuator/prometheus" target="_blank" rel="noopener">Metricas app</a>
+        </div>
+    </div>
+    <div class="card">
+        <div class="label">Stack Docker</div>
+        <div class="value" id="stack-status">Sin datos</div>
+        <div class="small" id="stack-summary">-</div>
+        <div class="small">Proyecto: <span id="stack-project">-</span></div>
+        <div class="small">Compose: <span id="stack-compose">-</span></div>
+        <div class="small">Comando: <span id="stack-command">-</span></div>
+        <div class="small">Salida: <span id="stack-output">-</span></div>
+        <div class="error" id="stack-error"></div>
+        <div class="actions">
+            <button class="btn" id="stack-up-btn" type="button">Activar stack</button>
+            <button class="btn" id="stack-refresh-btn" type="button">Refrescar stack</button>
+            <a class="btn" href="/monitor" target="_blank" rel="noopener">Monitor local</a>
         </div>
     </div>
 </div>
 </div>
 
 <script>
+    let stackActionPinnedUntil = 0;
+
+    function getCsrf() {
+        const token = document.querySelector('meta[name="_csrf"]')?.getAttribute('content');
+        const header = document.querySelector('meta[name="_csrf_header"]')?.getAttribute('content');
+        return { token, header };
+    }
+
+    function withCsrf(headers = {}) {
+        const { token, header } = getCsrf();
+        if (token && header) headers[header] = token;
+        return headers;
+    }
+
     function setStatus(prefix, data) {
         const statusEl = document.getElementById(prefix + '-status');
         const httpEl = document.getElementById(prefix + '-http');
@@ -87,7 +121,75 @@
         errorEl.textContent = data.error || '';
     }
 
-    async function load() {
+    function stackSummary(data) {
+        if (!data) return 'Stack sin datos';
+        const docker = data.dockerReachable ? 'Docker OK' : (data.dockerInstalled ? 'Docker daemon OFF' : 'Docker CLI OFF');
+        const compose = data.composeAvailable ? 'Compose OK' : 'Compose OFF';
+        const api = data.apiContainerRunning ? 'API ON' : 'API OFF';
+        const prom = data.prometheusContainerRunning ? 'Prom ON' : 'Prom OFF';
+        const grafana = data.grafanaContainerRunning ? 'Grafana ON' : 'Grafana OFF';
+        return `${docker} | ${compose} | ${api} | ${prom} | ${grafana}`;
+    }
+
+    function setStackStatus(data, error = '') {
+        const statusEl = document.getElementById('stack-status');
+        const summaryEl = document.getElementById('stack-summary');
+        const projectEl = document.getElementById('stack-project');
+        const composeEl = document.getElementById('stack-compose');
+        const commandEl = document.getElementById('stack-command');
+        const outputEl = document.getElementById('stack-output');
+        const errorEl = document.getElementById('stack-error');
+        if (!statusEl || !summaryEl || !projectEl || !composeEl || !commandEl || !outputEl || !errorEl) return;
+
+        if (!data) {
+            statusEl.textContent = 'Sin datos';
+            summaryEl.textContent = '-';
+            projectEl.textContent = '-';
+            composeEl.textContent = '-';
+            commandEl.textContent = '-';
+            outputEl.textContent = '-';
+            errorEl.textContent = error || '';
+            return;
+        }
+        statusEl.textContent = data.success ? 'LISTO' : (data.actionExecuted ? 'PARCIAL' : 'ESTADO');
+        summaryEl.textContent = stackSummary(data);
+        projectEl.textContent = data.projectDir || '-';
+        composeEl.textContent = data.composeFile || '-';
+        commandEl.textContent = data.command || '-';
+        outputEl.textContent = data.output ? String(data.output).slice(0, 1200) : '-';
+        errorEl.textContent = error || data.message || '';
+    }
+
+    async function loadStackStatus() {
+        try {
+            const res = await fetch('/api/monitor/stack/status', { headers: withCsrf() });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+            setStackStatus(data);
+        } catch (e) {
+            setStackStatus(null, 'Error stack: ' + e.message);
+        }
+    }
+
+    async function activateStack() {
+        const btn = document.getElementById('stack-up-btn');
+        if (btn) btn.disabled = true;
+        stackActionPinnedUntil = Date.now() + 20000;
+        setStackStatus(null, 'Activando stack...');
+        try {
+            const res = await fetch('/api/monitor/stack/up', { method: 'POST', headers: withCsrf() });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+            setStackStatus(data);
+            await loadExternalStatus();
+        } catch (e) {
+            setStackStatus(null, 'No se pudo activar: ' + e.message);
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    async function loadExternalStatus() {
         try {
             const res = await fetch('/ops/status', { credentials: 'include' });
             if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -100,8 +202,20 @@
         }
     }
 
+    async function load() {
+        await loadExternalStatus();
+        if (Date.now() > stackActionPinnedUntil) {
+            await loadStackStatus();
+        }
+    }
+
+    document.getElementById('stack-up-btn')?.addEventListener('click', activateStack);
+    document.getElementById('stack-refresh-btn')?.addEventListener('click', loadStackStatus);
+
     load();
-    setInterval(load, 5000);
+    setInterval(() => {
+        load();
+    }, 5000);
 </script>
 </body>
 </html>

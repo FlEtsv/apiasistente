@@ -27,13 +27,25 @@ rag:
   vector:
     index-dir: ${java.io.tmpdir}/apiasistente-rag-hnsw-${random.uuid}
     rebuild-on-startup: false
+  code-learning:
+    enabled: false
+  web-scraper:
+    enabled: false
 
 chat:
   grounding:
     enabled: true
   response-guard:
     enabled: true
+  runtime-adaptation:
+    enabled: false
 
 monitoring:
+  gpu:
+    enabled: false
   alerts:
+    enabled: false
+
+bootstrap:
+  admin:
     enabled: false

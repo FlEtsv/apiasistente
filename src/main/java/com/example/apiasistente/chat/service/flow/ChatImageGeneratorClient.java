@@ -13,8 +13,10 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -29,11 +31,14 @@ public class ChatImageGeneratorClient {
 
     private static final int MIN_IMAGE_SIZE = 256;
     private static final int MAX_IMAGE_SIZE = 2048;
+    private static final String MODELS_PATH = "/models";
+    private static final long CHECKPOINT_CACHE_TTL_MS = 30_000L;
     private static final Logger log = LoggerFactory.getLogger(ChatImageGeneratorClient.class);
 
     private final ChatImageGenerationProperties properties;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private volatile CheckpointCatalog checkpointCatalog = CheckpointCatalog.empty();
 
     public ChatImageGeneratorClient(ChatImageGenerationProperties properties) {
         this.properties = properties;
@@ -48,23 +53,33 @@ public class ChatImageGeneratorClient {
             throw new IllegalStateException("No hay endpoint de generacion de imagen configurado.");
         }
 
+        boolean explicitCheckpointRequested = looksLikeCheckpoint(model);
         String requestedCheckpoint = resolveCheckpoint(model);
+        List<String> availableCheckpoints = resolveAvailableCheckpoints();
+        String selectedCheckpoint = selectCheckpoint(
+                requestedCheckpoint,
+                model,
+                availableCheckpoints,
+                explicitCheckpointRequested
+        );
+        logCheckpointSelection(requestedCheckpoint, selectedCheckpoint, availableCheckpoints, explicitCheckpointRequested);
+
         try {
             return executeGenerate(
                     endpoint,
                     prompt,
-                    requestedCheckpoint,
+                    selectedCheckpoint,
                     referenceImageDataUri,
                     model,
                     false,
                     requestedCheckpoint
             );
         } catch (IllegalStateException ex) {
-            String fallbackCheckpoint = normalize(properties.getCheckpoint());
-            if (shouldRetryWithFallback(ex, requestedCheckpoint, fallbackCheckpoint)) {
+            String fallbackCheckpoint = selectRetryFallbackCheckpoint(selectedCheckpoint, availableCheckpoints);
+            if (shouldRetryWithFallback(ex, selectedCheckpoint, fallbackCheckpoint)) {
                 log.warn(
                         "chat_image_provider_checkpoint_fallback requested={} fallback={} reason={}",
-                        requestedCheckpoint,
+                        selectedCheckpoint,
                         fallbackCheckpoint,
                         safeMessage(ex)
                 );
@@ -365,6 +380,235 @@ public class ChatImageGeneratorClient {
         throw new IllegalStateException("No hay checkpoint de imagen configurado para ComfyUI.");
     }
 
+    /**
+     * Carga checkpoints disponibles de ComfyUI y los cachea brevemente para no consultar `/models` en cada request.
+     */
+    private List<String> resolveAvailableCheckpoints() {
+        long now = System.currentTimeMillis();
+        CheckpointCatalog cached = checkpointCatalog;
+        if (!cached.isExpired(now)) {
+            return cached.checkpoints();
+        }
+
+        List<String> fetched = fetchAvailableCheckpoints();
+        if (!fetched.isEmpty()) {
+            checkpointCatalog = new CheckpointCatalog(now, fetched);
+            return fetched;
+        }
+
+        if (!cached.checkpoints().isEmpty()) {
+            return cached.checkpoints();
+        }
+
+        checkpointCatalog = new CheckpointCatalog(now, fetched);
+        return fetched;
+    }
+
+    private List<String> fetchAvailableCheckpoints() {
+        String modelsEndpoint = resolveEndpoint(properties.getBaseUrl(), MODELS_PATH);
+        if (modelsEndpoint.isBlank()) {
+            return List.of();
+        }
+
+        HttpRequest request = HttpRequest.newBuilder(URI.create(modelsEndpoint))
+                .GET()
+                .timeout(Duration.ofMillis(Math.max(1, properties.getTimeoutMs())))
+                .header("Accept", "application/json")
+                .build();
+
+        try {
+            HttpResponse<byte[]> response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                log.debug(
+                        "chat_image_provider_models_unavailable endpoint={} status={}",
+                        modelsEndpoint,
+                        response.statusCode()
+                );
+                return List.of();
+            }
+
+            JsonNode payload = objectMapper.readTree(response.body());
+            JsonNode checkpoints = payload.path("checkpoints");
+            if (!checkpoints.isArray()) {
+                return List.of();
+            }
+
+            LinkedHashSet<String> values = new LinkedHashSet<>();
+            for (JsonNode item : checkpoints) {
+                if (item == null || !item.isTextual()) {
+                    continue;
+                }
+                String checkpoint = normalize(item.asText());
+                if (checkpoint != null) {
+                    values.add(checkpoint);
+                }
+            }
+            return List.copyOf(values);
+        } catch (Exception ex) {
+            log.warn(
+                    "chat_image_provider_models_failed endpoint={} cause={}",
+                    modelsEndpoint,
+                    safeMessage(ex)
+            );
+            return List.of();
+        }
+    }
+
+    private String selectCheckpoint(String requestedCheckpoint,
+                                    String requestedModel,
+                                    List<String> availableCheckpoints,
+                                    boolean explicitCheckpointRequested) {
+        if (availableCheckpoints == null || availableCheckpoints.isEmpty()) {
+            return requestedCheckpoint;
+        }
+
+        String configuredCheckpoint = normalize(properties.getCheckpoint());
+
+        if (explicitCheckpointRequested) {
+            String candidate = findCheckpointByExact(availableCheckpoints, requestedCheckpoint);
+            if (candidate != null) {
+                return candidate;
+            }
+            candidate = findCheckpointByNormalizedKey(availableCheckpoints, requestedCheckpoint);
+            if (candidate != null) {
+                return candidate;
+            }
+            return requestedCheckpoint;
+        }
+
+        String candidate = findCheckpointByExact(availableCheckpoints, requestedCheckpoint);
+        if (candidate != null) {
+            return candidate;
+        }
+        candidate = findCheckpointByNormalizedKey(availableCheckpoints, requestedCheckpoint);
+        if (candidate != null) {
+            return candidate;
+        }
+        candidate = findCheckpointByExact(availableCheckpoints, configuredCheckpoint);
+        if (candidate != null) {
+            return candidate;
+        }
+        candidate = findCheckpointByNormalizedKey(availableCheckpoints, configuredCheckpoint);
+        if (candidate != null) {
+            return candidate;
+        }
+        candidate = findCheckpointByNormalizedKey(availableCheckpoints, requestedModel);
+        if (candidate != null) {
+            return candidate;
+        }
+
+        return availableCheckpoints.get(0);
+    }
+
+    private void logCheckpointSelection(String requestedCheckpoint,
+                                        String selectedCheckpoint,
+                                        List<String> availableCheckpoints,
+                                        boolean explicitCheckpointRequested) {
+        int available = availableCheckpoints == null ? 0 : availableCheckpoints.size();
+        if (available == 0) {
+            return;
+        }
+
+        if (requestedCheckpoint != null && requestedCheckpoint.equalsIgnoreCase(selectedCheckpoint)) {
+            log.info(
+                    "chat_image_checkpoint_selected requested={} selected={} explicit={} available={}",
+                    requestedCheckpoint,
+                    selectedCheckpoint,
+                    explicitCheckpointRequested,
+                    available
+            );
+            return;
+        }
+
+        log.warn(
+                "chat_image_checkpoint_adjusted requested={} selected={} explicit={} available={} catalog={}",
+                requestedCheckpoint,
+                selectedCheckpoint,
+                explicitCheckpointRequested,
+                available,
+                previewCheckpoints(availableCheckpoints)
+        );
+    }
+
+    private String selectRetryFallbackCheckpoint(String failedCheckpoint, List<String> availableCheckpoints) {
+        String configuredCheckpoint = normalize(properties.getCheckpoint());
+        if (availableCheckpoints == null || availableCheckpoints.isEmpty()) {
+            return configuredCheckpoint;
+        }
+
+        String candidate = findCheckpointByExact(availableCheckpoints, configuredCheckpoint);
+        if (candidate == null) {
+            candidate = findCheckpointByNormalizedKey(availableCheckpoints, configuredCheckpoint);
+        }
+        if (candidate != null && !candidate.equalsIgnoreCase(failedCheckpoint)) {
+            return candidate;
+        }
+
+        for (String checkpoint : availableCheckpoints) {
+            if (checkpoint != null && !checkpoint.equalsIgnoreCase(failedCheckpoint)) {
+                return checkpoint;
+            }
+        }
+        return configuredCheckpoint;
+    }
+
+    private String findCheckpointByExact(List<String> availableCheckpoints, String value) {
+        String expected = normalize(value);
+        if (expected == null) {
+            return null;
+        }
+        for (String checkpoint : availableCheckpoints) {
+            if (checkpoint != null && checkpoint.equalsIgnoreCase(expected)) {
+                return checkpoint;
+            }
+        }
+        return null;
+    }
+
+    private String findCheckpointByNormalizedKey(List<String> availableCheckpoints, String value) {
+        String expectedKey = normalizeCheckpointKey(value);
+        if (expectedKey == null) {
+            return null;
+        }
+        for (String checkpoint : availableCheckpoints) {
+            String checkpointKey = normalizeCheckpointKey(checkpoint);
+            if (checkpointKey != null && checkpointKey.equals(expectedKey)) {
+                return checkpoint;
+            }
+        }
+        return null;
+    }
+
+    private String normalizeCheckpointKey(String value) {
+        String normalized = normalize(value);
+        if (normalized == null) {
+            return null;
+        }
+        String lower = normalized.toLowerCase(Locale.ROOT);
+        if (lower.endsWith(".safetensors")) {
+            lower = lower.substring(0, lower.length() - ".safetensors".length());
+        }
+        String collapsed = lower.replaceAll("[^a-z0-9]", "");
+        return collapsed.isBlank() ? null : collapsed;
+    }
+
+    private String previewCheckpoints(List<String> checkpoints) {
+        if (checkpoints == null || checkpoints.isEmpty()) {
+            return "[]";
+        }
+        int limit = Math.min(5, checkpoints.size());
+        List<String> sample = new ArrayList<>(checkpoints.subList(0, limit));
+        if (checkpoints.size() > limit) {
+            sample.add("...");
+        }
+        return sample.toString();
+    }
+
+    private boolean looksLikeCheckpoint(String value) {
+        String normalized = normalize(value);
+        return normalized != null && normalized.toLowerCase(Locale.ROOT).endsWith(".safetensors");
+    }
+
     private String normalizeReferenceImageInput(String value) {
         if (!hasText(value)) {
             return null;
@@ -477,6 +721,17 @@ public class ChatImageGeneratorClient {
             return "sin detalle";
         }
         return error.getMessage().replaceAll("\\s+", " ").trim();
+    }
+
+    private record CheckpointCatalog(long loadedAtMillis, List<String> checkpoints) {
+
+        private static CheckpointCatalog empty() {
+            return new CheckpointCatalog(0L, List.of());
+        }
+
+        private boolean isExpired(long now) {
+            return loadedAtMillis <= 0 || (now - loadedAtMillis) >= CHECKPOINT_CACHE_TTL_MS;
+        }
     }
 
     public record GeneratedImage(

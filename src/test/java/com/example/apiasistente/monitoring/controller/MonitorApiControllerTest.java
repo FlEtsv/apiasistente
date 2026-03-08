@@ -2,10 +2,12 @@ package com.example.apiasistente.monitoring.controller;
 
 import com.example.apiasistente.monitoring.dto.MonitoringAlertDto;
 import com.example.apiasistente.monitoring.dto.MonitoringAlertStateDto;
+import com.example.apiasistente.monitoring.dto.MonitoringStackStatusDto;
 import com.example.apiasistente.monitoring.dto.ServerStatsDto;
 import com.example.apiasistente.monitoring.service.MonitorService;
 import com.example.apiasistente.monitoring.service.MonitoringAlertService;
 import com.example.apiasistente.monitoring.service.MonitoringAlertStore;
+import com.example.apiasistente.monitoring.service.MonitoringStackService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -19,6 +21,7 @@ import java.util.List;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -40,6 +43,9 @@ class MonitorApiControllerTest {
 
     @MockitoBean
     private MonitoringAlertService monitoringAlertService;
+
+    @MockitoBean
+    private MonitoringStackService monitoringStackService;
 
     @Test
     void serverReturnsSnapshot() throws Exception {
@@ -72,6 +78,27 @@ class MonitorApiControllerTest {
                 .andExpect(jsonPath("$.internetDown").value(true));
     }
 
+    @Test
+    void stackStatusReturnsCurrentState() throws Exception {
+        when(monitoringStackService.status()).thenReturn(stackStatus(false, "Stack parcial"));
+
+        mockMvc.perform(get("/api/monitor/stack/status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.dockerInstalled").value(true))
+                .andExpect(jsonPath("$.message").value("Stack parcial"));
+    }
+
+    @Test
+    void stackUpReturnsActionResult() throws Exception {
+        when(monitoringStackService.ensureUp()).thenReturn(stackStatus(true, "Stack de observabilidad activo"));
+
+        mockMvc.perform(post("/api/monitor/stack/up"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.actionExecuted").value(true))
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.message").value("Stack de observabilidad activo"));
+    }
+
     private ServerStatsDto serverStats() {
         return new ServerStatsDto(
                 "srv-01",
@@ -87,6 +114,7 @@ class MonitorApiControllerTest {
                 new ServerStatsDto.ThreadInfo(10, 12, 5),
                 new ServerStatsDto.GcInfo(1, 10),
                 new ServerStatsDto.NetworkInfo(true, 40, "https://example.test"),
+                new ServerStatsDto.GpuInfo(true, 0.42, 0.37, 4600, 12288, "RTX"),
                 8
         );
     }
@@ -119,6 +147,30 @@ class MonitorApiControllerTest {
                 null,
                 null,
                 Instant.parse("2026-02-28T10:02:00Z")
+        );
+    }
+
+    private MonitoringStackStatusDto stackStatus(boolean actionExecuted, String message) {
+        return new MonitoringStackStatusDto(
+                Instant.parse("2026-02-28T10:02:00Z"),
+                actionExecuted,
+                true,
+                true,
+                true,
+                true,
+                "docker compose",
+                "C:/repo/apiasistente",
+                "C:/repo/apiasistente/docker-compose.yml",
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                true,
+                "docker compose -f docker-compose.yml up -d api prometheus grafana",
+                message,
+                "ok"
         );
     }
 }

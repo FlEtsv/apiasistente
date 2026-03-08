@@ -17,8 +17,15 @@ const toggleSessionsBtn = document.getElementById('toggleSessions');
 const sessionDrawer = document.getElementById('sessionDrawer');
 const drawerBackdrop = document.getElementById('drawerBackdrop');
 const closeDrawerBtn = document.getElementById('closeDrawer');
+const toggleOpsBtn = document.getElementById('toggleOps');
+const closeOpsBtn = document.getElementById('closeOps');
+const opsBackdropEl = document.getElementById('opsBackdrop');
+const opsPanelEl = document.querySelector('.ops-panel');
+const opsPanelDetailsEl = document.getElementById('opsPanelDetails');
+const opsSummaryEl = document.querySelector('#opsPanelDetails > summary');
 const rootEl = document.documentElement;
 const mobileViewportQuery = window.matchMedia('(max-width: 980px)');
+const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
 
 const newChatBtn = document.getElementById('newChat');
 
@@ -26,6 +33,13 @@ const monitorIntervalEl = document.getElementById('monitorInterval');
 const monitorEventsEl = document.getElementById('monitorEvents');
 const monitorLastUpdateEl = document.getElementById('monitorLastUpdate');
 const monitorApplyBtn = document.getElementById('btnApplyMonitorInterval');
+const monitorStackProvisionBtn = document.getElementById('btnProvisionMonitorStack');
+const monitorStackRefreshBtn = document.getElementById('btnRefreshMonitorStack');
+const monitorStackActionStatusEl = document.getElementById('monitorStackActionStatus');
+const triggerMonitorProvisionSidebarBtn = document.getElementById('triggerMonitorProvisionSidebar');
+const triggerMonitorProvisionMobileBtn = document.getElementById('triggerMonitorProvisionMobile');
+const triggerMonitorProvisionTopBtn = document.getElementById('triggerMonitorProvisionTop');
+const monitorProvisionQuickStatusEl = document.getElementById('monitorProvisionQuickStatus');
 const ragContextPillEl = document.getElementById('ragContextPill');
 const ragTotalContextEl = document.getElementById('ragTotalContext');
 const ragGlobalContextEl = document.getElementById('ragGlobalContext');
@@ -47,6 +61,10 @@ const ragDecisionEventsEl = document.getElementById('ragDecisionEvents');
 const ragDecisionRefreshBtn = document.getElementById('btnRefreshRagDecision');
 
 const openApiKeysInline = document.getElementById('openApiKeysInline');
+const mobileNavMenuEl = document.getElementById('mobileNavMenu');
+const mobileOpenApiKeysEl = document.getElementById('mobileOpenApiKeys');
+const composerMenuEl = document.getElementById('composerMenu');
+const composerMenuToggleEl = document.getElementById('composerMenuToggle');
 const mediaInputEl = document.getElementById('mediaInput');
 const cameraInputEl = document.getElementById('cameraInput');
 const attachBtnEl = document.getElementById('attachBtn');
@@ -74,6 +92,7 @@ function syncViewportHeight() {
   if (viewportHeight > 0) {
     rootEl.style.setProperty('--app-height', `${Math.round(viewportHeight)}px`);
   }
+  syncKeyboardState(viewportHeight);
 }
 
 // Mantiene el textarea compacto y evita que el teclado tape el composer en movil.
@@ -82,6 +101,41 @@ function syncComposerHeight() {
   inputEl.style.height = 'auto';
   const next = Math.max(54, Math.min(inputEl.scrollHeight || 54, 180));
   inputEl.style.height = `${next}px`;
+}
+
+function closeComposerMenu() {
+  if (composerMenuEl?.open) {
+    composerMenuEl.open = false;
+  }
+}
+
+function closeMobileNavMenu() {
+  if (mobileNavMenuEl?.open) {
+    mobileNavMenuEl.open = false;
+  }
+}
+
+function syncKeyboardState(viewportHeight = window.visualViewport?.height || window.innerHeight || 0) {
+  const layoutHeight = window.innerHeight || viewportHeight || 0;
+  const ratio = layoutHeight > 0 ? viewportHeight / layoutHeight : 1;
+  const keyboardLikelyOpen = window.innerWidth <= 760 && ratio < 0.8;
+  document.body.classList.toggle('keyboard-open', keyboardLikelyOpen);
+  if (keyboardLikelyOpen) {
+    hideOps();
+  }
+}
+
+function getSelectedModelLabel() {
+  const label = modelSelectEl?.selectedOptions?.[0]?.textContent || 'Auto';
+  return String(label).trim().replace(/\s+/g, ' ');
+}
+
+function refreshComposerMenuLabel() {
+  if (!composerMenuToggleEl) return;
+  const modelLabel = getSelectedModelLabel();
+  const compactModel = modelLabel.length > 28 ? `${modelLabel.slice(0, 28).trim()}...` : modelLabel;
+  const attachmentLabel = pendingMedia.length > 0 ? ` + ${pendingMedia.length} adjunto(s)` : '';
+  composerMenuToggleEl.textContent = `Modelo: ${compactModel}${attachmentLabel}`;
 }
 
 function escapeHtml(value) {
@@ -195,9 +249,15 @@ function inferMediaLabel(item) {
 }
 
 function renderMediaPreview() {
-  if (!mediaPreviewEl) return;
+  if (!mediaPreviewEl) {
+    refreshComposerMenuLabel();
+    return;
+  }
   mediaPreviewEl.innerHTML = '';
-  if (!pendingMedia.length) return;
+  if (!pendingMedia.length) {
+    refreshComposerMenuLabel();
+    return;
+  }
 
   pendingMedia.forEach((item, idx) => {
     const chip = document.createElement('div');
@@ -228,6 +288,7 @@ function renderMediaPreview() {
     chip.appendChild(removeBtn);
     mediaPreviewEl.appendChild(chip);
   });
+  refreshComposerMenuLabel();
 }
 
 function clearMediaSelection() {
@@ -333,7 +394,10 @@ function extractErrorMessage(payload, res) {
 
 function scrollDown() {
   requestAnimationFrame(() => {
-    chatEl.scrollTo({ top: chatEl.scrollHeight, behavior: 'smooth' });
+    chatEl.scrollTo({
+      top: chatEl.scrollHeight,
+      behavior: reducedMotionQuery.matches ? 'auto' : 'smooth'
+    });
   });
 }
 
@@ -494,8 +558,10 @@ function loadModelSelection() {
   if (saved && options.includes(saved)) {
     modelSelectEl.value = saved;
   }
+  refreshComposerMenuLabel();
   modelSelectEl.addEventListener('change', () => {
     localStorage.setItem(MODEL_STORAGE_KEY, modelSelectEl.value);
+    refreshComposerMenuLabel();
   });
 }
 
@@ -535,6 +601,121 @@ function formatMs(value) {
   const num = Number(value);
   if (!Number.isFinite(num)) return '-';
   return `${num.toFixed(num >= 100 ? 0 : 1)} ms`;
+}
+
+function endpointHostPort(url) {
+  if (!url) return '';
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname || '';
+    if (!host) return '';
+    const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
+    return `${host}:${port}`;
+  } catch (e) {
+    return String(url).replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+  }
+}
+
+function metaMonitoringUrl(metaName) {
+  return document.querySelector(`meta[name="${metaName}"]`)?.getAttribute('content') || '';
+}
+
+function defaultServiceBaseUrl(link) {
+  if (!link) return '';
+  return link.getAttribute('data-default-url') || '';
+}
+
+function applyServiceLink(linkId, baseUrl, verboseText = false) {
+  const link = document.getElementById(linkId);
+  if (!link) return;
+  const resolvedBaseUrl = baseUrl || defaultServiceBaseUrl(link) || '';
+  if (resolvedBaseUrl) link.href = resolvedBaseUrl;
+  const label = link.getAttribute('data-label') || link.textContent || 'Abrir';
+  const hostPort = endpointHostPort(resolvedBaseUrl || link.href || '');
+  const forceHostPort = link.classList.contains('endpoint-link');
+  link.textContent = (verboseText || forceHostPort) && hostPort ? `${label} (${hostPort})` : label;
+  if (hostPort) {
+    link.title = `${label} - ${hostPort}`;
+  }
+}
+
+function stackStateLabel(status) {
+  if (!status || typeof status !== 'object') return 'Stack: sin datos';
+  const docker = status.dockerReachable ? 'Docker OK' : (status.dockerInstalled ? 'Docker daemon OFF' : 'Docker CLI OFF');
+  const compose = status.composeAvailable ? 'Compose OK' : 'Compose OFF';
+  const api = status.apiContainerRunning ? 'API ON' : 'API OFF';
+  const prom = status.prometheusContainerRunning ? 'Prom ON' : 'Prom OFF';
+  const grafana = status.grafanaContainerRunning ? 'Grafana ON' : 'Grafana OFF';
+  return `${docker} | ${compose} | ${api} | ${prom} | ${grafana}`;
+}
+
+function setMonitorStackStatus(status, fallbackText = '') {
+  if (!monitorStackActionStatusEl) return;
+  const summary = stackStateLabel(status);
+  const message = status?.message ? String(status.message) : fallbackText;
+  monitorStackActionStatusEl.textContent = message ? `${summary} - ${message}` : summary;
+}
+
+function setMonitorProvisionQuickStatus(message, isError = false) {
+  if (!monitorProvisionQuickStatusEl) return;
+  monitorProvisionQuickStatusEl.textContent = message || '';
+  monitorProvisionQuickStatusEl.className = isError ? 'sub status-down' : 'sub status-up';
+}
+
+function setProvisionTriggersDisabled(disabled) {
+  [monitorStackProvisionBtn, triggerMonitorProvisionSidebarBtn, triggerMonitorProvisionMobileBtn, triggerMonitorProvisionTopBtn]
+    .forEach((btn) => {
+      if (btn) btn.disabled = disabled;
+    });
+}
+
+async function loadMonitorStackStatus() {
+  if (!monitorStackActionStatusEl) return;
+  try {
+    const res = await fetch('/api/monitor/stack/status', { headers: withCsrf() });
+    const payload = await readResponsePayload(res);
+    if (!res.ok) {
+      throw new Error(extractErrorMessage(payload, res));
+    }
+    setMonitorStackStatus(payload || {});
+  } catch (e) {
+    setMonitorStackStatus(null, `Error stack: ${e.message || 'no disponible'}`);
+  }
+}
+
+async function activateMonitorStack() {
+  setProvisionTriggersDisabled(true);
+  setMonitorStackStatus(null, 'Activando stack...');
+  setMonitorProvisionQuickStatus('Activando stack...', false);
+  try {
+    const res = await fetch('/api/monitor/stack/up', { method: 'POST', headers: withCsrf() });
+    const payload = await readResponsePayload(res);
+    if (!res.ok) {
+      throw new Error(extractErrorMessage(payload, res));
+    }
+    setMonitorStackStatus(payload || {});
+    await loadOpsStatus();
+    await loadMonitorEvents();
+    const ok = payload?.success === true;
+    setMonitorProvisionQuickStatus(
+      ok ? 'Stack de observabilidad activo' : 'Stack parcial, revisar estado',
+      !ok
+    );
+    return ok;
+  } catch (e) {
+    setMonitorStackStatus(null, `No se pudo activar: ${e.message || 'error'}`);
+    setMonitorProvisionQuickStatus(`Error activando stack: ${e.message || 'error'}`, true);
+    return false;
+  } finally {
+    setProvisionTriggersDisabled(false);
+  }
+}
+
+async function triggerMonitorProvisionShortcut() {
+  closeMobileNavMenu();
+  closeComposerMenu();
+  hideDrawer();
+  await activateMonitorStack();
 }
 
 function setRagContextLoading() {
@@ -733,9 +914,12 @@ async function loadOpsStatus() {
     document.getElementById('prometheus-status');
   if (!hasOpsTargets) return;
 
+  const fallbackGrafanaBaseUrl = metaMonitoringUrl('monitoring_grafana_url');
+  const fallbackPrometheusBaseUrl = metaMonitoringUrl('monitoring_prometheus_url');
+
   try {
     const res = await fetch('/ops/status', { credentials: 'include' });
-    if (!res.ok) return;
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
 
     const grafanaOk = data.grafana && data.grafana.up;
@@ -758,10 +942,44 @@ async function loadOpsStatus() {
       pStatus.textContent = promOk ? 'OK' : 'CAIDO';
       pStatus.className = promOk ? 'status-up' : 'status-down';
     }
-    if (gUrl) gUrl.textContent = data.grafana ? data.grafana.baseUrl : '-';
-    if (pUrl) pUrl.textContent = data.prometheus ? data.prometheus.baseUrl : '-';
+    const grafanaBaseUrl = data.grafana?.baseUrl || fallbackGrafanaBaseUrl;
+    const prometheusBaseUrl = data.prometheus?.baseUrl || fallbackPrometheusBaseUrl;
+    if (gUrl) gUrl.textContent = grafanaBaseUrl || '-';
+    if (pUrl) pUrl.textContent = prometheusBaseUrl || '-';
+
+    applyServiceLink('sidebarGrafanaLink', grafanaBaseUrl, false);
+    applyServiceLink('sidebarPrometheusLink', prometheusBaseUrl, false);
+    applyServiceLink('mobileGrafanaLink', grafanaBaseUrl, false);
+    applyServiceLink('mobilePrometheusLink', prometheusBaseUrl, false);
+    applyServiceLink('opsGrafanaLink', grafanaBaseUrl, true);
+    applyServiceLink('opsPrometheusLink', prometheusBaseUrl, true);
   } catch (e) {
-    // silencioso
+    const grafanaDot = document.getElementById('grafana-dot');
+    const promDot = document.getElementById('prometheus-dot');
+    if (grafanaDot) grafanaDot.style.background = '#e07b7b';
+    if (promDot) promDot.style.background = '#e07b7b';
+
+    const gStatus = document.getElementById('grafana-status');
+    const pStatus = document.getElementById('prometheus-status');
+    const gUrl = document.getElementById('grafana-url');
+    const pUrl = document.getElementById('prometheus-url');
+    if (gStatus) {
+      gStatus.textContent = 'NO DISPONIBLE';
+      gStatus.className = 'status-down';
+    }
+    if (pStatus) {
+      pStatus.textContent = 'NO DISPONIBLE';
+      pStatus.className = 'status-down';
+    }
+    if (gUrl) gUrl.textContent = fallbackGrafanaBaseUrl || '-';
+    if (pUrl) pUrl.textContent = fallbackPrometheusBaseUrl || '-';
+
+    applyServiceLink('sidebarGrafanaLink', fallbackGrafanaBaseUrl, false);
+    applyServiceLink('sidebarPrometheusLink', fallbackPrometheusBaseUrl, false);
+    applyServiceLink('mobileGrafanaLink', fallbackGrafanaBaseUrl, false);
+    applyServiceLink('mobilePrometheusLink', fallbackPrometheusBaseUrl, false);
+    applyServiceLink('opsGrafanaLink', fallbackGrafanaBaseUrl, true);
+    applyServiceLink('opsPrometheusLink', fallbackPrometheusBaseUrl, true);
   }
 }
 
@@ -783,6 +1001,7 @@ function scheduleMonitorPolling() {
   monitorTimer = setInterval(() => {
     loadMonitorEvents();
     loadOpsStatus();
+    loadMonitorStackStatus();
     loadRagContextStats();
     loadRagDecisionMetrics();
   }, ms);
@@ -798,6 +1017,7 @@ function applyMonitorInterval() {
   scheduleMonitorPolling();
   loadMonitorEvents();
   loadOpsStatus();
+  loadMonitorStackStatus();
   loadRagContextStats();
   loadRagDecisionMetrics();
 }
@@ -1032,6 +1252,9 @@ async function send() {
       : 'Analiza el adjunto y responde a mi consulta.';
   }
   if (!text) return;
+  closeComposerMenu();
+  closeMobileNavMenu();
+  hideOps();
 
   const mediaPayload = pendingMedia.map(m => ({
     name: m.name,
@@ -1123,10 +1346,36 @@ function hideDrawer() {
   setDrawerOpen(false);
 }
 
+function setOpsOpen(open) {
+  if (!opsPanelDetailsEl) return;
+  if (!mobileViewportQuery.matches) {
+    document.body.classList.remove('ops-open');
+    opsPanelEl?.classList.remove('is-open');
+    opsPanelEl?.setAttribute('aria-hidden', 'false');
+    opsPanelDetailsEl.open = true;
+    return;
+  }
+  document.body.classList.toggle('ops-open', open);
+  opsPanelEl?.classList.toggle('is-open', open);
+  opsPanelEl?.setAttribute('aria-hidden', open ? 'false' : 'true');
+  opsPanelDetailsEl.open = open;
+}
+
+function showOps() {
+  setOpsOpen(true);
+}
+
+function hideOps() {
+  setOpsOpen(false);
+}
+
 /* Listeners */
 sendBtn?.addEventListener('click', send);
 inputEl?.addEventListener('input', () => syncComposerHeight());
 inputEl?.addEventListener('focus', () => {
+  closeComposerMenu();
+  closeMobileNavMenu();
+  hideOps();
   syncComposerHeight();
   if (window.innerWidth <= 760) {
     setTimeout(() => inputEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 180);
@@ -1138,9 +1387,18 @@ inputEl?.addEventListener('keydown', (e) => {
     send();
   }
 });
-attachBtnEl?.addEventListener('click', () => mediaInputEl?.click());
-cameraBtnEl?.addEventListener('click', () => cameraInputEl?.click());
-clearMediaBtnEl?.addEventListener('click', () => clearMediaSelection());
+attachBtnEl?.addEventListener('click', () => {
+  closeComposerMenu();
+  mediaInputEl?.click();
+});
+cameraBtnEl?.addEventListener('click', () => {
+  closeComposerMenu();
+  cameraInputEl?.click();
+});
+clearMediaBtnEl?.addEventListener('click', () => {
+  clearMediaSelection();
+  closeComposerMenu();
+});
 mediaInputEl?.addEventListener('change', async (e) => {
   await handlePickedFiles(e.target.files);
   e.target.value = '';
@@ -1151,6 +1409,7 @@ cameraInputEl?.addEventListener('change', async (e) => {
 });
 
 newChatBtn?.addEventListener('click', async () => {
+  hideOps();
   try { await createNewChat(); } catch (e) { alert(e.message); }
 });
 
@@ -1158,8 +1417,40 @@ openApiKeysInline?.addEventListener('click', () => {
   const btn = document.getElementById('openApiKeys');
   if (btn) btn.click();
 });
+mobileOpenApiKeysEl?.addEventListener('click', () => {
+  closeMobileNavMenu();
+  const btn = document.getElementById('openApiKeys');
+  if (btn) btn.click();
+});
+mobileNavMenuEl?.querySelectorAll('a').forEach((link) => {
+  link.addEventListener('click', () => closeMobileNavMenu());
+});
+toggleOpsBtn?.addEventListener('click', () => {
+  hideDrawer();
+  closeMobileNavMenu();
+  closeComposerMenu();
+  showOps();
+});
+closeOpsBtn?.addEventListener('click', (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  hideOps();
+});
+opsBackdropEl?.addEventListener('click', () => hideOps());
+opsSummaryEl?.addEventListener('click', (event) => {
+  if (!mobileViewportQuery.matches) return;
+  if (event.target instanceof Element && event.target.closest('#closeOps')) {
+    return;
+  }
+  event.preventDefault();
+});
 
 monitorApplyBtn?.addEventListener('click', () => applyMonitorInterval());
+monitorStackProvisionBtn?.addEventListener('click', () => activateMonitorStack());
+monitorStackRefreshBtn?.addEventListener('click', () => loadMonitorStackStatus());
+triggerMonitorProvisionSidebarBtn?.addEventListener('click', () => triggerMonitorProvisionShortcut());
+triggerMonitorProvisionMobileBtn?.addEventListener('click', () => triggerMonitorProvisionShortcut());
+triggerMonitorProvisionTopBtn?.addEventListener('click', () => triggerMonitorProvisionShortcut());
 ragRefreshBtn?.addEventListener('click', () => loadRagContextStats());
 ragDecisionRefreshBtn?.addEventListener('click', () => loadRagDecisionMetrics());
 monitorIntervalEl?.addEventListener('keydown', (e) => {
@@ -1184,32 +1475,71 @@ window.addEventListener('storage', (e) => {
 window.addEventListener('resize', () => {
   syncViewportHeight();
   syncComposerHeight();
+  closeComposerMenu();
+  closeMobileNavMenu();
   if (!mobileViewportQuery.matches) {
     hideDrawer();
+    setOpsOpen(false);
   }
 });
 
 window.addEventListener('orientationchange', () => {
   syncViewportHeight();
+  syncKeyboardState();
   syncComposerHeight();
+  closeMobileNavMenu();
+  hideOps();
 });
 
-window.visualViewport?.addEventListener('resize', syncViewportHeight);
+window.visualViewport?.addEventListener('resize', () => {
+  syncViewportHeight();
+  syncKeyboardState();
+});
 mobileViewportQuery.addEventListener?.('change', (event) => {
   if (!event.matches) {
     hideDrawer();
   }
+  closeComposerMenu();
+  closeMobileNavMenu();
+  hideOps();
+  syncKeyboardState();
+  setOpsOpen(false);
 });
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
+    closeComposerMenu();
+    closeMobileNavMenu();
+    hideOps();
     hideDrawer();
   }
 });
 
-toggleSessionsBtn?.addEventListener('click', showDrawer);
-drawerBackdrop?.addEventListener('click', hideDrawer);
-closeDrawerBtn?.addEventListener('click', hideDrawer);
+document.addEventListener('click', (event) => {
+  if (!(event.target instanceof Element)) return;
+  if (composerMenuEl?.open && !composerMenuEl.contains(event.target)) {
+    closeComposerMenu();
+  }
+  if (mobileNavMenuEl?.open && !mobileNavMenuEl.contains(event.target)) {
+    closeMobileNavMenu();
+  }
+});
+
+toggleSessionsBtn?.addEventListener('click', () => {
+  closeMobileNavMenu();
+  hideOps();
+  showDrawer();
+});
+drawerBackdrop?.addEventListener('click', () => {
+  hideDrawer();
+  closeMobileNavMenu();
+  hideOps();
+});
+closeDrawerBtn?.addEventListener('click', () => {
+  hideDrawer();
+  closeMobileNavMenu();
+  hideOps();
+});
 
 sessionSearchEl?.addEventListener('input', () => renderSessions(sessionSearchEl.value));
 sessionSearchMobileEl?.addEventListener('input', () => renderSessions(sessionSearchMobileEl.value));
@@ -1218,10 +1548,12 @@ sessionSearchMobileEl?.addEventListener('input', () => renderSessions(sessionSea
   try {
     syncViewportHeight();
     syncComposerHeight();
+    setOpsOpen(false);
     loadModelSelection();
     syncMonitorIntervalUI();
     loadOpsStatus();
     loadMonitorEvents();
+    loadMonitorStackStatus();
     setRagContextLoading();
     loadRagContextStats();
     renderRagDecisionLoading();

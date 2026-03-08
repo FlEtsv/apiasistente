@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="es" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Configuracion Inicial - ApiAsistente</title>
+    <meta name="_csrf" th:content="${_csrf.token}"/>
+    <meta name="_csrf_header" th:content="${_csrf.headerName}"/>
+    <style>
+        :root {
+            --bg: #0b1017;
+            --panel: #121a24;
+            --border: #1f2c3d;
+            --text: #e7eef7;
+            --muted: #8fa3b8;
+            --ok: #39c07d;
+            --warn: #e07b7b;
+            --accent: #1f7ae0;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: "Segoe UI", Arial, sans-serif;
+            color: var(--text);
+            background: radial-gradient(900px 420px at -10% -10%, rgba(31,122,224,0.22), transparent),
+            radial-gradient(720px 360px at 110% 110%, rgba(24,192,166,0.14), transparent),
+            var(--bg);
+            min-height: 100vh;
+        }
+        .wrap {
+            max-width: 980px;
+            margin: 0 auto;
+            padding: 28px 16px 40px;
+        }
+        .card {
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            background: linear-gradient(165deg, rgba(18, 26, 36, 0.95), rgba(11, 17, 25, 0.9));
+            padding: 18px;
+            box-shadow: 0 16px 30px rgba(0,0,0,0.35);
+        }
+        h1 {
+            margin: 0 0 6px;
+            font-size: clamp(22px, 3vw, 30px);
+        }
+        .sub {
+            margin: 0;
+            color: var(--muted);
+            font-size: 13px;
+        }
+        .status {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 12px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            font-size: 12px;
+        }
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #56657a;
+        }
+        .status.ok .dot { background: var(--ok); }
+        .status.warn .dot { background: var(--warn); }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+            margin-top: 16px;
+        }
+        .field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .field.full {
+            grid-column: 1 / -1;
+        }
+        label {
+            font-size: 12px;
+            color: var(--muted);
+        }
+        input, textarea {
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: #0f1621;
+            color: var(--text);
+            padding: 10px 12px;
+            width: 100%;
+            font: inherit;
+        }
+        textarea {
+            min-height: 130px;
+            resize: vertical;
+            line-height: 1.45;
+        }
+        .hint {
+            font-size: 11px;
+            color: var(--muted);
+        }
+        .switch {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .actions {
+            margin-top: 16px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .btn {
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 10px 14px;
+            background: #101927;
+            color: var(--text);
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .btn.primary {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: #fff;
+        }
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 12px;
+            font-size: 13px;
+            line-height: 1.45;
+            white-space: pre-wrap;
+        }
+        .result.ok { color: #9fe7c0; }
+        .result.error { color: #f6a9a9; }
+        .guide {
+            margin-top: 16px;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 12px;
+            background: rgba(10, 16, 24, 0.55);
+        }
+        .guide h2 {
+            margin: 0 0 6px;
+            font-size: 15px;
+        }
+        .guide p {
+            margin: 6px 0;
+            font-size: 12px;
+            color: var(--muted);
+            line-height: 1.5;
+        }
+        .robot-line {
+            margin-top: 12px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            padding: 6px 10px;
+            font-size: 12px;
+            background: #0d1420;
+        }
+        .pill.on {
+            border-color: rgba(57, 192, 125, 0.55);
+            color: #9fe7c0;
+        }
+        .pill.off {
+            border-color: rgba(224, 123, 123, 0.55);
+            color: #f6a9a9;
+        }
+        @media (max-width: 760px) {
+            .grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+<main class="wrap">
+    <section class="card">
+        <h1>Configuracion Inicial</h1>
+        <p class="sub">Define Ollama, modelos y fuentes web del scraper para activar chat + RAG sin tocar codigo.</p>
+        <div id="setupStatus" class="status warn" th:classappend="${configured} ? ' ok' : ' warn'">
+            <span class="dot"></span>
+            <span id="setupStatusText" th:text="${configured} ? 'Instalacion configurada' : 'Configuracion pendiente'">Configuracion pendiente</span>
+        </div>
+
+        <div class="guide">
+            <h2>Por que esta configuracion es critica</h2>
+            <p>Si la URL de Ollama o un modelo estan mal, el chat puede fallar, tardar demasiado o devolver respuestas vacias.</p>
+            <p>El modelo de embeddings alimenta el retrieval del RAG: si no es correcto, el sistema no encuentra contexto y baja la precision.</p>
+            <p>El scraper es opcional: sin URLs validas no ingesta conocimiento web y la base RAG no crece con informacion externa.</p>
+            <p>El preset inicial viene con nuestra configuracion recomendada, pero el cliente final puede cambiar todos los campos.</p>
+        </div>
+
+        <div class="guide">
+            <h2>Robot RAG y Scraper</h2>
+            <p><strong>Robot RAG:</strong> revisa el corpus en segundo plano, detecta contenido degradado y mantiene la base util para retrieval.</p>
+            <p><strong>Scraper:</strong> extrae texto de webs que indiques y lo inserta como documentos del RAG.</p>
+            <div class="robot-line">
+                <span id="ragRobotState" class="pill off">Robot RAG apagado</span>
+                <button id="toggleRagRobotBtn" class="btn" type="button">Encender robot RAG</button>
+            </div>
+            <div id="ragRobotDetail" class="hint">Cargando estado del robot RAG...</div>
+        </div>
+
+        <div class="grid">
+            <div class="field full">
+                <label for="ollamaBaseUrl">Ollama Base URL</label>
+                <input id="ollamaBaseUrl" placeholder="http://localhost:11434/api"/>
+                <div class="hint">Si pones solo host/puerto, el sistema completa /api automaticamente.</div>
+            </div>
+
+            <div class="field">
+                <label for="chatModel">Modelo chat principal</label>
+                <input id="chatModel" placeholder="qwen3:14b"/>
+            </div>
+            <div class="field">
+                <label for="fastChatModel">Modelo chat rapido</label>
+                <input id="fastChatModel" placeholder="qwen2.5:7b"/>
+            </div>
+            <div class="field">
+                <label for="visualModel">Modelo visual</label>
+                <input id="visualModel" placeholder="qwen2.5vl:7b"/>
+            </div>
+            <div class="field">
+                <label for="imageModel">Modelo imagen</label>
+                <input id="imageModel" placeholder="dreamshaper_8"/>
+            </div>
+            <div class="field">
+                <label for="embedModel">Modelo embeddings (RAG)</label>
+                <input id="embedModel" placeholder="nomic-embed-text:latest"/>
+            </div>
+            <div class="field">
+                <label for="responseGuardModel">Modelo response guard (opcional)</label>
+                <input id="responseGuardModel" placeholder="mistral:7b"/>
+            </div>
+
+            <div class="field full">
+                <label class="switch">
+                    <input id="scraperEnabled" type="checkbox"/>
+                    Activar scraper web automatico a RAG
+                </label>
+                <div class="hint">Opcional. Si el scraper vive en otro servicio, integralo contra la misma MySQL o via API RAG externa.</div>
+            </div>
+            <div class="field">
+                <label for="scraperTickSec">Frecuencia scraper (segundos)</label>
+                <input id="scraperTickSec" type="number" min="10" step="1" placeholder="300"/>
+            </div>
+            <div class="field">
+                <label for="scraperOwner">Owner RAG para scraper</label>
+                <input id="scraperOwner" placeholder="global"/>
+            </div>
+            <div class="field">
+                <label for="scraperSource">Source del scraper</label>
+                <input id="scraperSource" placeholder="web-scraper"/>
+            </div>
+            <div class="field">
+                <label for="scraperTags">Tags del scraper</label>
+                <input id="scraperTags" placeholder="scraper,web,knowledge"/>
+            </div>
+            <div class="field full">
+                <label for="scraperUrls">URLs del scraper (una por linea o separadas por coma)</label>
+                <textarea id="scraperUrls" placeholder="https://docs.spring.io/spring-boot/reference&#10;https://example.com/base-conocimiento"></textarea>
+            </div>
+        </div>
+
+        <div class="actions">
+            <button id="saveSetupBtn" class="btn primary">Guardar configuracion</button>
+            <button id="loadDefaultsBtn" class="btn">Cargar preset recomendado</button>
+            <button id="runScraperBtn" class="btn">Ejecutar scraper ahora</button>
+            <a href="/chat" class="btn" style="text-decoration:none; display:inline-flex; align-items:center;">Ir al chat</a>
+        </div>
+
+        <div id="setupResult" class="result"></div>
+    </section>
+</main>
+<script src="/js/setup.js?v=1"></script>
+</body>
+</html>

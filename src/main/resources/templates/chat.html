@@ -10,6 +10,8 @@
     <!-- CSRF para fetch() -->
     <meta name="_csrf" th:content="${_csrf.token}"/>
     <meta name="_csrf_header" th:content="${_csrf.headerName}"/>
+    <meta name="monitoring_grafana_url" th:content="${grafanaBaseUrl}"/>
+    <meta name="monitoring_prometheus_url" th:content="${prometheusBaseUrl}"/>
 
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
@@ -24,6 +26,8 @@
             --muted: #8fa3b8;
             --text: #e7eef7;
             --accent: #1f7ae0;
+            --accent-2: #18c0a6;
+            --accent-soft: rgba(24, 192, 166, 0.26);
             --warn: #c04848;
             --shadow: 0 12px 30px rgba(0,0,0,0.35);
             --safe-top: env(safe-area-inset-top, 0px);
@@ -34,6 +38,9 @@
         * { box-sizing: border-box; }
         .hidden { display: none !important; }
         body.drawer-open {
+            overflow: hidden;
+        }
+        body.ops-open {
             overflow: hidden;
         }
         html, body {
@@ -48,10 +55,11 @@
             color: var(--text);
             background: radial-gradient(1200px 600px at 10% -10%, #152235, transparent),
                         radial-gradient(900px 500px at 100% 0%, #1b2740, transparent),
+                        radial-gradient(1100px 700px at 50% 120%, rgba(24, 192, 166, 0.12), transparent 58%),
                         var(--bg);
             min-height: 100vh;
             min-height: 100dvh;
-            overflow-x: hidden;
+            overflow: hidden;
         }
 
         body::before {
@@ -63,9 +71,29 @@
             background-size: 36px 36px;
             pointer-events: none;
             opacity: 0.35;
+            z-index: 0;
+        }
+
+        body::after {
+            content: "";
+            position: fixed;
+            inset: -18%;
+            background: radial-gradient(560px 380px at 16% 26%, rgba(31, 122, 224, 0.2), transparent),
+                        radial-gradient(520px 360px at 86% 74%, rgba(24, 192, 166, 0.18), transparent);
+            pointer-events: none;
+            opacity: 0.9;
+            filter: blur(14px);
+            animation: ambient-shift 16s ease-in-out infinite alternate;
+            z-index: 0;
+        }
+
+        @keyframes ambient-shift {
+            0% { transform: translate3d(-1.5%, -1%, 0) scale(1); }
+            100% { transform: translate3d(1.5%, 1%, 0) scale(1.05); }
         }
 
         .app {
+            position: relative;
             display: grid;
             grid-template-columns: clamp(220px, 22vw, 280px) minmax(0, 1fr);
             height: var(--app-height);
@@ -140,7 +168,13 @@
             text-align: left;
             cursor: pointer;
             min-width: 0;
-            white-space: nowrap;
+            white-space: normal;
+            overflow-wrap: anywhere;
+        }
+
+        .endpoint-link {
+            font-size: 12px;
+            line-height: 1.25;
         }
 
         .nav a:hover,
@@ -245,6 +279,122 @@
             justify-content: flex-end;
         }
 
+        .mobile-ops-trigger {
+            display: none;
+            border-color: rgba(24, 192, 166, 0.72);
+            background: linear-gradient(145deg, rgba(14, 31, 32, 0.92), rgba(8, 22, 24, 0.86));
+            color: #dffcf7;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+        }
+
+        .mobile-nav {
+            display: none;
+            position: relative;
+        }
+
+        .mobile-nav > summary {
+            list-style: none;
+            min-height: 34px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            border: 1px solid rgba(61, 85, 114, 0.92);
+            background: linear-gradient(150deg, rgba(13, 20, 31, 0.92), rgba(11, 17, 26, 0.85));
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 8px 18px rgba(0, 0, 0, 0.28);
+            color: var(--text);
+            cursor: pointer;
+            font-size: 11px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+        }
+
+        .mobile-nav > summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .mobile-nav > summary::after {
+            content: "v";
+            color: var(--muted);
+            font-size: 10px;
+            transition: transform 0.16s ease;
+        }
+
+        .mobile-nav[open] > summary::after {
+            transform: rotate(180deg);
+        }
+
+        .mobile-nav-panel {
+            position: fixed;
+            top: calc(var(--safe-top) + 62px);
+            left: 12px;
+            right: 12px;
+            width: auto;
+            max-width: none;
+            max-height: min(76dvh, 520px);
+            overflow-y: auto;
+            padding: 11px;
+            border-radius: 16px;
+            border: 1px solid rgba(70, 98, 131, 0.85);
+            background: linear-gradient(160deg, rgba(9, 15, 23, 0.98) 0%, rgba(8, 14, 21, 0.95) 100%);
+            box-shadow: 0 22px 40px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            display: grid;
+            gap: 8px;
+            z-index: 75;
+            backdrop-filter: blur(18px);
+            animation: mobile-nav-pop 0.2s ease-out;
+        }
+
+        .mobile-nav-panel a,
+        .mobile-nav-panel button {
+            text-decoration: none;
+            color: var(--text);
+            background: rgba(16, 25, 36, 0.9);
+            border: 1px solid rgba(59, 82, 109, 0.85);
+            padding: 10px 11px;
+            border-radius: 10px;
+            font-size: 12px;
+            text-align: left;
+            cursor: pointer;
+            min-width: 0;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .mobile-nav-panel a:hover,
+        .mobile-nav-panel button:hover {
+            border-color: rgba(24, 192, 166, 0.82);
+            transform: translateY(-1px);
+        }
+
+        .mobile-nav-panel a::before,
+        .mobile-nav-panel button::before {
+            content: ">";
+            color: var(--accent-2);
+            font-weight: 700;
+        }
+
+        @keyframes mobile-nav-pop {
+            from {
+                opacity: 0;
+                transform: translateY(-6px) scale(0.98);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            body::after,
+            .animate-msg,
+            .animate-pulse-slow,
+            .mobile-nav-panel {
+                animation: none !important;
+            }
+        }
+
         .btn {
             padding: 8px 12px;
             border-radius: 10px;
@@ -284,6 +434,18 @@
             flex: 0 0 auto;
         }
 
+        body.keyboard-open .topbar {
+            display: none;
+        }
+
+        body.keyboard-open .main {
+            padding-top: 8px;
+        }
+
+        body.keyboard-open .chat-panel > .panel-header {
+            display: none;
+        }
+
         .workspace {
             display: grid;
             grid-template-columns: minmax(220px, 280px) minmax(0, 1fr) minmax(260px, 320px);
@@ -300,10 +462,10 @@
         }
 
         .panel {
-            background: rgba(18, 26, 36, 0.86);
-            border: 1px solid var(--border);
-            border-radius: 16px;
-            box-shadow: var(--shadow);
+            background: linear-gradient(165deg, rgba(18, 26, 36, 0.94) 0%, rgba(10, 15, 24, 0.9) 100%);
+            border: 1px solid rgba(41, 58, 78, 0.88);
+            border-radius: 18px;
+            box-shadow: 0 18px 38px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.03);
             min-height: 0;
             display: flex;
             flex-direction: column;
@@ -313,7 +475,7 @@
 
         .panel-header {
             padding: 14px 16px;
-            border-bottom: 1px solid var(--border);
+            border-bottom: 1px solid rgba(41, 58, 78, 0.7);
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -388,7 +550,87 @@
             flex-direction: column;
             height: 100%;
             min-height: 0;
-            background: linear-gradient(180deg, rgba(18, 26, 36, 0.94) 0%, rgba(10, 15, 22, 0.92) 100%);
+            position: relative;
+            isolation: isolate;
+            background: linear-gradient(180deg, rgba(17, 25, 35, 0.96) 0%, rgba(9, 14, 21, 0.94) 100%);
+            border: 1px solid rgba(47, 67, 91, 0.92);
+        }
+
+        .chat-panel::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            z-index: 0;
+            pointer-events: none;
+            background: radial-gradient(420px 200px at 15% 0%, rgba(31, 122, 224, 0.16), transparent 70%),
+                        radial-gradient(360px 220px at 90% 100%, rgba(24, 192, 166, 0.14), transparent 72%);
+            opacity: 0.95;
+        }
+
+        .chat-panel > * {
+            position: relative;
+            z-index: 1;
+        }
+
+        .chat-header {
+            align-items: flex-start;
+            gap: 12px;
+        }
+
+        .chat-header .sub {
+            font-size: 11px;
+        }
+
+        .chat-meta {
+            min-width: 0;
+            position: relative;
+        }
+
+        .chat-meta > summary {
+            list-style: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            min-height: 36px;
+            padding: 7px 11px;
+            border-radius: 999px;
+            border: 1px solid rgba(47, 67, 91, 0.9);
+            background: rgba(9, 15, 24, 0.78);
+            color: var(--text);
+            cursor: pointer;
+            font-size: 11px;
+            white-space: nowrap;
+        }
+
+        .chat-meta > summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .chat-meta > summary::after {
+            content: "v";
+            color: var(--muted);
+            font-size: 11px;
+            transition: transform 0.16s ease;
+        }
+
+        .chat-meta[open] > summary::after {
+            transform: rotate(180deg);
+        }
+
+        .chat-meta-body {
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            width: max-content;
+            max-width: min(320px, 72vw);
+            display: grid;
+            gap: 8px;
+            padding: 10px;
+            border-radius: 12px;
+            border: 1px solid rgba(47, 67, 91, 0.9);
+            background: rgba(9, 16, 25, 0.96);
+            box-shadow: 0 18px 30px rgba(0, 0, 0, 0.36);
+            z-index: 30;
         }
 
         #chat {
@@ -449,17 +691,91 @@
             flex-direction: column;
             gap: 10px;
             align-self: stretch;
+            min-width: 0;
         }
 
-        .composer-tools {
-            margin-top: 10px;
-            display: flex;
-            align-items: center;
+        .composer-actions-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
             gap: 8px;
-            flex-wrap: wrap;
+            min-width: 0;
+            align-items: stretch;
         }
 
-        .composer-tools .btn {
+        .composer-menu {
+            position: relative;
+            min-width: 0;
+        }
+
+        .composer-menu > summary {
+            list-style: none;
+            width: 100%;
+            min-height: 48px;
+            padding: 10px 12px;
+            border-radius: 14px;
+            border: 1px solid var(--border);
+            background: var(--bg-soft);
+            color: var(--text);
+            font-size: 12px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .composer-menu > summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .composer-menu > summary::after {
+            content: 'v';
+            color: var(--muted);
+            font-size: 12px;
+            transition: transform 0.16s ease;
+        }
+
+        .composer-menu[open] > summary {
+            border-color: rgba(31, 122, 224, 0.68);
+            box-shadow: 0 0 0 1px rgba(31, 122, 224, 0.2);
+        }
+
+        .composer-menu[open] > summary::after {
+            transform: rotate(180deg);
+        }
+
+        .composer-menu-panel {
+            position: absolute;
+            right: 0;
+            bottom: calc(100% + 10px);
+            width: min(380px, 94vw);
+            max-height: min(58dvh, 460px);
+            overflow-y: auto;
+            padding: 12px;
+            border-radius: 14px;
+            border: 1px solid var(--border);
+            background: rgba(10, 16, 25, 0.98);
+            box-shadow: 0 18px 40px rgba(0, 0, 0, 0.4);
+            z-index: 30;
+            display: grid;
+            gap: 10px;
+        }
+
+        .composer-menu-label {
+            font-size: 11px;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        .composer-menu-tools {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 8px;
+        }
+
+        .composer-menu-tools .btn {
+            width: 100%;
             padding: 7px 10px;
             font-size: 11px;
         }
@@ -515,6 +831,7 @@
         .media-hint {
             font-size: 11px;
             color: var(--muted);
+            line-height: 1.35;
         }
 
         #input {
@@ -555,6 +872,7 @@
             background: var(--bg-soft);
             color: var(--text);
             font-size: 12px;
+            appearance: none;
         }
 
         .ops-grid {
@@ -566,12 +884,89 @@
             display: flex;
             flex-direction: column;
             min-height: 0;
+            position: relative;
+            z-index: 50;
+        }
+
+        .ops-close-btn {
+            display: none;
+            min-height: 34px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            border: 1px solid rgba(71, 96, 126, 0.82);
+            background: rgba(13, 21, 32, 0.92);
+            color: var(--text);
+        }
+
+        .ops-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(3, 8, 14, 0.44);
+            backdrop-filter: blur(0.8px);
+            z-index: 1040;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease;
+        }
+
+        body.ops-open .ops-backdrop {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .ops-details {
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            height: 100%;
+            overflow: hidden;
+        }
+
+        .ops-details > summary {
+            list-style: none;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .ops-details > summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .ops-details > summary::after {
+            content: "v";
+            margin-left: auto;
+            color: var(--muted);
+            font-size: 11px;
+            transition: transform 0.16s ease;
+        }
+
+        .ops-details[open] > summary::after {
+            transform: rotate(180deg);
+        }
+
+        .ops-summary-meta {
+            font-size: 11px;
+            color: var(--muted);
+        }
+
+        .ops-summary-group {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-left: auto;
         }
 
         .ops-panel .panel-body {
             flex: 1 1 auto;
             min-height: 0;
             overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior: contain;
+            touch-action: pan-y;
+        }
+
+        .ops-details:not([open]) .panel-body {
+            display: none;
         }
 
         .stat {
@@ -909,21 +1304,27 @@
         @media (max-width: 980px) {
             .app {
                 grid-template-columns: 1fr;
-                height: auto;
-                max-height: none;
-                overflow: visible;
+                grid-template-rows: auto minmax(0, 1fr);
+                height: var(--app-height);
+                min-height: var(--app-height);
+                max-height: var(--app-height);
+                overflow: hidden;
             }
             .sidebar {
                 position: relative;
                 top: auto;
-                max-height: none;
+                max-height: min(28dvh, 210px);
                 border-right: 0;
                 border-bottom: 1px solid var(--border);
-                gap: 12px;
+                gap: 10px;
+                padding: calc(12px + var(--safe-top)) 12px 12px;
+            }
+            .brand p {
+                display: none;
             }
             .nav {
                 flex-direction: row;
-                flex-wrap: wrap;
+                flex-wrap: nowrap;
                 overflow-x: auto;
                 padding-bottom: 2px;
                 scroll-snap-type: x proximity;
@@ -934,60 +1335,205 @@
                 flex: 0 0 auto;
                 scroll-snap-align: start;
             }
-            .sidebar-footer { width: 100%; }
+            .sidebar-footer { display: none; }
             .main {
                 min-height: 0;
-                height: auto;
+                height: 100%;
+                padding-top: 10px;
+                overflow: hidden;
             }
-            .workspace { grid-template-columns: 1fr; }
+            .workspace {
+                grid-template-columns: 1fr;
+                grid-template-rows: minmax(0, 1fr);
+                min-height: 0;
+                overflow: hidden;
+            }
             .sessions-panel { display: none; }
-            .topbar { flex-direction: column; align-items: flex-start; }
+            .topbar {
+                flex-direction: column;
+                align-items: flex-start;
+                margin-bottom: 10px;
+                padding-bottom: 8px;
+            }
             .actions { width: 100%; justify-content: flex-start; }
             #toggleSessions { display: inline-flex; }
-            .ops-panel { display: flex; }
-            .ops-panel .panel-body { overflow: visible; }
-            .ops-panel .ops-grid {
-                grid-auto-flow: column;
-                grid-auto-columns: minmax(320px, 86vw);
-                overflow-x: auto;
-                padding-bottom: 6px;
-                scroll-snap-type: x mandatory;
+            .mobile-ops-trigger { display: inline-flex; }
+            .ops-panel {
+                display: flex;
+                position: fixed;
+                left: 12px;
+                right: 12px;
+                bottom: calc(12px + var(--safe-bottom));
+                top: auto;
+                height: min(74dvh, 700px);
+                max-height: min(74dvh, 700px);
+                z-index: 1100;
+                border-radius: 18px;
+                transform: translateY(calc(100% + 20px));
+                opacity: 0;
+                visibility: hidden;
+                pointer-events: none;
+                transition: transform 0.24s ease, opacity 0.2s ease;
+                box-shadow: 0 22px 42px rgba(0, 0, 0, 0.5);
+                touch-action: pan-y;
             }
-            .ops-panel .ops-grid > * {
-                scroll-snap-align: start;
+            .ops-details {
+                display: grid;
+                grid-template-rows: auto minmax(0, 1fr);
+                min-height: 0;
+                height: 100%;
+                overflow: hidden;
+            }
+            .ops-panel .panel-body {
+                min-height: 0;
+                height: 100%;
+                max-height: 100%;
+                overflow-y: auto;
+                overscroll-behavior-y: contain;
+                -webkit-overflow-scrolling: touch;
+                padding-bottom: calc(18px + var(--safe-bottom));
+            }
+            .ops-panel .event-list {
+                max-height: none;
+                overflow: visible;
+            }
+            .ops-close-btn {
+                display: inline-flex;
+            }
+            body.ops-open .ops-panel {
+                transform: translateY(0);
+                opacity: 1;
+                visibility: visible;
+                pointer-events: auto;
+            }
+            .ops-panel.is-open {
+                transform: translateY(0);
+                opacity: 1;
+                visibility: visible;
+                pointer-events: auto;
+            }
+            .chat-panel {
+                border-radius: 22px;
+            }
+            .chat-meta-body {
+                max-width: min(360px, 82vw);
             }
         }
 
         @media (max-width: 760px) {
+            .app {
+                grid-template-rows: minmax(0, 1fr);
+            }
+            .sidebar {
+                display: none;
+            }
+            .main {
+                padding-top: calc(8px + var(--safe-top));
+            }
+            .topbar {
+                padding-top: 0;
+                gap: 8px;
+                margin-bottom: 8px;
+                background: rgba(8, 12, 19, 0.72);
+                border: 1px solid rgba(47, 67, 91, 0.65);
+                border-radius: 14px;
+                padding-left: 10px;
+                padding-right: 10px;
+            }
+            .topbar-left {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                width: 100%;
+                gap: 8px;
+            }
+            .topbar-left > div {
+                display: none;
+            }
+            .mobile-nav {
+                display: flex;
+                width: 100%;
+            }
+            .mobile-nav > summary {
+                width: 100%;
+                justify-content: space-between;
+            }
+            #toggleSessions {
+                width: 100%;
+            }
+            .actions {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 8px;
+                width: 100%;
+            }
+            .actions .pill {
+                display: none;
+            }
+            .actions .btn {
+                width: 100%;
+                min-height: 38px;
+                justify-content: center;
+                border-radius: 12px;
+            }
+            .mobile-ops-trigger {
+                display: inline-flex;
+                justify-content: center;
+            }
+            .ops-summary-meta {
+                display: none;
+            }
+            #newChat {
+                min-height: 38px;
+                padding: 8px 11px;
+            }
+            #toggleSessions {
+                min-height: 38px;
+                padding: 8px 11px;
+            }
             .composer-row { grid-template-columns: 1fr; }
             .composer-actions {
                 width: 100%;
-                display: grid;
+            }
+            .composer-actions-row {
                 grid-template-columns: minmax(0, 1fr) auto;
             }
-            #send, #modelSelect { width: 100%; }
+            #send { min-width: 92px; }
             .panel-header { flex-direction: column; align-items: flex-start; }
-            .composer-tools {
-                display: grid;
-                grid-template-columns: repeat(2, minmax(0, 1fr));
+            .chat-header {
+                gap: 10px;
             }
-            .composer-tools .btn {
+            .chat-header .sub {
+                display: none;
+            }
+            .chat-meta {
                 width: 100%;
             }
-            .media-hint {
-                grid-column: 1 / -1;
+            .chat-meta > summary {
+                width: 100%;
+                justify-content: space-between;
+            }
+            .chat-meta-body {
+                position: static;
+                margin-top: 8px;
+                width: 100%;
+                max-width: none;
+            }
+            .composer-menu-panel {
+                width: min(420px, calc(100vw - 24px));
+            }
+            .composer-menu-tools {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
             }
         }
 
         @media (max-width: 640px) {
             body::before { opacity: 0.2; }
-            .sidebar { padding: calc(12px + var(--safe-top)) 12px 12px; }
             .main { padding: 12px 12px calc(16px + var(--safe-bottom)); }
             .topbar-left { width: 100%; }
-            .topbar p { font-size: 11px; }
             .actions {
                 display: grid;
                 grid-template-columns: repeat(2, minmax(0, 1fr));
+                overflow: visible;
                 width: 100%;
             }
             .actions > * {
@@ -1003,10 +1549,31 @@
             }
             #chat { padding: 12px; }
             .chat-panel {
-                min-height: max(64dvh, 540px);
+                min-height: 0;
+                height: 100%;
+                border-radius: 18px;
             }
-            .ops-panel .ops-grid {
-                grid-auto-columns: minmax(88vw, 1fr);
+            .ops-panel {
+                left: 10px;
+                right: 10px;
+                bottom: calc(10px + var(--safe-bottom));
+                height: min(78dvh, 760px);
+                max-height: min(78dvh, 760px);
+            }
+            .mobile-nav-panel {
+                top: calc(var(--safe-top) + 56px);
+                left: 10px;
+                right: 10px;
+                max-width: none;
+            }
+            .composer-menu-panel {
+                left: 0;
+                right: 0;
+                width: auto;
+                max-height: min(54dvh, 360px);
+            }
+            .composer-menu-tools {
+                grid-template-columns: 1fr;
             }
             .drawer-panel {
                 top: auto;
@@ -1035,11 +1602,11 @@
         }
 
         @media (max-width: 440px) {
-            .composer-actions {
+            .composer-actions-row {
                 grid-template-columns: 1fr;
             }
-            .composer-tools {
-                grid-template-columns: 1fr;
+            #send {
+                width: 100%;
             }
         }
     </style>
@@ -1060,9 +1627,11 @@
             <a href="/rag-admin" sec:authorize="hasAuthority('PERM_RAG')">RAG Admin</a>
             <button id="openApiKeys" type="button" sec:authorize="hasAuthority('PERM_API_KEYS')">API Keys</button>
             <a href="/monitor" sec:authorize="hasAuthority('PERM_MONITOR')">Monitor local</a>
+            <button id="triggerMonitorProvisionSidebar" type="button" sec:authorize="hasAuthority('PERM_MONITOR')">Detonar stack monitor</button>
             <a href="/ops/status/ui" target="_blank" rel="noopener" sec:authorize="hasAuthority('PERM_MONITOR')">Ops Status</a>
-            <a href="/ops/grafana" target="_blank" rel="noopener" sec:authorize="hasAuthority('PERM_MONITOR')">Grafana</a>
-            <a href="/ops/prometheus" target="_blank" rel="noopener" sec:authorize="hasAuthority('PERM_MONITOR')">Prometheus</a>
+            <a id="sidebarGrafanaLink" class="endpoint-link" data-label="Grafana" th:attr="data-default-url=${grafanaBaseUrl}" href="/ops/grafana" target="_blank" rel="noopener" sec:authorize="hasAuthority('PERM_MONITOR')">Grafana</a>
+            <a id="sidebarPrometheusLink" class="endpoint-link" data-label="Prometheus" th:attr="data-default-url=${prometheusBaseUrl}" href="/ops/prometheus" target="_blank" rel="noopener" sec:authorize="hasAuthority('PERM_MONITOR')">Prometheus</a>
+            <a href="/actuator/prometheus" target="_blank" rel="noopener" sec:authorize="hasAuthority('PERM_MONITOR')">Metricas API</a>
         </nav>
 
         <div class="sidebar-footer">
@@ -1082,15 +1651,32 @@
         <header class="topbar">
             <div class="topbar-left">
                 <button id="toggleSessions" class="btn">Sesiones</button>
+                <details id="mobileNavMenu" class="mobile-nav">
+                    <summary>Menu</summary>
+                    <div class="mobile-nav-panel">
+                        <a href="/chat" sec:authorize="hasAuthority('PERM_CHAT')">Chat</a>
+                        <a href="/rag-admin" sec:authorize="hasAuthority('PERM_RAG')">RAG Admin</a>
+                        <button id="mobileOpenApiKeys" type="button" sec:authorize="hasAuthority('PERM_API_KEYS')">API Keys</button>
+                        <a href="/monitor" sec:authorize="hasAuthority('PERM_MONITOR')">Monitor local</a>
+                        <button id="triggerMonitorProvisionMobile" type="button" sec:authorize="hasAuthority('PERM_MONITOR')">Detonar stack monitor</button>
+                        <a href="/ops/status/ui" target="_blank" rel="noopener" sec:authorize="hasAuthority('PERM_MONITOR')">Ops Status</a>
+                        <a id="mobileGrafanaLink" class="endpoint-link" data-label="Grafana" th:attr="data-default-url=${grafanaBaseUrl}" href="/ops/grafana" target="_blank" rel="noopener" sec:authorize="hasAuthority('PERM_MONITOR')">Grafana</a>
+                        <a id="mobilePrometheusLink" class="endpoint-link" data-label="Prometheus" th:attr="data-default-url=${prometheusBaseUrl}" href="/ops/prometheus" target="_blank" rel="noopener" sec:authorize="hasAuthority('PERM_MONITOR')">Prometheus</a>
+                        <a href="/actuator/prometheus" target="_blank" rel="noopener" sec:authorize="hasAuthority('PERM_MONITOR')">Metricas Prometheus</a>
+                    </div>
+                </details>
                 <div>
                     <h2>Dashboard operativo</h2>
                     <p>Chat, monitoreo y herramientas de datos en un solo lugar</p>
                 </div>
             </div>
             <div class="actions">
+                <button id="toggleOps" class="btn mobile-ops-trigger" type="button" sec:authorize="hasAnyAuthority('PERM_MONITOR','PERM_RAG','PERM_API_KEYS')">Panel tecnico</button>
+                <button id="triggerMonitorProvisionTop" class="btn" type="button" sec:authorize="hasAuthority('PERM_MONITOR')">Detonar observabilidad</button>
                 <button id="newChat" class="btn primary">Nuevo chat</button>
                 <span class="pill" sec:authorize="hasAuthority('PERM_MONITOR')"><span class="dot" id="grafana-dot"></span>Grafana</span>
                 <span class="pill" sec:authorize="hasAuthority('PERM_MONITOR')"><span class="dot" id="prometheus-dot"></span>Prometheus</span>
+                <span id="monitorProvisionQuickStatus" class="sub" sec:authorize="hasAuthority('PERM_MONITOR')"></span>
             </div>
         </header>
 
@@ -1108,12 +1694,18 @@
 
             <!-- Flujo de conversacion: input fijo abajo, historial arriba y contexto visible -->
             <div class="panel chat-panel">
-                <div class="panel-header">
-                    <h3>Chat operativo</h3>
-                    <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
-                        <span class="pill" sec:authorize="hasAuthority('PERM_RAG')">RAG + Ollama</span>
-                        <span class="pill" id="ragContextPill" sec:authorize="hasAuthority('PERM_RAG')">Contexto RAG: ...</span>
+                <div class="panel-header chat-header">
+                    <div>
+                        <h3>Chat operativo</h3>
+                        <p class="sub">Vista limpia, controles avanzados en apartados ocultos.</p>
                     </div>
+                    <details class="chat-meta" sec:authorize="hasAuthority('PERM_RAG')">
+                        <summary>Estado IA</summary>
+                        <div class="chat-meta-body">
+                            <span class="pill">RAG + Ollama</span>
+                            <span class="pill" id="ragContextPill">Contexto RAG: ...</span>
+                        </div>
+                    </details>
                 </div>
                 <div id="chat">
                     <div class="empty-state opacity-50">
@@ -1131,43 +1723,56 @@
                             <textarea id="input" rows="1" placeholder="Escribe tu consulta aqui..." autocomplete="off" autocapitalize="sentences" enterkeyhint="send"></textarea>
                         </label>
                         <div class="composer-actions">
-                            <select id="modelSelect" aria-label="Modelo de respuesta">
-                                <option value="auto">Auto (router de intencion)</option>
-                                <option value="fast">Rapido (gemma2:9b)</option>
-                                <option value="chat">Complejo/RAG (llama3.1:8b)</option>
-                                <option value="visual">Vision (qwen2.5vl:7b)</option>
-                                <option value="image">Generar imagen (DreamShaper8)</option>
-                                <option value="dreamshaper8.safetensors">Generar imagen PRO 3090 (DreamShaper8 checkpoint)</option>
-                            </select>
-                            <button id="send" type="button">Enviar</button>
+                            <div class="composer-actions-row">
+                                <details id="composerMenu" class="composer-menu">
+                                    <summary id="composerMenuToggle" aria-label="Abrir opciones de modelo y adjuntos">Modelo y adjuntos</summary>
+                                    <div class="composer-menu-panel">
+                                        <label class="composer-menu-label" for="modelSelect">Modelo de respuesta</label>
+                                        <select id="modelSelect" aria-label="Modelo de respuesta">
+                                            <option value="auto">Auto (router de intencion)</option>
+                                            <option value="fast">Rapido (gemma2:9b)</option>
+                                            <option value="chat">Complejo/RAG (llama3.1:8b)</option>
+                                            <option value="visual">Vision (qwen2.5vl:7b)</option>
+                                            <option value="image">Generar imagen (DreamShaper8)</option>
+                                            <option value="dreamshaper8.safetensors">Generar imagen PRO 3090 (DreamShaper8 checkpoint)</option>
+                                        </select>
+                                        <input id="mediaInput" type="file" accept="image/*,.txt,.md,.json,.csv,.pdf" multiple class="hidden" />
+                                        <input id="cameraInput" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" class="hidden" />
+                                        <div class="composer-menu-tools">
+                                            <button id="attachBtn" type="button" class="btn">Adjuntar archivo</button>
+                                            <button id="cameraBtn" type="button" class="btn">Usar camara</button>
+                                            <button id="clearMediaBtn" type="button" class="btn">Limpiar adjuntos</button>
+                                        </div>
+                                        <span class="media-hint">Puedes enviar imagen, camara o documento. En modo imagen, si adjuntas una foto se usa como referencia (img2img). Recomendado: JPG/PNG.</span>
+                                    </div>
+                                </details>
+                                <button id="send" type="button">Enviar</button>
+                            </div>
                         </div>
-                    </div>
-                    <div class="composer-tools">
-                        <input id="mediaInput" type="file" accept="image/*,.txt,.md,.json,.csv,.pdf" multiple class="hidden" />
-                        <input id="cameraInput" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" class="hidden" />
-                        <button id="attachBtn" type="button" class="btn">Adjuntar archivo</button>
-                        <button id="cameraBtn" type="button" class="btn">Usar camara</button>
-                        <button id="clearMediaBtn" type="button" class="btn">Limpiar adjuntos</button>
-                        <span class="media-hint">Puedes enviar imagen, camara o documento. En modo imagen, si adjuntas una foto se usa como referencia (img2img). Recomendado: JPG/PNG.</span>
                     </div>
                     <div id="mediaPreview" class="media-preview"></div>
                 </div>
             </div>
 
-            <aside class="panel ops-panel" sec:authorize="hasAnyAuthority('PERM_MONITOR','PERM_RAG','PERM_API_KEYS')">
-                <div class="panel-header">
-                    <h3>Monitoreo y control</h3>
-                </div>
-                <div class="panel-body ops-grid">
+            <aside class="panel ops-panel" aria-hidden="true" sec:authorize="hasAnyAuthority('PERM_MONITOR','PERM_RAG','PERM_API_KEYS')">
+                <details id="opsPanelDetails" class="ops-details" open>
+                    <summary class="panel-header">
+                        <h3>Monitoreo y control</h3>
+                        <span class="ops-summary-group">
+                            <span class="ops-summary-meta">Panel tecnico</span>
+                            <button id="closeOps" type="button" class="ops-close-btn">Cerrar</button>
+                        </span>
+                    </summary>
+                    <div class="panel-body ops-grid">
                     <div class="stat" sec:authorize="hasAuthority('PERM_MONITOR')">
                         <strong>Estado Grafana</strong>
                         <span id="grafana-status" class="status-down">Sin datos</span>
-                        <span id="grafana-url" class="sub">-</span>
+                        <span id="grafana-url" class="sub" th:text="${grafanaBaseUrl}">-</span>
                     </div>
                     <div class="stat" sec:authorize="hasAuthority('PERM_MONITOR')">
                         <strong>Estado Prometheus</strong>
                         <span id="prometheus-status" class="status-down">Sin datos</span>
-                        <span id="prometheus-url" class="sub">-</span>
+                        <span id="prometheus-url" class="sub" th:text="${prometheusBaseUrl}">-</span>
                     </div>
                     <div class="stat" sec:authorize="hasAuthority('PERM_MONITOR')">
                         <strong>Eventos recientes</strong>
@@ -1189,10 +1794,16 @@
                     </div>
                     <div class="stat" sec:authorize="hasAuthority('PERM_MONITOR')">
                         <strong>Accesos directos</strong>
+                        <div class="sub" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin: 6px 0 8px;">
+                            <button id="btnProvisionMonitorStack" class="btn">Activar stack observabilidad</button>
+                            <button id="btnRefreshMonitorStack" class="btn">Estado stack</button>
+                            <span id="monitorStackActionStatus" class="sub">Stack: sin verificar</span>
+                        </div>
                         <div class="link-list">
                             <a href="/ops/status/ui" target="_blank" rel="noopener">Ops Status</a>
-                            <a href="/ops/grafana" target="_blank" rel="noopener">Abrir Grafana</a>
-                            <a href="/ops/prometheus" target="_blank" rel="noopener">Abrir Prometheus</a>
+                            <a id="opsGrafanaLink" class="endpoint-link" data-label="Abrir Grafana" th:attr="data-default-url=${grafanaBaseUrl}" href="/ops/grafana" target="_blank" rel="noopener">Abrir Grafana</a>
+                            <a id="opsPrometheusLink" class="endpoint-link" data-label="Abrir Prometheus" th:attr="data-default-url=${prometheusBaseUrl}" href="/ops/prometheus" target="_blank" rel="noopener">Abrir Prometheus</a>
+                            <a href="/actuator/prometheus" target="_blank" rel="noopener">Metricas Prometheus</a>
                             <a href="/monitor" target="_blank" rel="noopener">Monitor local</a>
                         </div>
                     </div>
@@ -1365,11 +1976,13 @@
                             </div>
                         </div>
                     </div>
-                </div>
+                    </div>
+                </details>
             </aside>
         </section>
     </main>
 </div>
+<div id="opsBackdrop" class="ops-backdrop" aria-hidden="true"></div>
 
 <!-- Drawer de sesiones: lateral en tablet, bottom-sheet en movil -->
 <div id="sessionDrawer" class="drawer hidden" aria-hidden="true">
@@ -1522,7 +2135,7 @@
 <!-- IMPORTANTE: cache-busting para que NO uses un chat.js viejo -->
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-<script src="/chat.js?v=12"></script>
+<script src="/chat.js?v=17"></script>
 <script src="/api-keys.js?v=2"></script>
 <script src="/rag-maintenance.js?v=2"></script>
 <script src="/rag-ops.js?v=1"></script>

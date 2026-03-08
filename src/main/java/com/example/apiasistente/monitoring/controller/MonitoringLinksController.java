@@ -11,6 +11,7 @@ import org.springframework.ui.Model;
 import org.springframework.web.servlet.view.RedirectView;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import java.net.URI;
 import java.time.Instant;
 
 /**
@@ -25,11 +26,11 @@ public class MonitoringLinksController {
     private final RestClient restClient;
 
     public MonitoringLinksController(
-            @Value("${monitoring.grafana-url:http://localhost:3000}") String grafanaBaseUrl,
-            @Value("${monitoring.prometheus-url:http://localhost:9090}") String prometheusBaseUrl
+            @Value("${monitoring.grafana-url:http://192.168.1.61:3000}") String grafanaBaseUrl,
+            @Value("${monitoring.prometheus-url:http://192.168.1.61:9090}") String prometheusBaseUrl
     ) {
-        this.grafanaBaseUrl = normalizeBaseUrl(grafanaBaseUrl);
-        this.prometheusBaseUrl = normalizeBaseUrl(prometheusBaseUrl);
+        this.grafanaBaseUrl = normalizeBaseUrl(grafanaBaseUrl, 3000);
+        this.prometheusBaseUrl = normalizeBaseUrl(prometheusBaseUrl, 9090);
         this.restClient = RestClient.builder()
                 .requestFactory(requestFactory())
                 .build();
@@ -114,15 +115,44 @@ public class MonitoringLinksController {
         return ex.getClass().getSimpleName() + ": " + trimmed;
     }
 
-    private String normalizeBaseUrl(String baseUrl) {
+    private String normalizeBaseUrl(String baseUrl, int defaultPort) {
         String trimmed = baseUrl == null ? "" : baseUrl.trim();
         if (trimmed.isEmpty()) {
-            return "http://localhost";
+            return "http://localhost:" + defaultPort;
         }
-        if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-            return trimmed;
+        String withScheme = trimmed.startsWith("http://") || trimmed.startsWith("https://")
+                ? trimmed
+                : "http://" + trimmed;
+        try {
+            URI parsed = URI.create(withScheme);
+            String scheme = parsed.getScheme() == null ? "http" : parsed.getScheme();
+            String host = parsed.getHost();
+            if (host == null || host.isBlank()) {
+                return stripTrailingSlash(withScheme);
+            }
+            int port = parsed.getPort() > 0 ? parsed.getPort() : defaultPort;
+            UriComponentsBuilder builder = UriComponentsBuilder.newInstance()
+                    .scheme(scheme)
+                    .host(host)
+                    .port(port);
+            String path = parsed.getPath();
+            if (path != null && !path.isBlank() && !"/".equals(path)) {
+                builder.path(path);
+            }
+            return stripTrailingSlash(builder.build().toUriString());
+        } catch (Exception ex) {
+            return stripTrailingSlash(withScheme);
         }
-        return "http://" + trimmed;
+    }
+
+    private String stripTrailingSlash(String value) {
+        if (value == null) {
+            return "";
+        }
+        if (value.endsWith("/")) {
+            return value.substring(0, value.length() - 1);
+        }
+        return value;
     }
 
     public record MonitoringStatus(Instant timestamp, ServiceStatus grafana, ServiceStatus prometheus) {}

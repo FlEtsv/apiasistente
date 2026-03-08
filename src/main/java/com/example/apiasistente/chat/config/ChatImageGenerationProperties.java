@@ -18,7 +18,7 @@ public class ChatImageGenerationProperties {
     private int timeoutMs = 120000;
     private int maxPromptChars = 600;
     private String storageDir = "data/chat-generated-images";
-    private String checkpoint = "dreamshaper8.safetensors";
+    private String checkpoint = "dreamshaper_8.safetensors";
     private int steps = 28;
     private double cfgScale = 7.0;
     private String samplerName = "dpmpp_2m_sde";

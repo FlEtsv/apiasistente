@@ -1,6 +1,8 @@
 package com.example.apiasistente.chat.service;
 
 import com.example.apiasistente.shared.config.OllamaProperties;
+import com.example.apiasistente.setup.service.SetupConfigService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -19,9 +21,21 @@ public class ChatModelSelector {
     public static final String IMAGE_HQ_ALIAS = "image-hq";
 
     private final OllamaProperties properties;
+    private ChatRuntimeAdaptationService runtimeAdaptationService;
+    private SetupConfigService setupConfigService;
 
     public ChatModelSelector(OllamaProperties properties) {
         this.properties = properties;
+    }
+
+    @Autowired(required = false)
+    void setRuntimeAdaptationService(ChatRuntimeAdaptationService runtimeAdaptationService) {
+        this.runtimeAdaptationService = runtimeAdaptationService;
+    }
+
+    @Autowired(required = false)
+    void setSetupConfigService(SetupConfigService setupConfigService) {
+        this.setupConfigService = setupConfigService;
     }
 
     /**
@@ -60,9 +74,9 @@ public class ChatModelSelector {
                                    boolean multiStepQuery,
                                    ChatPromptSignals.IntentRoute intentRoute) {
         String trimmed = requested == null ? "" : requested.trim();
-        String defaultModel = normalize(properties.getChatModel());
-        String fastModel = normalize(properties.getFastChatModel());
-        String visualModel = normalize(properties.getVisualModel());
+        String defaultModel = normalize(resolveConfiguredChatModel());
+        String fastModel = normalize(resolveConfiguredFastModel());
+        String visualModel = normalize(resolveConfiguredVisualModel());
 
         ChatPromptSignals.IntentRoute route = intentRoute == null
                 ? ChatPromptSignals.IntentRoute.TASK_SIMPLE
@@ -77,6 +91,9 @@ public class ChatModelSelector {
                     || isTextRender
                     || hasRagContext
                     || (!isSmallTalk && (complexQuery || multiStepQuery));
+            if (shouldPreferFastByRuntime(route, hasRagContext)) {
+                requiresChatModel = false;
+            }
             String resolved = requiresChatModel
                     ? firstNonBlank(defaultModel, fastModel, null)
                     : firstNonBlank(fastModel, defaultModel, null);
@@ -131,9 +148,9 @@ public class ChatModelSelector {
      * Devuelve el modelo a usar para el puente visual, ignorando alias de chat final.
      */
     public String resolveVisualModel(String requested) {
-        String visualModel = normalize(properties.getVisualModel());
-        String defaultModel = normalize(properties.getChatModel());
-        String fastModel = normalize(properties.getFastChatModel());
+        String visualModel = normalize(resolveConfiguredVisualModel());
+        String defaultModel = normalize(resolveConfiguredChatModel());
+        String fastModel = normalize(resolveConfiguredFastModel());
         String trimmed = requested == null ? "" : requested.trim();
 
         if (visualModel == null) {
@@ -158,8 +175,8 @@ public class ChatModelSelector {
      * Si no hay uno dedicado configurado, cae al visual-model para entornos simples.
      */
     public String resolveImageModel(String requested) {
-        String imageModel = normalize(properties.getImageModel());
-        String visualModel = normalize(properties.getVisualModel());
+        String imageModel = normalize(resolveConfiguredImageModel());
+        String visualModel = normalize(resolveConfiguredVisualModel());
         String trimmed = requested == null ? "" : requested.trim();
         String fallback = firstNonBlank(imageModel, visualModel, null);
 
@@ -195,15 +212,15 @@ public class ChatModelSelector {
      * Devuelve el modelo liviano usado por el response guard.
      */
     public String resolveResponseGuardModel() {
-        return normalize(properties.getResponseGuardModel());
+        return normalize(resolveConfiguredResponseGuardModel());
     }
 
     /**
      * Devuelve el modelo principal de chat configurado, con fallback al rapido si hace falta.
      */
     public String resolvePrimaryChatModel() {
-        String defaultModel = normalize(properties.getChatModel());
-        String fastModel = normalize(properties.getFastChatModel());
+        String defaultModel = normalize(resolveConfiguredChatModel());
+        String fastModel = normalize(resolveConfiguredFastModel());
         return firstNonBlank(defaultModel, fastModel, null);
     }
 
@@ -249,6 +266,55 @@ public class ChatModelSelector {
                 || requested.isBlank()
                 || DEFAULT_ALIAS.equalsIgnoreCase(requested)
                 || AUTO_ALIAS.equalsIgnoreCase(requested);
+    }
+
+    /**
+     * Bajo degradacion operativa puede priorizar el modelo rapido en consultas no factuales.
+     */
+    private boolean shouldPreferFastByRuntime(ChatPromptSignals.IntentRoute route, boolean hasRagContext) {
+        if (runtimeAdaptationService == null || hasRagContext) {
+            return false;
+        }
+        ChatRuntimeAdaptationService.RuntimeProfile profile = runtimeAdaptationService.currentProfile();
+        if (profile == null || !profile.preferFastModel()) {
+            return false;
+        }
+        return route != ChatPromptSignals.IntentRoute.FACTUAL_TECH;
+    }
+
+    private String resolveConfiguredChatModel() {
+        if (setupConfigService != null) {
+            return setupConfigService.resolvedOllamaConfig().chatModel();
+        }
+        return properties.getChatModel();
+    }
+
+    private String resolveConfiguredFastModel() {
+        if (setupConfigService != null) {
+            return setupConfigService.resolvedOllamaConfig().fastChatModel();
+        }
+        return properties.getFastChatModel();
+    }
+
+    private String resolveConfiguredVisualModel() {
+        if (setupConfigService != null) {
+            return setupConfigService.resolvedOllamaConfig().visualModel();
+        }
+        return properties.getVisualModel();
+    }
+
+    private String resolveConfiguredImageModel() {
+        if (setupConfigService != null) {
+            return setupConfigService.resolvedOllamaConfig().imageModel();
+        }
+        return properties.getImageModel();
+    }
+
+    private String resolveConfiguredResponseGuardModel() {
+        if (setupConfigService != null) {
+            return setupConfigService.resolvedOllamaConfig().responseGuardModel();
+        }
+        return properties.getResponseGuardModel();
     }
 }
 

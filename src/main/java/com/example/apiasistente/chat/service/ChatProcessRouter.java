@@ -37,7 +37,7 @@ public class ChatProcessRouter {
     private static final Logger log = LoggerFactory.getLogger(ChatProcessRouter.class);
 
     private static final Pattern IMAGE_ACTION_HINTS = Pattern.compile(
-            "\\b(genera(?:r)?|crea(?:r)?|dibuja(?:r)?|pinta(?:r)?|ilustra(?:r)?|renderiza(?:r)?|haz(?:me)?\\s+(?:una\\s+)?imagen|make\\s+(?:an\\s+)?image|generate\\s+(?:an\\s+)?image|text\\s*to\\s*image|txt2img|img2img)\\b",
+            "\\b(genera(?:r)?|crea(?:r)?|dibuja(?:r)?|pinta(?:r)?|ilustra(?:r)?|renderiza(?:r)?|haz(?:me)?\\s+(?:una\\s+)?imagen|dame\\s+(?:una\\s+)?(?:imagen|foto|ilustracion|render)|muestrame\\s+(?:una\\s+)?(?:imagen|foto|ilustracion|render)|quiero\\s+(?:una\\s+)?(?:imagen|foto|ilustracion|render)|show\\s+me\\s+(?:an?\\s+)?(?:image|picture|photo)|make\\s+(?:an\\s+)?image|generate\\s+(?:an\\s+)?image|text\\s*to\\s*image|txt2img|img2img)\\b",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
     );
 

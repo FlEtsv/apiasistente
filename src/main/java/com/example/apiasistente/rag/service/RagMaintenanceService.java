@@ -2,6 +2,7 @@ package com.example.apiasistente.rag.service;
 
 import com.example.apiasistente.chat.repository.ChatMessageSourceRepository;
 import com.example.apiasistente.monitoring.dto.MonitoringAlertStateDto;
+import com.example.apiasistente.monitoring.service.AppMetricsService;
 import com.example.apiasistente.monitoring.service.MonitoringAlertService;
 import com.example.apiasistente.rag.config.RagMaintenanceProperties;
 import com.example.apiasistente.rag.dto.RagMaintenanceCaseDecisionRequest;
@@ -25,6 +26,7 @@ import com.example.apiasistente.rag.repository.RagMaintenanceCaseRepository;
 import com.example.apiasistente.rag.util.TextChunker;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -109,6 +111,7 @@ public class RagMaintenanceService {
     private volatile String currentDocumentTitle;
     private volatile RagMaintenanceRunDto lastRun = RagMaintenanceRunDto.empty();
     private volatile RagMaintenanceCorpusDto lastKnownCorpus;
+    private AppMetricsService metricsService;
 
     public RagMaintenanceService(RagMaintenanceProperties properties,
                                  KnowledgeDocumentRepository docRepo,
@@ -136,6 +139,12 @@ public class RagMaintenanceService {
         this.ragChunkOverlap = ragChunkOverlap;
         this.dryRun.set(properties.isDryRun());
         this.intervalMs.set(clampIntervalMillis(properties.getIntervalMs()));
+    }
+
+    @Autowired(required = false)
+    void setMetricsService(AppMetricsService metricsService) {
+        this.metricsService = metricsService;
+        publishMaintenanceFlags();
     }
 
     @Scheduled(fixedDelayString = "${rag.maintenance.tick-ms:15000}")
@@ -236,6 +245,7 @@ public class RagMaintenanceService {
         if (paused.compareAndSet(false, true)) {
             currentStep = running.get() ? currentStep : "Pausado";
             recordEvent("INFO", "PAUSED", "Robot pausado", "El barrido automatico queda detenido hasta reanudarlo.");
+            publishMaintenanceFlags();
         }
         return status();
     }
@@ -244,6 +254,7 @@ public class RagMaintenanceService {
         if (paused.compareAndSet(true, false)) {
             currentStep = running.get() ? currentStep : "Idle";
             recordEvent("INFO", "RESUMED", "Robot reanudado", "El barrido automatico vuelve a ejecutarse en segundo plano.");
+            publishMaintenanceFlags();
         }
         return status();
     }
@@ -263,6 +274,7 @@ public class RagMaintenanceService {
                         "Modo del robot actualizado",
                         nextDryRun ? "Ahora solo analiza y no borra datos." : "Ahora puede ejecutar limpieza real."
                 );
+                publishMaintenanceFlags();
             }
         }
 
@@ -301,6 +313,7 @@ public class RagMaintenanceService {
         Instant startedAt = Instant.now();
         RagMaintenanceCorpusDto before = snapshotCorpusQuietly();
         RunAccumulator acc = new RunAccumulator(trigger, dryRun.get(), startedAt, before);
+        publishMaintenanceFlags();
 
         lastStartedAt = startedAt;
         currentStep = "Preparando barrido";
@@ -358,6 +371,7 @@ public class RagMaintenanceService {
             lastKnownCorpus = after;
             lastRun = acc.success(completedAt, after);
             recordEvent("INFO", "RUN_FINISHED", "Barrido completado", lastRun.summary());
+            publishRunMetrics(lastRun, startedAt, completedAt);
         } catch (Exception e) {
             Instant completedAt = Instant.now();
             lastCompletedAt = completedAt;
@@ -365,13 +379,30 @@ public class RagMaintenanceService {
             lastRun = acc.failure(completedAt, safeMessage(e));
             recordEvent("ERROR", "RUN_FAILED", "Barrido fallido", safeMessage(e));
             log.warn("Fallo el barrido de mantenimiento RAG", e);
+            publishRunMetrics(lastRun, startedAt, completedAt);
         } finally {
             currentDocumentTitle = null;
             currentStep = paused.get() ? "Pausado" : "Idle";
             running.set(false);
+            publishMaintenanceFlags();
         }
 
         return status();
+    }
+
+    private void publishMaintenanceFlags() {
+        if (metricsService == null) {
+            return;
+        }
+        metricsService.setRagMaintenanceFlags(paused.get(), running.get(), dryRun.get());
+    }
+
+    private void publishRunMetrics(RagMaintenanceRunDto run, Instant startedAt, Instant completedAt) {
+        if (metricsService == null || run == null || startedAt == null || completedAt == null) {
+            return;
+        }
+        long elapsedMs = Math.max(0L, Duration.between(startedAt, completedAt).toMillis());
+        metricsService.recordRagMaintenanceRun(run, elapsedMs);
     }
 
     private void processDocument(KnowledgeDocument doc,
@@ -587,13 +618,16 @@ public class RagMaintenanceService {
     private void accelerateAdminBacklog(Instant now,
                                         RunAccumulator acc,
                                         MonitoringAlertStateDto monitoringState) {
-        long pendingAdminCount = caseRepo.countByStatus(RagMaintenanceCaseStatus.OPEN);
+        long pendingAdminCount = caseRepo.countEligibleForBacklogAcceleration(
+                RagMaintenanceCaseStatus.OPEN,
+                now
+        );
         int threshold = Math.max(0, properties.getAdminBacklogThreshold());
         if (pendingAdminCount <= threshold) {
             return;
         }
         if (!canUseDecisionModel(monitoringState)) {
-            log.info("La cola admin del RAG tiene {} casos OPEN; se evita consultar IA por monitoreo degradado: {}",
+            log.info("La cola admin del RAG tiene {} casos OPEN elegibles; se evita consultar IA por monitoreo degradado: {}",
                     pendingAdminCount,
                     describeMonitoringState(monitoringState));
             return;
@@ -605,18 +639,17 @@ public class RagMaintenanceService {
             return;
         }
 
-        List<RagMaintenanceCase> backlogCandidates = caseRepo.findTop100ByStatusOrderByAdminDueAtAscCreatedAtAsc(
-                RagMaintenanceCaseStatus.OPEN
+        List<RagMaintenanceCase> backlogCandidates = caseRepo.findEligibleForBacklogAcceleration(
+                RagMaintenanceCaseStatus.OPEN,
+                now,
+                PageRequest.of(0, 100)
         );
         int reviewed = 0;
         for (RagMaintenanceCase ragCase : backlogCandidates) {
             if (ragCase == null || ragCase.getStatus() != RagMaintenanceCaseStatus.OPEN) {
                 continue;
             }
-            if (ragCase.getAdminDueAt() != null && !ragCase.getAdminDueAt().isAfter(now)) {
-                continue;
-            }
-            appendAudit(ragCase, "SYSTEM", "Revision IA adelantada por backlog admin alto (" + pendingAdminCount + " casos OPEN).");
+            appendAudit(ragCase, "SYSTEM", "Revision IA adelantada por backlog admin alto (" + pendingAdminCount + " casos OPEN elegibles).");
             if (reviewCaseWithAi(ragCase, false, acc, monitoringState)) {
                 reviewed++;
             }
@@ -630,7 +663,7 @@ public class RagMaintenanceService {
                     "WARN",
                     "ADMIN_BACKLOG_AI",
                     "Cola admin acelerada",
-                    "Habia " + pendingAdminCount + " casos OPEN; la IA adelanto " + reviewed + " decisiones."
+                    "Habia " + pendingAdminCount + " casos OPEN elegibles; la IA adelanto " + reviewed + " decisiones."
             );
         }
     }

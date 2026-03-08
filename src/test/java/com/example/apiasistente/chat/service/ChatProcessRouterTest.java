@@ -56,6 +56,22 @@ class ChatProcessRouterTest {
     }
 
     @Test
+    void routesDameUnaImagenPromptToImageGenerate() {
+        ChatProcessRouter.ProcessDecision decision = router.decide(
+                "Dame una imagen de una pina realista",
+                "auto",
+                List.of()
+        );
+
+        assertEquals(ChatProcessRouter.ProcessRoute.IMAGE_GENERATE, decision.route());
+        assertEquals("hard-rule", decision.source());
+        assertFalse(decision.usedLlm());
+        assertEquals(ChatProcessRouter.PipelineHint.IMAGE_TXT2IMG, decision.pipeline());
+        assertEquals(ChatModelSelector.IMAGE_ALIAS, decision.recommendedModelAlias());
+        assertEquals("image", decision.expectedOutput());
+    }
+
+    @Test
     void keepsCameraAnalysisInChatFlow() {
         ChatMediaInput cameraPhoto = imageInput();
 

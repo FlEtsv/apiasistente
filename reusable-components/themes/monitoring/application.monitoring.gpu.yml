@@ -1,0 +1,7 @@
+monitoring:
+  internet-check-url: ${INTERNET_CHECK_URL:https://www.gstatic.com/generate_204}
+  internet-check-timeout-ms: ${INTERNET_CHECK_TIMEOUT_MS:2000}
+  gpu:
+    enabled: ${MONITOR_GPU_ENABLED:true}
+    command: ${MONITOR_GPU_COMMAND:nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,name --format=csv,noheader,nounits}
+    timeout-ms: ${MONITOR_GPU_TIMEOUT_MS:900}

@@ -1,0 +1,18 @@
+chat:
+  runtime-adaptation:
+    enabled: true
+    profile-ttl-ms: 4000
+    ema-alpha: 0.25
+    cpu-threshold: 0.88
+    memory-threshold: 0.90
+    gpu-threshold: 0.90
+    network-latency-threshold-ms: 1200
+    model-latency-threshold-ms: 9000
+    turn-latency-threshold-ms: 15000
+    constrained-temperature: 0.15
+    degraded-temperature: 0.10
+    normal-max-tokens: 0
+    constrained-max-tokens: 1200
+    degraded-max-tokens: 800
+    force-fast-when-constrained: false
+    force-fast-when-degraded: true

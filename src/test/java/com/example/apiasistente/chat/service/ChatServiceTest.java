@@ -22,6 +22,7 @@ import com.example.apiasistente.chat.service.flow.ChatPromptBuilder;
 import com.example.apiasistente.chat.service.flow.ChatRagDecisionEngine;
 import com.example.apiasistente.chat.service.flow.ChatRagFlowService;
 import com.example.apiasistente.chat.service.flow.ChatRagGateService;
+import com.example.apiasistente.chat.service.flow.ChatRagPostCheckFlowService;
 import com.example.apiasistente.chat.service.flow.ChatRagTelemetryService;
 import com.example.apiasistente.chat.service.flow.ChatSessionService;
 import com.example.apiasistente.chat.service.flow.ChatSourceSnapshotService;
@@ -141,6 +142,12 @@ class ChatServiceTest {
                 groundingService,
                 historyService
         );
+        ChatRagPostCheckFlowService postCheckFlowService = new ChatRagPostCheckFlowService(
+                decisionEngine,
+                ragTelemetryService,
+                ragFlowService,
+                assistantService
+        );
         ChatTurnService turnService = new ChatTurnService(
                 contextFactory,
                 ragFlowService,
@@ -148,7 +155,7 @@ class ChatServiceTest {
                 historyService,
                 sourceSnapshotService,
                 sessionService,
-                decisionEngine,
+                postCheckFlowService,
                 ragTelemetryService,
                 auditTrailService
         );

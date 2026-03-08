@@ -1,24 +1,55 @@
 services:
+  apiasistente_mysql:
+    image: mysql:8.4
+    container_name: apiasistente_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: apiasistente_db
+      MYSQL_USER: apiuser
+      MYSQL_PASSWORD: apipassword
+      MYSQL_ROOT_PASSWORD: rootpassword
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+
   api:
-    image: stevefletesalfaro/apiasistente:1.2
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: apiasistente
+    restart: unless-stopped
     ports:
       - "8082:8082"
     environment:
+      SERVER_PORT: 8082
       MYSQL_HOST: apiasistente_mysql
       MYSQL_PORT: 3306
       MYSQL_DB: apiasistente_db
       MYSQL_USER: apiuser
       MYSQL_PASSWORD: apipassword
-      SERVER_PORT: 8082
-      OLLAMA_BASE_URL: http://ollama:11434/api
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/api}
+      GRAFANA_URL: ${GRAFANA_URL:-http://192.168.1.61:3000}
+      PROMETHEUS_URL: ${PROMETHEUS_URL:-http://192.168.1.61:9090}
+      BOOTSTRAP_ADMIN_ENABLED: ${BOOTSTRAP_ADMIN_ENABLED:-true}
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      BOOTSTRAP_ADMIN_OUTPUT_FILE: ${BOOTSTRAP_ADMIN_OUTPUT_FILE:-data/bootstrap-admin.txt}
+    volumes:
+      - ./data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
-      - apiasistente_mysql
-      - ollama
+      apiasistente_mysql:
+        condition: service_healthy
 
   prometheus:
     image: prom/prometheus:v2.53.1
     container_name: apiasistente_prometheus
+    restart: unless-stopped
     ports:
       - "9090:9090"
     volumes:
@@ -29,16 +60,20 @@ services:
   grafana:
     image: grafana/grafana:11.5.1
     container_name: apiasistente_grafana
+    restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_METRICS_ENABLED: "true"
     volumes:
       - grafana-data:/var/lib/grafana
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - prometheus
 
 volumes:
+  mysql-data:
   grafana-data:

@@ -1,0 +1,23 @@
+{
+  "runtime-adaptation": [
+    "src/main/java/com/example/apiasistente/chat/config/ChatRuntimeAdaptationProperties.java",
+    "src/main/java/com/example/apiasistente/chat/service/ChatRuntimeAdaptationService.java",
+    "src/main/java/com/example/apiasistente/chat/controller/ChatRuntimeController.java",
+    "src/main/java/com/example/apiasistente/chat/service/ChatModelSelector.java",
+    "src/main/java/com/example/apiasistente/chat/service/flow/ChatTurnService.java",
+    "src/main/java/com/example/apiasistente/shared/ai/OllamaClient.java"
+  ],
+  "rag-learning": [
+    "src/main/java/com/example/apiasistente/rag/config/RagLogLearningProperties.java",
+    "src/main/java/com/example/apiasistente/rag/service/RagLogLearningService.java",
+    "src/main/java/com/example/apiasistente/rag/config/RagCodeLearningProperties.java",
+    "src/main/java/com/example/apiasistente/rag/service/RagCodeLearningService.java"
+  ],
+  "monitoring": [
+    "src/main/java/com/example/apiasistente/monitoring/dto/ServerStatsDto.java",
+    "src/main/java/com/example/apiasistente/monitoring/service/MonitorService.java"
+  ],
+  "prompt-governance": [
+    "src/main/java/com/example/apiasistente/chat/service/flow/ChatPromptBuilder.java"
+  ]
+}

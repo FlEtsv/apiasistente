@@ -1,0 +1,430 @@
+{
+  "id": null,
+  "uid": "apiasistente-overview",
+  "title": "ApiAsistente - Overview",
+  "tags": [
+    "apiasistente",
+    "chat",
+    "rag",
+    "runtime"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Requests/min",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(apiasistente_chat_requests_total{application=\"apiasistente\"}[5m])) * 60",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqpm",
+          "decimals": 2
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Turns/min (success)",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(apiasistente_chat_turns_total{application=\"apiasistente\",result=\"success\"}[5m])) * 60",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqpm",
+          "decimals": 2
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Failure rate %",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(apiasistente_chat_turn_failures_total{application=\"apiasistente\"}[5m])) / clamp_min(sum(rate(apiasistente_chat_turns_total{application=\"apiasistente\"}[5m])), 0.0001) * 100",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 5 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "RAG usage %",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(apiasistente_chat_turns_total{application=\"apiasistente\",result=\"success\",rag_used=\"true\"}[5m])) / clamp_min(sum(rate(apiasistente_chat_turns_total{application=\"apiasistente\",result=\"success\"}[5m])), 0.0001) * 100",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 2
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Chat turn latency (avg ms)",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        {
+          "expr": "(sum(rate(apiasistente_chat_turn_duration_seconds_sum{application=\"apiasistente\",result=\"success\"}[5m])) / clamp_min(sum(rate(apiasistente_chat_turn_duration_seconds_count{application=\"apiasistente\",result=\"success\"}[5m])), 0.0001)) * 1000",
+          "legendFormat": "turn avg",
+          "refId": "A"
+        },
+        {
+          "expr": "(sum(rate(apiasistente_chat_queue_latency_seconds_sum{application=\"apiasistente\",result=\"success\"}[5m])) / clamp_min(sum(rate(apiasistente_chat_queue_latency_seconds_count{application=\"apiasistente\",result=\"success\"}[5m])), 0.0001)) * 1000",
+          "legendFormat": "queue avg",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Queue depth",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        {
+          "expr": "apiasistente_chat_queue_pending_messages{application=\"apiasistente\"}",
+          "legendFormat": "pending",
+          "refId": "A"
+        },
+        {
+          "expr": "apiasistente_chat_queue_active_sessions{application=\"apiasistente\"}",
+          "legendFormat": "active sessions",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Runtime load ratios",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        {
+          "expr": "apiasistente_runtime_cpu_load_ratio{application=\"apiasistente\"}",
+          "legendFormat": "cpu",
+          "refId": "A"
+        },
+        {
+          "expr": "apiasistente_runtime_memory_load_ratio{application=\"apiasistente\"}",
+          "legendFormat": "memory",
+          "refId": "B"
+        },
+        {
+          "expr": "apiasistente_runtime_gpu_load_ratio{application=\"apiasistente\"}",
+          "legendFormat": "gpu",
+          "refId": "C"
+        },
+        {
+          "expr": "apiasistente_runtime_gpu_memory_load_ratio{application=\"apiasistente\"}",
+          "legendFormat": "gpu_mem",
+          "refId": "D"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Runtime state",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        {
+          "expr": "apiasistente_runtime_mode{application=\"apiasistente\"}",
+          "legendFormat": "mode (0 normal, 1 constrained, 2 degraded)",
+          "refId": "A"
+        },
+        {
+          "expr": "apiasistente_runtime_pressure_score{application=\"apiasistente\"}",
+          "legendFormat": "pressure score",
+          "refId": "B"
+        },
+        {
+          "expr": "apiasistente_runtime_network_latency_ms{application=\"apiasistente\"}",
+          "legendFormat": "network latency ms",
+          "refId": "C"
+        },
+        {
+          "expr": "apiasistente_runtime_turn_latency_ms{application=\"apiasistente\"}",
+          "legendFormat": "turn latency ms",
+          "refId": "D"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "RAG maintenance runs (per hour)",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (increase(apiasistente_rag_maintenance_runs_total{application=\"apiasistente\"}[1h]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "RAG maintenance status and impact",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "targets": [
+        {
+          "expr": "apiasistente_rag_maintenance_running{application=\"apiasistente\"}",
+          "legendFormat": "running",
+          "refId": "A"
+        },
+        {
+          "expr": "apiasistente_rag_maintenance_paused{application=\"apiasistente\"}",
+          "legendFormat": "paused",
+          "refId": "B"
+        },
+        {
+          "expr": "apiasistente_rag_maintenance_dry_run{application=\"apiasistente\"}",
+          "legendFormat": "dry_run",
+          "refId": "C"
+        },
+        {
+          "expr": "apiasistente_rag_maintenance_last_deleted_documents{application=\"apiasistente\"}",
+          "legendFormat": "last deleted docs",
+          "refId": "D"
+        },
+        {
+          "expr": "apiasistente_rag_maintenance_last_freed_bytes{application=\"apiasistente\"}",
+          "legendFormat": "last freed bytes",
+          "refId": "E"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Prometheus focus - host load and memory",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "targets": [
+        {
+          "expr": "apiasistente_monitor_cpu_system_load_ratio{application=\"apiasistente\"}",
+          "legendFormat": "cpu system",
+          "refId": "A"
+        },
+        {
+          "expr": "apiasistente_monitor_cpu_process_load_ratio{application=\"apiasistente\"}",
+          "legendFormat": "cpu process",
+          "refId": "B"
+        },
+        {
+          "expr": "apiasistente_monitor_memory_system_used_bytes{application=\"apiasistente\"} / clamp_min(apiasistente_monitor_memory_system_total_bytes{application=\"apiasistente\"}, 1)",
+          "legendFormat": "memory used ratio",
+          "refId": "C"
+        },
+        {
+          "expr": "apiasistente_monitor_disk_used_bytes{application=\"apiasistente\"} / clamp_min(apiasistente_monitor_disk_total_bytes{application=\"apiasistente\"}, 1)",
+          "legendFormat": "disk used ratio",
+          "refId": "D"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 3,
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Prometheus focus - network, gpu and alerts",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "targets": [
+        {
+          "expr": "apiasistente_monitor_network_up{application=\"apiasistente\"}",
+          "legendFormat": "network up",
+          "refId": "A"
+        },
+        {
+          "expr": "apiasistente_monitor_network_latency_ms{application=\"apiasistente\"}",
+          "legendFormat": "network latency ms",
+          "refId": "B"
+        },
+        {
+          "expr": "apiasistente_monitor_gpu_utilization_ratio{application=\"apiasistente\"}",
+          "legendFormat": "gpu util",
+          "refId": "C"
+        },
+        {
+          "expr": "apiasistente_monitor_alert_cpu_high{application=\"apiasistente\"}",
+          "legendFormat": "alert cpu",
+          "refId": "D"
+        },
+        {
+          "expr": "apiasistente_monitor_alert_memory_high{application=\"apiasistente\"}",
+          "legendFormat": "alert memory",
+          "refId": "E"
+        },
+        {
+          "expr": "apiasistente_monitor_alert_internet_down{application=\"apiasistente\"}",
+          "legendFormat": "alert internet",
+          "refId": "F"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Prometheus scrape health (up)",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 36 },
+      "targets": [
+        {
+          "expr": "up{job=~\"apiasistente|prometheus|grafana\"}",
+          "legendFormat": "{{job}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Prometheus engine health",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 36 },
+      "targets": [
+        {
+          "expr": "prometheus_engine_queries_concurrent_max",
+          "legendFormat": "queries concurrent max",
+          "refId": "A"
+        },
+        {
+          "expr": "prometheus_tsdb_head_series",
+          "legendFormat": "head series",
+          "refId": "B"
+        },
+        {
+          "expr": "prometheus_target_scrape_pool_targets",
+          "legendFormat": "scrape targets",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      }
+    }
+  ]
+}

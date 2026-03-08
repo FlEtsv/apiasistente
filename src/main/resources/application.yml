@@ -32,7 +32,7 @@ spring:
 
 ollama:
   # Endpoint base del servidor Ollama (local o contenedor).
-  base-url: ${OLLAMA_BASE_URL:http://192.168.1.61:11434/api}
+  base-url: ${OLLAMA_BASE_URL:http://localhost:11434/api}
   #base-url: ${OLLAMA_BASE_URL:http://ollama:11434/api}
   # Modelo para generaciÃƒÂ³n de chat.
   chat-model: qwen3:14b
@@ -41,7 +41,7 @@ ollama:
   # Modelo visual para etapa intermedia de imagen/camara/documento.
   visual-model: qwen2.5vl:7b
   # Alias de modelo para generación de imágenes desde el chat (ComfyUI checkpoint resolver).
-  image-model: ${OLLAMA_IMAGE_MODEL:dreamshaper8}
+  image-model: ${OLLAMA_IMAGE_MODEL:dreamshaper_8}
   # Mini-modelo opcional para depurar respuestas y quitar relleno.
   response-guard-model: ${OLLAMA_RESPONSE_GUARD_MODEL:mistral:7b}
   # Modelo para embeddings de RAG.
@@ -138,6 +138,96 @@ rag:
   ops:
     # Cuantos eventos recientes del core RAG se guardan en memoria para la home.
     max-events: 120
+  log-learning:
+    # Aprende logs de runtime dentro del corpus para responder sobre incidencias reales.
+    enabled: true
+    # Frecuencia de ingesta automatica de logs hacia RAG.
+    tick-ms: 60000
+    # Espera inicial tras arrancar para no competir con startup.
+    initial-delay-ms: 20000
+    # Se guarda como conocimiento global reutilizable en chat.
+    owner: global
+    # Metadata del documento en RAG.
+    source: app-log
+    tags: logs,incident,runtime
+    # Cuanto leer del final de cada archivo por pasada.
+    tail-bytes: 262144
+    # Limites de contexto para que retrieval sea util y barato.
+    max-lines: 800
+    max-chars: 32000
+    # Si esta activo, prioriza lineas problemáticas (error/warn/exception) y su contexto cercano.
+    include-only-problematic: true
+    context-lines: 2
+    # Enmascara tokens/secretos antes de guardar en el corpus.
+    redact-secrets: true
+    # Archivos a aprender.
+    paths:
+      - data/audit/chat-trace.jsonl
+      - data/logs/apiasistente.log
+  code-learning:
+    # Aprende el codigo fuente por lotes para responder con contexto real del proyecto.
+    enabled: true
+    # Frecuencia del barrido incremental.
+    tick-ms: 180000
+    # Espera inicial para no competir con el arranque.
+    initial-delay-ms: 45000
+    # Se guarda como conocimiento global.
+    owner: global
+    # Metadata del documento en RAG.
+    source: code-learning
+    tags: code,review,architecture
+    # Raiz del repositorio a escanear.
+    root-path: .
+    # Directorios que se indexan para soporte tecnico.
+    scan-paths:
+      - src/main/java
+      - src/main/resources/static
+      - src/main/resources/templates
+      - src/main/resources
+    # Rutas excluidas para no meter ruido binario o generado.
+    exclude-directories:
+      - .git
+      - .idea
+      - .gradle
+      - build
+      - data
+      - node_modules
+      - target
+    # Extensiones permitidas para aprender codigo/config.
+    include-extensions:
+      - .java
+      - .js
+      - .ts
+      - .tsx
+      - .html
+      - .css
+      - .yml
+      - .yaml
+      - .properties
+      - .md
+    # Limites por pasada para no saturar embeddings.
+    max-files-per-run: 25
+    max-file-size-bytes: 196608
+    max-chars-per-file: 22000
+    # Umbrales para notas automaticas de revision.
+    max-method-lines: 90
+    max-line-length: 180
+    max-recommendations: 6
+  web-scraper:
+    # Habilita scraper web hacia RAG (la lista real de URLs vive en /setup).
+    enabled: true
+    # Tick interno del scheduler para comprobar si toca una nueva pasada.
+    scheduler-tick-ms: 30000
+    # Espera inicial tras arrancar.
+    initial-delay-ms: 20000
+    # Timeout HTTP por URL.
+    timeout-ms: 12000
+    # Recorte maximo de texto extraido por pagina.
+    max-chars-per-page: 30000
+    # Limite de URLs procesadas por pasada.
+    max-urls-per-run: 20
+    # User-Agent para scraping.
+    user-agent: ApiAsistente-Scraper/1.0
 
 chat:
   audit:
@@ -164,7 +254,7 @@ chat:
     # Activa generación de imágenes para el modo "image" del chat.
     enabled: true
     # Base URL del servidor ComfyUI API.
-    base-url: ${CHAT_IMAGE_BASE_URL:http://192.168.1.61:8083}
+    base-url: ${CHAT_IMAGE_BASE_URL:http://localhost:8083}
     # Endpoint de ejecución de workflow (ComfyUI API).
     prompt-path: /prompt
     # Tamaño estándar de salida.
@@ -175,7 +265,7 @@ chat:
     # Limite de caracteres de prompt.
     max-prompt-chars: 600
     # Checkpoint por defecto para DreamShaper8 en ComfyUI.
-    checkpoint: ${CHAT_IMAGE_CHECKPOINT:dreamshaper8.safetensors}
+    checkpoint: ${CHAT_IMAGE_CHECKPOINT:dreamshaper_8.safetensors}
     # Parámetros recomendados para DreamShaper8 (RTX 3090).
     steps: 28
     cfg-scale: 7.0
@@ -211,6 +301,29 @@ chat:
     max-cache-entries: 500
     # Cuantos eventos recientes de decisión se muestran en la home.
     max-events: 80
+  runtime-adaptation:
+    # Ajusta parametros del modelo segun carga local y latencias observadas.
+    enabled: true
+    # Cache corta del perfil para no recalcularlo en cada llamada.
+    profile-ttl-ms: 4000
+    # Suavizado EMA para latencia de modelo/turno.
+    ema-alpha: 0.25
+    # Umbrales de presion.
+    cpu-threshold: 0.88
+    memory-threshold: 0.90
+    gpu-threshold: 0.90
+    network-latency-threshold-ms: 1200
+    model-latency-threshold-ms: 9000
+    turn-latency-threshold-ms: 15000
+    # Overrides de inferencia por modo.
+    constrained-temperature: 0.15
+    degraded-temperature: 0.10
+    normal-max-tokens: 0
+    constrained-max-tokens: 1200
+    degraded-max-tokens: 800
+    # En alta presion puede forzar alias rapido para consultas no factuales.
+    force-fast-when-constrained: false
+    force-fast-when-degraded: true
   rag-gate:
     # Compuerta barata para decidir si merece la pena pagar retrieval + embedding.
     enabled: true
@@ -247,6 +360,9 @@ chat:
 
 
 logging:
+  file:
+    # Persistimos log en archivo para poder aprender incidentes con RAG.
+    name: ${LOGGING_FILE_NAME:data/logs/apiasistente.log}
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg [rid=%X{requestId}]%n"
   level:
@@ -255,8 +371,27 @@ logging:
 monitoring:
   grafana-url: ${GRAFANA_URL:http://192.168.1.61:3000}
   prometheus-url: ${PROMETHEUS_URL:http://192.168.1.61:9090}
+  stack:
+    # Permite activar el stack de observabilidad desde la web (requiere Docker accesible).
+    project-dir: ${MONITOR_STACK_PROJECT_DIR:.}
+    compose-file: ${MONITOR_STACK_COMPOSE_FILE:docker-compose.yml}
+    # Script opcional para arranque del stack desde web; si esta vacio usa docker compose directo.
+    start-script: ${MONITOR_STACK_START_SCRIPT:}
+    command-timeout-ms: ${MONITOR_STACK_COMMAND_TIMEOUT_MS:180000}
+    services: ${MONITOR_STACK_SERVICES:api,prometheus,grafana}
+    api-container-name: ${MONITOR_STACK_API_CONTAINER:apiasistente}
+    prometheus-container-name: ${MONITOR_STACK_PROMETHEUS_CONTAINER:apiasistente_prometheus}
+    grafana-container-name: ${MONITOR_STACK_GRAFANA_CONTAINER:apiasistente_grafana}
+  # Publicador periodico de metricas para Prometheus (aunque no haya trafico de chat).
+  prometheus-publish-interval-ms: ${MONITOR_PROMETHEUS_PUBLISH_INTERVAL_MS:10000}
+  prometheus-publish-initial-delay-ms: ${MONITOR_PROMETHEUS_PUBLISH_INITIAL_DELAY_MS:3000}
   internet-check-url: ${INTERNET_CHECK_URL:https://www.gstatic.com/generate_204}
   internet-check-timeout-ms: ${INTERNET_CHECK_TIMEOUT_MS:2000}
+  gpu:
+    # Si existe Nvidia local, usa nvidia-smi para reportar saturacion de GPU.
+    enabled: ${MONITOR_GPU_ENABLED:true}
+    command: ${MONITOR_GPU_COMMAND:nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,name --format=csv,noheader,nounits}
+    timeout-ms: ${MONITOR_GPU_TIMEOUT_MS:900}
   alerts:
     enabled: ${MONITOR_ALERTS_ENABLED:true}
     check-interval-ms: ${MONITOR_ALERTS_INTERVAL_MS:15000}
@@ -282,6 +417,17 @@ management:
     metrics:
       export:
         enabled: true
+
+bootstrap:
+  admin:
+    # Crea automaticamente un admin inicial si la tabla app_user esta vacia.
+    enabled: ${BOOTSTRAP_ADMIN_ENABLED:true}
+    username: ${BOOTSTRAP_ADMIN_USERNAME:admin}
+    # Si queda vacio y generate-random-password-if-empty=true, se genera clave temporal.
+    password: ${BOOTSTRAP_ADMIN_PASSWORD:}
+    generate-random-password-if-empty: true
+    # Archivo local para recuperar credenciales en instalaciones nuevas.
+    output-file: ${BOOTSTRAP_ADMIN_OUTPUT_FILE:data/bootstrap-admin.txt}
 
 registration:
   codes:
