@@ -1,3 +1,11 @@
+<#
+.SYNOPSIS
+Provisiona o reutiliza el contenedor MySQL para ApiAsistente.
+
+.DESCRIPTION
+Crea red/volumen cuando corresponde, arranca o recrea contenedor MySQL y garantiza
+DB/usuario de aplicacion. No despliega la API web.
+#>
 [CmdletBinding()]
 param(
     [string]$ContainerName = "apiasistente_mysql",

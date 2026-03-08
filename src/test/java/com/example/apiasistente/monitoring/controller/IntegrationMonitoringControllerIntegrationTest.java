@@ -4,16 +4,16 @@ import com.example.apiasistente.monitoring.dto.MonitoringAlertDto;
 import com.example.apiasistente.monitoring.dto.MonitoringAlertStateDto;
 import com.example.apiasistente.monitoring.dto.ServerStatsDto;
 import com.example.apiasistente.apikey.service.ApiKeyService;
-import com.example.apiasistente.monitoring.service.MonitorService;
-import com.example.apiasistente.monitoring.service.MonitoringAlertService;
-import com.example.apiasistente.monitoring.service.MonitoringAlertStore;
+import com.example.apiasistente.monitoring.service.MonitoringReadService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 
@@ -37,13 +37,7 @@ class IntegrationMonitoringControllerIntegrationTest {
     private ApiKeyService apiKeyService;
 
     @MockitoBean
-    private MonitorService monitorService;
-
-    @MockitoBean
-    private MonitoringAlertService monitoringAlertService;
-
-    @MockitoBean
-    private MonitoringAlertStore monitoringAlertStore;
+    private MonitoringReadService monitoringReadService;
 
     @Test
     void integrationMonitorRejectsMissingApiKey() throws Exception {
@@ -73,7 +67,7 @@ class IntegrationMonitoringControllerIntegrationTest {
                 new ServerStatsDto.GpuInfo(true, 0.33, 0.44, 8000, 24576, "RTX 3090"),
                 8
         );
-        when(monitorService.snapshot()).thenReturn(dto);
+        when(monitoringReadService.serverSnapshot()).thenReturn(dto);
 
         mockMvc.perform(get("/api/integration/monitor/server")
                         .header("X-API-KEY", "valid-token")
@@ -86,7 +80,6 @@ class IntegrationMonitoringControllerIntegrationTest {
     @Test
     void integrationMonitorReturnsRecentAlerts() throws Exception {
         stubApiKey("valid-token");
-        Instant since = Instant.parse("2026-02-27T18:00:00Z");
         MonitoringAlertDto alert = new MonitoringAlertDto(
                 "alert-1",
                 Instant.parse("2026-02-27T18:05:00Z"),
@@ -100,11 +93,11 @@ class IntegrationMonitoringControllerIntegrationTest {
                 null,
                 null
         );
-        when(monitoringAlertStore.recent(eq(since), eq(10))).thenReturn(java.util.List.of(alert));
+        when(monitoringReadService.recentAlerts(eq("2026-02-27T18:00:00Z"), eq(10))).thenReturn(java.util.List.of(alert));
 
         mockMvc.perform(get("/api/integration/monitor/alerts")
                         .header("X-API-KEY", "valid-token")
-                        .param("since", since.toString())
+                        .param("since", "2026-02-27T18:00:00Z")
                         .param("limit", "10")
                         .accept(MediaType.APPLICATION_JSON))
                 .andExpect(status().isOk())
@@ -116,6 +109,8 @@ class IntegrationMonitoringControllerIntegrationTest {
     @Test
     void integrationMonitorRejectsInvalidSinceParameter() throws Exception {
         stubApiKey("valid-token");
+        when(monitoringReadService.recentAlerts(eq("ayer"), eq(50)))
+                .thenThrow(new ResponseStatusException(HttpStatus.BAD_REQUEST, "Parametro 'since' invalido. Usa ISO-8601."));
 
         mockMvc.perform(get("/api/integration/monitor/alerts")
                         .header("X-API-KEY", "valid-token")
@@ -139,7 +134,7 @@ class IntegrationMonitoringControllerIntegrationTest {
                 null,
                 Instant.parse("2026-02-27T18:03:00Z")
         );
-        when(monitoringAlertService.currentState()).thenReturn(state);
+        when(monitoringReadService.currentAlertState()).thenReturn(state);
 
         mockMvc.perform(get("/api/integration/monitor/alerts/state")
                         .header("X-API-KEY", "valid-token")

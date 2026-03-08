@@ -12,7 +12,10 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Servicio para Monitoring Alert.
+ * Evalua umbrales de salud y emite eventos de alerta/recuperacion.
+ * <p>
+ * Este servicio solo decide estado y publica eventos en {@link MonitoringAlertStore};
+ * no expone endpoints ni realiza rendering.
  */
 @Service
 public class MonitoringAlertService {
@@ -49,6 +52,9 @@ public class MonitoringAlertService {
         this.cooldownMs = cooldownMs;
     }
 
+    /**
+     * Ejecuta una comprobacion periodica de umbrales y publica cambios de estado.
+     */
     @Scheduled(fixedDelayString = "${monitoring.alerts.check-interval-ms:15000}")
     public void check() {
         if (!enabled) return;
@@ -116,6 +122,11 @@ public class MonitoringAlertService {
         return now - lastSent >= cooldownMs;
     }
 
+    /**
+     * Devuelve el estado agregado de alertas activas y su ultima transicion.
+     *
+     * @return snapshot de estado de alertas
+     */
     public MonitoringAlertStateDto currentState() {
         AlertState s = state.get();
         return new MonitoringAlertStateDto(

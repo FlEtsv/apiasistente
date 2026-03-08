@@ -3,9 +3,7 @@ package com.example.apiasistente.monitoring.controller;
 import com.example.apiasistente.monitoring.dto.MonitoringAlertDto;
 import com.example.apiasistente.monitoring.dto.MonitoringAlertStateDto;
 import com.example.apiasistente.monitoring.dto.ServerStatsDto;
-import com.example.apiasistente.monitoring.service.MonitorService;
-import com.example.apiasistente.monitoring.service.MonitoringAlertService;
-import com.example.apiasistente.monitoring.service.MonitoringAlertStore;
+import com.example.apiasistente.monitoring.service.MonitoringReadService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -33,17 +31,11 @@ class ExternalMonitoringControllerTest {
     private MockMvc mockMvc;
 
     @MockitoBean
-    private MonitorService monitorService;
-
-    @MockitoBean
-    private MonitoringAlertService monitoringAlertService;
-
-    @MockitoBean
-    private MonitoringAlertStore monitoringAlertStore;
+    private MonitoringReadService monitoringReadService;
 
     @Test
     void serverReturnsSnapshot() throws Exception {
-        when(monitorService.snapshot()).thenReturn(new ServerStatsDto(
+        when(monitoringReadService.serverSnapshot()).thenReturn(new ServerStatsDto(
                 "srv-ext",
                 Instant.parse("2026-02-28T10:00:00Z"),
                 123,
@@ -68,7 +60,7 @@ class ExternalMonitoringControllerTest {
 
     @Test
     void alertsReturnsRecentEvents() throws Exception {
-        when(monitoringAlertStore.recent(eq(Instant.parse("2026-02-28T10:00:00Z")), eq(5)))
+        when(monitoringReadService.recentAlerts(eq("2026-02-28T10:00:00Z"), eq(5)))
                 .thenReturn(List.of(new MonitoringAlertDto(
                         "alert-ext",
                         Instant.parse("2026-02-28T10:01:00Z"),
@@ -92,7 +84,7 @@ class ExternalMonitoringControllerTest {
 
     @Test
     void alertStateReturnsCurrentState() throws Exception {
-        when(monitoringAlertService.currentState()).thenReturn(new MonitoringAlertStateDto(
+        when(monitoringReadService.currentAlertState()).thenReturn(new MonitoringAlertStateDto(
                 false,
                 true,
                 false,

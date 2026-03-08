@@ -72,6 +72,9 @@ public class AppSetupConfig {
     @Column(nullable = false)
     private Instant updatedAt;
 
+    /**
+     * Inicializa timestamps al crear el registro.
+     */
     @PrePersist
     void onCreate() {
         Instant now = Instant.now();
@@ -81,6 +84,9 @@ public class AppSetupConfig {
         updatedAt = now;
     }
 
+    /**
+     * Actualiza timestamp de modificacion en cada persist.
+     */
     @PreUpdate
     void onUpdate() {
         updatedAt = Instant.now();

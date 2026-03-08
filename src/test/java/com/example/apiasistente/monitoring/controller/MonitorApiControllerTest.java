@@ -4,9 +4,7 @@ import com.example.apiasistente.monitoring.dto.MonitoringAlertDto;
 import com.example.apiasistente.monitoring.dto.MonitoringAlertStateDto;
 import com.example.apiasistente.monitoring.dto.MonitoringStackStatusDto;
 import com.example.apiasistente.monitoring.dto.ServerStatsDto;
-import com.example.apiasistente.monitoring.service.MonitorService;
-import com.example.apiasistente.monitoring.service.MonitoringAlertService;
-import com.example.apiasistente.monitoring.service.MonitoringAlertStore;
+import com.example.apiasistente.monitoring.service.MonitoringReadService;
 import com.example.apiasistente.monitoring.service.MonitoringStackService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,20 +34,14 @@ class MonitorApiControllerTest {
     private MockMvc mockMvc;
 
     @MockitoBean
-    private MonitorService monitorService;
-
-    @MockitoBean
-    private MonitoringAlertStore monitoringAlertStore;
-
-    @MockitoBean
-    private MonitoringAlertService monitoringAlertService;
+    private MonitoringReadService monitoringReadService;
 
     @MockitoBean
     private MonitoringStackService monitoringStackService;
 
     @Test
     void serverReturnsSnapshot() throws Exception {
-        when(monitorService.snapshot()).thenReturn(serverStats());
+        when(monitoringReadService.serverSnapshot()).thenReturn(serverStats());
 
         mockMvc.perform(get("/api/monitor/server"))
                 .andExpect(status().isOk())
@@ -58,7 +50,7 @@ class MonitorApiControllerTest {
 
     @Test
     void alertsReturnsRecentEvents() throws Exception {
-        when(monitoringAlertStore.recent(eq(Instant.parse("2026-02-28T10:00:00Z")), eq(5)))
+        when(monitoringReadService.recentAlerts(eq("2026-02-28T10:00:00Z"), eq(5)))
                 .thenReturn(List.of(alert()));
 
         mockMvc.perform(get("/api/monitor/alerts")
@@ -70,7 +62,7 @@ class MonitorApiControllerTest {
 
     @Test
     void alertStateReturnsCurrentState() throws Exception {
-        when(monitoringAlertService.currentState()).thenReturn(alertState());
+        when(monitoringReadService.currentAlertState()).thenReturn(alertState());
 
         mockMvc.perform(get("/api/monitor/alerts/state"))
                 .andExpect(status().isOk())

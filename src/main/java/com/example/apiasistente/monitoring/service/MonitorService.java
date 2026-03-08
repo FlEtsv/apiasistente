@@ -20,7 +20,10 @@ import java.time.Instant;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Servicio para Monitor.
+ * Provee snapshots de recursos de host/JVM/red/GPU para monitorizacion.
+ * <p>
+ * Incluye cache corta para sondas de red y GPU, evitando bloquear
+ * peticiones frecuentes por llamadas externas.
  */
 @Service
 public class MonitorService {
@@ -48,6 +51,11 @@ public class MonitorService {
     private volatile ServerStatsDto.GpuInfo lastGpu;
     private volatile long lastGpuCheckMs;
 
+    /**
+     * Construye un snapshot consolidado de estado de servidor y proceso.
+     *
+     * @return fotografia puntual de metricas operativas
+     */
     public ServerStatsDto snapshot() {
         String host = resolveHostname();
         Instant ts = Instant.now();

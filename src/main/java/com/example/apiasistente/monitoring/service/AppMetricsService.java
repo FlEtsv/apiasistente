@@ -96,6 +96,14 @@ public class AppMetricsService {
         registerGauges();
     }
 
+    /**
+     * Registra metrica de enrutado inicial de una peticion de chat.
+     *
+     * @param decision decision del router de proceso
+     * @param mediaCount numero total de adjuntos en la peticion
+     * @param hasImageMedia si contiene media de tipo imagen
+     * @param hasDocumentMedia si contiene media documental
+     */
     public void recordChatRoute(ChatProcessRouter.ProcessDecision decision,
                                 int mediaCount,
                                 boolean hasImageMedia,
@@ -121,6 +129,12 @@ public class AppMetricsService {
         meterRegistry.summary(NAME_CHAT_MEDIA_ITEMS).record(Math.max(0, mediaCount));
     }
 
+    /**
+     * Registra una finalizacion exitosa de turno de chat.
+     *
+     * @param response respuesta final devuelta al cliente
+     * @param durationMs duracion del turno en milisegundos
+     */
     public void recordChatTurnSuccess(ChatResponse response, long durationMs) {
         String ragUsed = boolTag(response != null && response.isRagUsed());
         String ragNeeded = boolTag(response != null && response.isRagNeeded());
@@ -148,6 +162,13 @@ public class AppMetricsService {
         }
     }
 
+    /**
+     * Registra una finalizacion con error de turno de chat.
+     *
+     * @param stage etapa donde se produjo el fallo
+     * @param errorType tipo tecnico de error
+     * @param durationMs duracion acumulada hasta el fallo
+     */
     public void recordChatTurnFailure(String stage, String errorType, long durationMs) {
         String safeStage = normalizeTag(stage, "unknown");
         String safeErrorType = normalizeTag(errorType, "runtime_exception");
@@ -170,16 +191,32 @@ public class AppMetricsService {
         ).record(Math.max(0L, durationMs), TimeUnit.MILLISECONDS);
     }
 
+    /**
+     * Registra encolado de turno en la cola de chat.
+     *
+     * @param hasMedia indica si el turno incluye adjuntos
+     */
     public void recordQueueEnqueued(boolean hasMedia) {
         meterRegistry.counter(NAME_QUEUE_ENQUEUED, "has_media", boolTag(hasMedia)).increment();
     }
 
+    /**
+     * Registra una finalizacion correcta en cola.
+     *
+     * @param latencyMs latencia total en cola
+     */
     public void recordQueueCompleted(long latencyMs) {
         meterRegistry.counter(NAME_QUEUE_COMPLETED).increment();
         timer(NAME_QUEUE_LATENCY, "result", "success")
                 .record(Math.max(0L, latencyMs), TimeUnit.MILLISECONDS);
     }
 
+    /**
+     * Registra una finalizacion fallida en cola.
+     *
+     * @param errorType tipo tecnico de error
+     * @param latencyMs latencia total hasta fallo
+     */
     public void recordQueueFailed(String errorType, long latencyMs) {
         String safeErrorType = normalizeTag(errorType, "runtime_exception");
         meterRegistry.counter(NAME_QUEUE_FAILED, "error_type", safeErrorType).increment();
@@ -187,11 +224,22 @@ public class AppMetricsService {
                 .record(Math.max(0L, latencyMs), TimeUnit.MILLISECONDS);
     }
 
+    /**
+     * Actualiza gauges de cola activa/pendiente.
+     *
+     * @param activeSessions sesiones con procesamiento en curso
+     * @param pendingMessages mensajes esperando turno
+     */
     public void setChatQueueStats(int activeSessions, int pendingMessages) {
         queueActiveSessions.set(Math.max(0, activeSessions));
         queuePendingMessages.set(Math.max(0, pendingMessages));
     }
 
+    /**
+     * Publica perfil runtime calculado por el adaptador dinamico de chat.
+     *
+     * @param profile perfil/telemetria de adaptacion
+     */
     public void recordRuntimeProfile(ChatRuntimeAdaptationService.RuntimeProfile profile) {
         if (profile == null) {
             return;
@@ -227,12 +275,25 @@ public class AppMetricsService {
         runtimeTurnLatencyMs.set(nonNegative(snapshot.avgTurnLatencyMs()));
     }
 
+    /**
+     * Actualiza flags de estado global del robot RAG.
+     *
+     * @param paused indica pausa manual
+     * @param running indica ejecucion actual
+     * @param dryRun indica modo simulacion
+     */
     public void setRagMaintenanceFlags(boolean paused, boolean running, boolean dryRun) {
         ragPaused.set(paused ? 1 : 0);
         ragRunning.set(running ? 1 : 0);
         ragDryRun.set(dryRun ? 1 : 0);
     }
 
+    /**
+     * Registra resultado de una corrida del mantenimiento RAG.
+     *
+     * @param run resumen de la corrida
+     * @param durationMs duracion total en milisegundos
+     */
     public void recordRagMaintenanceRun(RagMaintenanceRunDto run, long durationMs) {
         if (run == null) {
             return;

@@ -1,3 +1,11 @@
+<#
+.SYNOPSIS
+Valida prerequisitos base antes de instalar o levantar ApiAsistente.
+
+.DESCRIPTION
+Comprueba Docker CLI, daemon Docker, docker compose y conectividad a Ollama.
+No crea contenedores ni modifica estado persistente.
+#>
 [CmdletBinding()]
 param(
     [string]$OllamaBaseUrl = "http://localhost:11434/api",

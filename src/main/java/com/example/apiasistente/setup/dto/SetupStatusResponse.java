@@ -1,7 +1,9 @@
 package com.example.apiasistente.setup.dto;
 
 /**
- * Indicador simple de si la instalacion ya fue configurada.
+ * Estado minimo del setup para redireccion inicial.
+ *
+ * @param configured si la instalacion ya tiene configuracion valida
  */
 public record SetupStatusResponse(boolean configured) {
 }

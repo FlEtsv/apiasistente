@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Activa el stack de observabilidad (API + Prometheus + Grafana) con Docker Compose.
+# Script operativo idempotente para diagnosticos desde backend/UI.
 
 PROJECT_DIR="${1:-.}"
 COMPOSE_FILE="${2:-docker-compose.yml}"

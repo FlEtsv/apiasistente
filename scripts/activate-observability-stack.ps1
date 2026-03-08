@@ -1,3 +1,11 @@
+<#
+.SYNOPSIS
+Activa servicios del stack de observabilidad via Docker Compose.
+
+.DESCRIPTION
+Levanta (o reintenta levantar) API, Prometheus y Grafana.
+No modifica configuracion funcional de la aplicacion.
+#>
 param(
     [string]$ProjectDir = ".",
     [string]$ComposeFile = "docker-compose.yml",

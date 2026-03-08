@@ -4,6 +4,8 @@ import jakarta.validation.constraints.NotBlank;
 
 /**
  * Payload de guardado para el wizard de instalacion.
+ * <p>
+ * El saneamiento y limites de seguridad se aplican en capa servicio.
  */
 public class SetupConfigRequest {
 

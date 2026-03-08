@@ -14,6 +14,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Publica metricas operativas periodicas para Prometheus, incluso sin trafico de chat.
+ * <p>
+ * Toma snapshots de monitor/alertas y actualiza gauges/counters en Micrometer.
  */
 @Service
 public class PrometheusMonitoringMetricsPublisher {
@@ -86,6 +88,9 @@ public class PrometheusMonitoringMetricsPublisher {
         registerGauges();
     }
 
+    /**
+     * Ejecuta ciclo de publicacion de metricas de servidor y estado de alertas.
+     */
     @Scheduled(
             fixedDelayString = "${monitoring.prometheus-publish-interval-ms:10000}",
             initialDelayString = "${monitoring.prometheus-publish-initial-delay-ms:3000}"

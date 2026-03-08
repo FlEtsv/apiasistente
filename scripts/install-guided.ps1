@@ -1,3 +1,11 @@
+<#
+.SYNOPSIS
+Orquestador de instalacion guiada para ApiAsistente (Windows/PowerShell).
+
+.DESCRIPTION
+Encadena preflight, provisioning MySQL y provisioning API en orden.
+Es el punto de entrada recomendado para instalacion completa.
+#>
 [CmdletBinding()]
 param(
     [switch]$NonInteractive,

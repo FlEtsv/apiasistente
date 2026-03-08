@@ -3,7 +3,23 @@ package com.example.apiasistente.monitoring.dto;
 import java.time.Instant;
 
 /**
- * DTO para Server Stats.
+ * Snapshot consolidado de estado de host y JVM.
+ *
+ * @param hostname nombre de host local
+ * @param timestamp instante de captura
+ * @param uptimeSeconds uptime del proceso en segundos
+ * @param cpu metricas de CPU
+ * @param jvm memoria JVM total
+ * @param jvmHeap memoria heap JVM
+ * @param jvmNonHeap memoria non-heap JVM
+ * @param system memoria del sistema operativo
+ * @param swap uso de swap
+ * @param disk uso de disco
+ * @param threads metricas de hilos
+ * @param gc estadisticas de GC
+ * @param network estado de conectividad externa
+ * @param gpu telemetria de GPU
+ * @param availableProcessors procesadores disponibles para la JVM
  */
 public record ServerStatsDto(
         String hostname,

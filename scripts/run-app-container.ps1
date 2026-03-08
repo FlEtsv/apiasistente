@@ -1,3 +1,11 @@
+<#
+.SYNOPSIS
+Provisiona o reutiliza el contenedor de API de ApiAsistente.
+
+.DESCRIPTION
+Construye imagen o usa JAR bundleado, inyecta variables runtime y espera healthcheck.
+No crea ni administra el contenedor MySQL (eso corresponde a run-mysql-container).
+#>
 [CmdletBinding()]
 param(
     [string]$ContainerName = "apiasistente",

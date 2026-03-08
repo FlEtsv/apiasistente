@@ -1,3 +1,11 @@
+<#
+.SYNOPSIS
+Empaqueta un bundle instalable de ApiAsistente para distribucion.
+
+.DESCRIPTION
+Genera JAR ejecutable, copia scripts/docs esenciales y construye ZIP final.
+Pensado como artefacto de entrega para testers o cliente final.
+#>
 [CmdletBinding()]
 param(
     [string]$OutputDir = "dist",

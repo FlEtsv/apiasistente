@@ -11,7 +11,9 @@ import java.util.Deque;
 import java.util.List;
 
 /**
- * Servicio para Monitoring Alert Store.
+ * Buffer circular en memoria para eventos de alerta de monitor.
+ * <p>
+ * Mantiene solo los eventos recientes para consultas operativas de baja latencia.
  */
 @Service
 public class MonitoringAlertStore {
@@ -23,6 +25,11 @@ public class MonitoringAlertStore {
         this.maxEvents = Math.max(1, maxEvents);
     }
 
+    /**
+     * Registra un nuevo evento al inicio del buffer.
+     *
+     * @param event evento de alerta o recuperacion
+     */
     public void record(MonitoringAlertDto event) {
         if (event == null) return;
         synchronized (events) {
@@ -33,6 +40,13 @@ public class MonitoringAlertStore {
         }
     }
 
+    /**
+     * Devuelve eventos recientes aplicando filtro temporal y limite.
+     *
+     * @param since fecha minima opcional
+     * @param limit maximo de eventos a devolver
+     * @return lista en orden descendente (mas reciente primero)
+     */
     public List<MonitoringAlertDto> recent(Instant since, int limit) {
         int safeLimit = limit <= 0 ? maxEvents : Math.min(limit, maxEvents);
         List<MonitoringAlertDto> out = new ArrayList<>(safeLimit);

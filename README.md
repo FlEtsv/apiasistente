@@ -22,6 +22,7 @@ El proyecto expone dos superficies de API:
 Documentacion tecnica:
 - `docs/architecture.md`: componentes, decisiones y limites de arquitectura.
 - `docs/flow.md`: flujos de datos por endpoint.
+- `docs/responsibility-flows.md`: separacion de responsabilidades por capa y flujo.
 
 Resumen:
 1. El codigo esta organizado por feature (`apikey`, `auth`, `chat`, `monitoring`, `prompt`, `rag`, `registration`, `shared`).

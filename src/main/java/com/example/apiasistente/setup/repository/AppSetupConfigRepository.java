@@ -9,5 +9,11 @@ import java.util.Optional;
  * Repositorio para la configuracion inicial de la instalacion.
  */
 public interface AppSetupConfigRepository extends JpaRepository<AppSetupConfig, Long> {
+
+    /**
+     * Recupera el primer registro de setup creado en la instalacion.
+     *
+     * @return configuracion persistida si existe
+     */
     Optional<AppSetupConfig> findTopByOrderByIdAsc();
 }

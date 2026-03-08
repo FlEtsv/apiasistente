@@ -1,3 +1,11 @@
+<#
+.SYNOPSIS
+Exporta componentes front reutilizables segun el mapa tematico.
+
+.DESCRIPTION
+Lee reusable-components/component-map.json y copia recursos a carpetas por tema.
+No modifica codigo fuente original, solo genera artefactos de reutilizacion.
+#>
 param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 )

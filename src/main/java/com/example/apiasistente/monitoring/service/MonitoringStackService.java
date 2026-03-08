@@ -26,7 +26,10 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Gestiona activacion y diagnostico del stack Docker (api + prometheus + grafana).
+ * Gestiona inspeccion y activacion del stack Docker (API + Prometheus + Grafana).
+ * <p>
+ * Separa dos responsabilidades de alto nivel:
+ * diagnostico no destructivo ({@link #status()}) y activacion idempotente ({@link #ensureUp()}).
  */
 @Service
 public class MonitoringStackService {
@@ -81,10 +84,20 @@ public class MonitoringStackService {
                 .build();
     }
 
+    /**
+     * Inspecciona estado actual del stack sin ejecutar cambios.
+     *
+     * @return estado operativo y diagnostico de entorno Docker
+     */
     public MonitoringStackStatusDto status() {
         return inspect(false, "", "");
     }
 
+    /**
+     * Intenta dejar operativo el stack de observabilidad usando script o compose.
+     *
+     * @return estado posterior de activacion con salida del comando ejecutado
+     */
     public MonitoringStackStatusDto ensureUp() {
         MonitoringStackStatusDto before = inspect(false, "", "");
         if (!before.dockerInstalled()) {

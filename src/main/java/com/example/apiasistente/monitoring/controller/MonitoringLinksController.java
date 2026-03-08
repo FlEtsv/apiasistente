@@ -15,7 +15,9 @@ import java.net.URI;
 import java.time.Instant;
 
 /**
- * Controlador para Monitoring Links.
+ * Controlador de enlaces operativos hacia Grafana y Prometheus.
+ * <p>
+ * Incluye redirecciones directas y una sonda HTTP ligera para diagnostico.
  */
 @Controller
 @RequestMapping("/ops")
@@ -36,26 +38,51 @@ public class MonitoringLinksController {
                 .build();
     }
 
+    /**
+     * Redirecciona al home de Grafana.
+     *
+     * @return redireccion absoluta a Grafana
+     */
     @GetMapping("/grafana")
     public RedirectView grafana() {
         return redirect(grafanaBaseUrl, "");
     }
 
+    /**
+     * Redirecciona a panel de administracion de Grafana.
+     *
+     * @return redireccion absoluta a Grafana admin
+     */
     @GetMapping("/grafana/config")
     public RedirectView grafanaConfig() {
         return redirect(grafanaBaseUrl, "/admin");
     }
 
+    /**
+     * Redirecciona al home de Prometheus.
+     *
+     * @return redireccion absoluta a Prometheus
+     */
     @GetMapping("/prometheus")
     public RedirectView prometheus() {
         return redirect(prometheusBaseUrl, "");
     }
 
+    /**
+     * Redirecciona a la vista de configuracion de Prometheus.
+     *
+     * @return redireccion absoluta a /config de Prometheus
+     */
     @GetMapping("/prometheus/config")
     public RedirectView prometheusConfig() {
         return redirect(prometheusBaseUrl, "/config");
     }
 
+    /**
+     * Ejecuta chequeo remoto de salud para Grafana y Prometheus.
+     *
+     * @return payload con resultado por servicio
+     */
     @GetMapping("/status")
     @ResponseBody
     public MonitoringStatus status() {
@@ -64,6 +91,12 @@ public class MonitoringLinksController {
         return new MonitoringStatus(Instant.now(), grafana, prometheus);
     }
 
+    /**
+     * Renderiza UI de estado con enlaces de monitor.
+     *
+     * @param model modelo de la vista
+     * @return plantilla Thymeleaf de estado operativo
+     */
     @GetMapping("/status/ui")
     public String statusPage(Model model) {
         model.addAttribute("grafanaBaseUrl", grafanaBaseUrl);
