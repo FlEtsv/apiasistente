@@ -3,58 +3,310 @@
 <head>
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>RAG Admin</title>
-
-    <!-- CSRF (Thymeleaf / Spring Security) -->
+    <title>RAG Admin — ApiAsistente</title>
     <meta name="_csrf" th:content="${_csrf.token}"/>
     <meta name="_csrf_header" th:content="${_csrf.headerName}"/>
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0b1017;
+            --bg-soft: #0f1621;
+            --panel: #121a24;
+            --border: #1e2a3a;
+            --muted: #8fa3b8;
+            --text: #e7eef7;
+            --accent: #1f7ae0;
+            --accent-2: #18c0a6;
+            --ok: #39c07d;
+            --bad: #e07b7b;
+            --warn: #e3b341;
+            --shadow: 0 12px 30px rgba(0,0,0,0.35);
+        }
+        * { box-sizing: border-box; }
+        html, body { min-height: 100%; min-height: 100dvh; }
+        body {
+            font-family: 'Sora', sans-serif;
+            margin: 0;
+            background:
+                radial-gradient(900px 420px at -10% -10%, rgba(31,122,224,0.16), transparent),
+                radial-gradient(720px 360px at 110% 110%, rgba(24,192,166,0.11), transparent),
+                var(--bg);
+            color: var(--text);
+            overflow-x: hidden;
+        }
+        body::before {
+            content: "";
+            position: fixed; inset: 0;
+            background-image:
+                linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+            background-size: 36px 36px;
+            pointer-events: none; opacity: 0.4; z-index: 0;
+        }
 
-    <script src="https://cdn.tailwindcss.com"></script>
+        .page { position: relative; z-index: 1; max-width: 860px; margin: 0 auto; padding: clamp(16px, 3vw, 28px) clamp(12px, 2.5vw, 20px) 48px; }
+
+        /* Header */
+        .header { display: flex; align-items: center; gap: 14px; margin-bottom: 28px; flex-wrap: wrap; }
+        .brand-badge {
+            width: 40px; height: 40px; flex-shrink: 0;
+            background: linear-gradient(135deg, var(--accent-2), #1f7ae0);
+            border-radius: 12px; display: grid; place-items: center;
+            font-weight: 700; font-size: 18px;
+            box-shadow: 0 8px 20px rgba(24,192,166,0.3);
+        }
+        .header-text h1 { margin: 0; font-size: clamp(18px, 2.5vw, 22px); font-weight: 700; }
+        .header-text p  { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+        .header-nav { margin-left: auto; }
+        .nav-btn {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 8px 16px; border-radius: 10px;
+            border: 1px solid var(--border); background: var(--panel); color: var(--text);
+            font: inherit; font-size: 13px; cursor: pointer; text-decoration: none;
+            transition: background 0.14s, border-color 0.14s;
+        }
+        .nav-btn:hover { background: var(--bg-soft); border-color: var(--accent); color: var(--accent); }
+
+        /* Card */
+        .card {
+            background: linear-gradient(165deg, rgba(18,26,36,0.97), rgba(11,17,25,0.93));
+            border: 1px solid var(--border); border-radius: 18px; padding: 24px;
+            box-shadow: var(--shadow); margin-bottom: 20px;
+        }
+        .card-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+        .card-icon {
+            width: 38px; height: 38px; border-radius: 10px; flex-shrink: 0;
+            display: grid; place-items: center;
+        }
+        .card-icon.blue { background: rgba(31,122,224,0.16); color: var(--accent); }
+        .card-icon.teal { background: rgba(24,192,166,0.16); color: var(--accent-2); }
+        .card-title { font-size: 16px; font-weight: 600; }
+        .card-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+        /* Form fields */
+        .form-group { margin-bottom: 16px; }
+        .form-label { display: block; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+        .form-input {
+            width: 100%; padding: 11px 14px;
+            background: var(--bg-soft); border: 1px solid var(--border);
+            border-radius: 11px; color: var(--text); font: inherit; font-size: 14px;
+            outline: none; transition: border-color 0.16s, box-shadow 0.16s;
+        }
+        .form-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(31,122,224,0.12); }
+        .form-input::placeholder { color: rgba(143,163,184,0.5); }
+        textarea.form-input { resize: vertical; min-height: 160px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; line-height: 1.6; }
+
+        /* Actions row */
+        .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+        .btn {
+            display: inline-flex; align-items: center; gap: 7px;
+            padding: 10px 18px; border-radius: 11px; font: inherit; font-size: 13px; font-weight: 600;
+            cursor: pointer; border: 1px solid var(--border); transition: background 0.14s, border-color 0.14s;
+        }
+        .btn.primary { background: linear-gradient(135deg, var(--accent), #2a87f5); border-color: var(--accent); color: #fff; box-shadow: 0 6px 18px rgba(31,122,224,0.3); }
+        .btn.primary:hover { opacity: 0.9; }
+        .btn.secondary { background: var(--bg-soft); color: var(--text); }
+        .btn.secondary:hover { background: var(--panel); border-color: var(--accent); }
+        .btn.success { background: rgba(57,192,125,0.15); border-color: rgba(57,192,125,0.4); color: #9fe7c0; }
+        .btn.success:hover { background: rgba(57,192,125,0.22); }
+
+        /* Drag-and-drop zone */
+        .drop-zone {
+            border: 2px dashed var(--border); border-radius: 14px;
+            padding: 32px 20px; text-align: center;
+            cursor: pointer; transition: border-color 0.2s, background 0.2s;
+            background: var(--bg-soft); position: relative;
+        }
+        .drop-zone:hover, .drop-zone.drag-over {
+            border-color: var(--accent-2); background: rgba(24,192,166,0.06);
+        }
+        .drop-zone input[type="file"] {
+            position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+        }
+        .drop-icon { color: var(--accent-2); margin-bottom: 12px; }
+        .drop-title { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+        .drop-sub { font-size: 12px; color: var(--muted); }
+        .drop-types { margin-top: 10px; display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+        .type-pill {
+            padding: 2px 10px; border-radius: 999px; font-size: 11px; font-family: 'IBM Plex Mono', monospace;
+            background: rgba(24,192,166,0.1); border: 1px solid rgba(24,192,166,0.25); color: var(--accent-2);
+        }
+        .selected-files { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+        .file-item {
+            display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 10px;
+            background: var(--panel); border: 1px solid var(--border); font-size: 12px;
+        }
+        .file-item-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .file-item-size { color: var(--muted); flex-shrink: 0; }
+
+        /* Log */
+        .log-wrap { margin-top: 16px; }
+        .log-label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+        .log-clear { font-size: 11px; color: rgba(143,163,184,0.5); cursor: pointer; text-transform: none; letter-spacing: 0; border: none; background: none; color: rgba(143,163,184,0.5); font: inherit; }
+        .log-clear:hover { color: var(--muted); }
+        #log {
+            background: var(--bg-soft); border: 1px solid var(--border); border-radius: 11px;
+            padding: 12px 14px; font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+            color: var(--muted); white-space: pre-wrap; word-break: break-words; line-height: 1.6;
+            max-height: 220px; overflow-y: auto; min-height: 48px;
+        }
+        #log:empty::before { content: "Los resultados aparecerán aquí..."; opacity: 0.4; }
+        #log::-webkit-scrollbar { width: 4px; }
+        #log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+        /* Note */
+        .note { font-size: 12px; color: rgba(143,163,184,0.6); margin-top: 10px; line-height: 1.5; }
+
+        @media (max-width: 640px) {
+            .header-nav { width: 100%; margin-left: 0; }
+            .nav-btn { width: 100%; justify-content: center; }
+            .actions { flex-direction: column; }
+            .btn { justify-content: center; }
+        }
+    </style>
 </head>
-<body class="min-h-screen min-h-[100dvh] bg-slate-950 text-slate-100 overflow-x-hidden">
+<body>
+<div class="page">
 
-<div class="max-w-5xl mx-auto p-4 sm:p-6 space-y-6">
-    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 class="text-xl sm:text-2xl font-bold">RAG Admin</h1>
-        <a class="text-sm text-blue-400 hover:underline" href="/chat">Volver a chat</a>
+    <!-- Header -->
+    <div class="header">
+        <div class="brand-badge">R</div>
+        <div class="header-text">
+            <h1>RAG Admin</h1>
+            <p>Gestión de la base de conocimiento</p>
+        </div>
+        <div class="header-nav">
+            <a class="nav-btn" href="/chat">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+                Volver al chat
+            </a>
+        </div>
     </div>
 
-    <div class="bg-slate-900/50 border border-slate-700/50 rounded-2xl p-4 space-y-3">
-        <h2 class="font-semibold">Subir documento</h2>
-        <input id="title" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2"
-               placeholder="Titulo (ej: Contexto - Endpoints)"/>
-        <textarea id="content" rows="10"
-                  class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 font-mono text-xs"
-                  placeholder="Pega aqui el contenido... (SANITIZA passwords)"></textarea>
-
-        <div class="flex flex-col sm:flex-row flex-wrap gap-2">
-            <button id="btnUpload"
-                    class="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 w-full sm:w-auto">
-                Subir 1
-            </button>
-            <button id="btnUploadSplit"
-                    class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 w-full sm:w-auto">
-                Subir y trocear (automatico)
-            </button>
+    <!-- Subir documento manual -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-icon blue">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+            </div>
+            <div>
+                <div class="card-title">Subir documento</div>
+                <div class="card-sub">Inserta texto directamente en el corpus RAG</div>
+            </div>
         </div>
 
-        <p class="text-xs text-slate-400">
-            "Trocear" divide el texto en varios docs (mejor recuperacion RAG).
+        <div class="form-group">
+            <label class="form-label" for="title">Título del documento</label>
+            <input id="title" class="form-input" placeholder="Ej: API Endpoints - Autenticación"/>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="content">Contenido</label>
+            <textarea id="content" class="form-input" placeholder="Pega aquí el contenido del documento...&#10;&#10;⚠️ Recuerda sanitizar contraseñas y datos sensibles antes de subir."></textarea>
+        </div>
+
+        <div class="actions">
+            <button id="btnUpload" class="btn primary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 5 5 12"/></svg>
+                Subir documento
+            </button>
+            <button id="btnUploadSplit" class="btn secondary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3M21 16v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+                Subir y trocear automático
+            </button>
+        </div>
+        <p class="note">
+            "Trocear" divide el texto en varios documentos más pequeños — mejora significativamente la recuperación RAG.
         </p>
     </div>
 
-    <div class="bg-slate-900/50 border border-slate-700/50 rounded-2xl p-4 space-y-3">
-        <h2 class="font-semibold">Subir archivos (lote)</h2>
-        <input id="files" type="file" multiple accept=".txt,.md,.json"
-               class="block w-full text-sm text-slate-300"/>
-        <button id="btnUploadFiles"
-                class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 w-full sm:w-auto">
-            Subir archivos como docs
-        </button>
-        <div id="log" class="text-xs text-slate-300 font-mono whitespace-pre-wrap break-words"></div>
+    <!-- Subir archivos en lote -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-icon teal">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            </div>
+            <div>
+                <div class="card-title">Subir archivos (lote)</div>
+                <div class="card-sub">Importa múltiples archivos de texto al corpus</div>
+            </div>
+        </div>
+
+        <div class="drop-zone" id="dropZone">
+            <input type="file" id="files" multiple accept=".txt,.md,.json" aria-label="Seleccionar archivos"/>
+            <div class="drop-icon">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            </div>
+            <div class="drop-title">Arrastra archivos aquí</div>
+            <div class="drop-sub">o haz clic para seleccionar</div>
+            <div class="drop-types">
+                <span class="type-pill">.txt</span>
+                <span class="type-pill">.md</span>
+                <span class="type-pill">.json</span>
+            </div>
+        </div>
+        <div id="selectedFiles" class="selected-files"></div>
+
+        <div class="actions" style="margin-top:16px">
+            <button id="btnUploadFiles" class="btn success">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 5 5 12"/></svg>
+                Subir archivos seleccionados
+            </button>
+        </div>
+
+        <div class="log-wrap">
+            <div class="log-label">
+                Log de operaciones
+                <button class="log-clear" onclick="document.getElementById('log').textContent=''">Limpiar</button>
+            </div>
+            <div id="log"></div>
+        </div>
     </div>
+
 </div>
 
 <script src="/rag-admin.js"></script>
+<script>
+    // Drag and drop UI
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('files');
+    const selectedFilesEl = document.getElementById('selectedFiles');
+
+    function fmtSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    function renderSelected(files) {
+        selectedFilesEl.innerHTML = '';
+        Array.from(files).forEach(f => {
+            const div = document.createElement('div');
+            div.className = 'file-item';
+            div.innerHTML = `
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--accent-2);flex-shrink:0"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                <span class="file-item-name">${f.name}</span>
+                <span class="file-item-size">${fmtSize(f.size)}</span>
+            `;
+            selectedFilesEl.appendChild(div);
+        });
+    }
+
+    fileInput.addEventListener('change', () => renderSelected(fileInput.files));
+
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', e => {
+        e.preventDefault();
+        dropZone.classList.remove('drag-over');
+        if (e.dataTransfer.files.length) {
+            // Transfer to input
+            const dt = new DataTransfer();
+            Array.from(e.dataTransfer.files).forEach(f => dt.items.add(f));
+            fileInput.files = dt.files;
+            renderSelected(fileInput.files);
+        }
+    });
+</script>
 </body>
 </html>

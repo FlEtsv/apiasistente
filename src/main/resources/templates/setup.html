@@ -3,223 +3,253 @@
 <head>
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>Configuracion Inicial - ApiAsistente</title>
+    <title>Configuración — ApiAsistente</title>
     <meta name="_csrf" th:content="${_csrf.token}"/>
     <meta name="_csrf_header" th:content="${_csrf.headerName}"/>
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
     <style>
         :root {
             --bg: #0b1017;
+            --bg-soft: #0f1621;
             --panel: #121a24;
             --border: #1f2c3d;
-            --text: #e7eef7;
             --muted: #8fa3b8;
+            --text: #e7eef7;
+            --accent: #1f7ae0;
+            --accent-2: #18c0a6;
             --ok: #39c07d;
             --warn: #e07b7b;
-            --accent: #1f7ae0;
+            --shadow: 0 16px 40px rgba(0,0,0,0.4);
         }
         * { box-sizing: border-box; }
+        html, body { min-height: 100%; min-height: 100dvh; }
         body {
             margin: 0;
-            font-family: "Segoe UI", Arial, sans-serif;
+            font-family: 'Sora', sans-serif;
             color: var(--text);
-            background: radial-gradient(900px 420px at -10% -10%, rgba(31,122,224,0.22), transparent),
-            radial-gradient(720px 360px at 110% 110%, rgba(24,192,166,0.14), transparent),
-            var(--bg);
-            min-height: 100vh;
+            background:
+                radial-gradient(900px 420px at -10% -10%, rgba(31,122,224,0.22), transparent),
+                radial-gradient(720px 360px at 110% 110%, rgba(24,192,166,0.14), transparent),
+                var(--bg);
+            overflow-x: hidden;
         }
-        .wrap {
-            max-width: 980px;
-            margin: 0 auto;
-            padding: 28px 16px 40px;
+        body::before {
+            content: "";
+            position: fixed; inset: 0;
+            background-image:
+                linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+            background-size: 36px 36px;
+            pointer-events: none; opacity: 0.4; z-index: 0;
         }
-        .card {
-            border: 1px solid var(--border);
-            border-radius: 16px;
-            background: linear-gradient(165deg, rgba(18, 26, 36, 0.95), rgba(11, 17, 25, 0.9));
-            padding: 18px;
-            box-shadow: 0 16px 30px rgba(0,0,0,0.35);
-        }
-        h1 {
-            margin: 0 0 6px;
-            font-size: clamp(22px, 3vw, 30px);
-        }
-        .sub {
-            margin: 0;
-            color: var(--muted);
-            font-size: 13px;
-        }
-        .status {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            margin-top: 12px;
-            padding: 6px 10px;
-            border-radius: 999px;
-            border: 1px solid var(--border);
-            font-size: 12px;
-        }
-        .dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #56657a;
-        }
-        .status.ok .dot { background: var(--ok); }
-        .status.warn .dot { background: var(--warn); }
 
-        .grid {
+        .page { position: relative; z-index: 1; max-width: 1000px; margin: 0 auto; padding: clamp(16px, 3vw, 32px) clamp(12px, 2.5vw, 20px) 60px; }
+
+        /* Header */
+        .page-header { display: flex; align-items: center; gap: 14px; margin-bottom: 28px; flex-wrap: wrap; }
+        .brand-badge {
+            width: 44px; height: 44px; flex-shrink: 0;
+            background: linear-gradient(135deg, var(--accent), #4da3ff);
+            border-radius: 13px; display: grid; place-items: center;
+            font-weight: 700; font-size: 20px;
+            box-shadow: 0 8px 24px rgba(31,122,224,0.4);
+        }
+        .header-text h1 { margin: 0; font-size: clamp(18px, 2.5vw, 22px); font-weight: 700; }
+        .header-text p  { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+        .header-nav { margin-left: auto; display: flex; gap: 8px; }
+        .nav-btn {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 8px 16px; border-radius: 10px;
+            border: 1px solid var(--border); background: var(--panel); color: var(--text);
+            font: inherit; font-size: 13px; cursor: pointer; text-decoration: none;
+            transition: background 0.14s, border-color 0.14s;
+        }
+        .nav-btn:hover { background: var(--bg-soft); border-color: var(--accent); color: var(--accent); }
+        .nav-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 4px 14px rgba(31,122,224,0.3); }
+        .nav-btn.primary:hover { background: #2a87f5; border-color: #2a87f5; color: #fff; }
+
+        /* Status badge */
+        .status-bar {
+            display: flex; align-items: center; gap: 10px;
+            padding: 12px 18px; border-radius: 12px; margin-bottom: 20px;
+            font-size: 13px; font-weight: 500;
+        }
+        .status-bar.ok  { background: rgba(57,192,125,0.1); border: 1px solid rgba(57,192,125,0.3); color: #9fe7c0; }
+        .status-bar.warn { background: rgba(224,123,123,0.1); border: 1px solid rgba(224,123,123,0.3); color: #f6a9a9; }
+        .status-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+        .status-bar.ok .status-dot  { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+        .status-bar.warn .status-dot { background: var(--warn); }
+
+        /* Cards */
+        .card {
+            background: linear-gradient(165deg, rgba(18,26,36,0.97), rgba(11,17,25,0.93));
+            border: 1px solid var(--border); border-radius: 18px;
+            padding: 24px; box-shadow: var(--shadow); margin-bottom: 20px;
+        }
+        .section-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+        .section-icon {
+            width: 38px; height: 38px; border-radius: 10px; flex-shrink: 0;
+            display: grid; place-items: center;
+        }
+        .section-icon.blue { background: rgba(31,122,224,0.16); color: var(--accent); }
+        .section-icon.teal { background: rgba(24,192,166,0.16); color: var(--accent-2); }
+        .section-icon.green { background: rgba(57,192,125,0.16); color: var(--ok); }
+        .section-icon.purple { background: rgba(150,100,220,0.16); color: #b08aee; }
+        .section-title { font-size: 16px; font-weight: 700; }
+        .section-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+        /* Guide boxes */
+        .guide {
+            background: rgba(10, 16, 24, 0.6); border: 1px solid var(--border);
+            border-radius: 12px; padding: 14px 16px; margin-bottom: 20px;
+        }
+        .guide p { margin: 5px 0; font-size: 12px; color: var(--muted); line-height: 1.55; }
+        .guide p:first-child { margin-top: 0; }
+        .guide p:last-child { margin-bottom: 0; }
+        .guide strong { color: var(--text); }
+
+        /* Grid layout */
+        .field-grid {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 12px;
-            margin-top: 16px;
+            gap: 16px;
         }
-        .field {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
+        .field-full { grid-column: 1 / -1; }
+
+        /* Fields */
+        .field { display: flex; flex-direction: column; gap: 7px; }
+        .field label {
+            font-size: 11px; font-weight: 600; color: var(--muted);
+            text-transform: uppercase; letter-spacing: 0.5px;
         }
-        .field.full {
-            grid-column: 1 / -1;
+        .field input, .field textarea {
+            border: 1px solid var(--border); border-radius: 11px;
+            background: var(--bg-soft); color: var(--text);
+            padding: 11px 13px; width: 100%; font: inherit; font-size: 14px;
+            outline: none; transition: border-color 0.16s, box-shadow 0.16s;
         }
-        label {
-            font-size: 12px;
-            color: var(--muted);
-        }
-        input, textarea {
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            background: #0f1621;
-            color: var(--text);
-            padding: 10px 12px;
-            width: 100%;
-            font: inherit;
-        }
-        textarea {
-            min-height: 130px;
-            resize: vertical;
-            line-height: 1.45;
-        }
-        .hint {
-            font-size: 11px;
-            color: var(--muted);
-        }
-        .switch {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .actions {
-            margin-top: 16px;
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-        }
-        .btn {
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 10px 14px;
-            background: #101927;
-            color: var(--text);
-            cursor: pointer;
-            font-size: 13px;
-        }
-        .btn.primary {
-            background: var(--accent);
+        .field input:focus, .field textarea:focus {
             border-color: var(--accent);
-            color: #fff;
+            box-shadow: 0 0 0 3px rgba(31,122,224,0.12);
         }
-        .btn:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
+        .field input::placeholder, .field textarea::placeholder { color: rgba(143,163,184,0.45); }
+        .field textarea { min-height: 130px; resize: vertical; line-height: 1.5; font-size: 13px; }
+        .hint { font-size: 11px; color: rgba(143,163,184,0.6); line-height: 1.45; }
+
+        /* Toggle switch */
+        .toggle-row { display: flex; align-items: center; gap: 12px; }
+        .toggle-label { font-size: 14px; }
+        .toggle {
+            position: relative; width: 44px; height: 24px; flex-shrink: 0;
         }
-        .result {
-            margin-top: 12px;
-            font-size: 13px;
-            line-height: 1.45;
-            white-space: pre-wrap;
+        .toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+        .toggle-track {
+            position: absolute; inset: 0; border-radius: 999px;
+            background: var(--bg-soft); border: 1px solid var(--border);
+            cursor: pointer; transition: background 0.2s, border-color 0.2s;
         }
-        .result.ok { color: #9fe7c0; }
-        .result.error { color: #f6a9a9; }
-        .guide {
-            margin-top: 16px;
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 12px;
-            background: rgba(10, 16, 24, 0.55);
+        .toggle input:checked + .toggle-track { background: var(--accent-2); border-color: var(--accent-2); }
+        .toggle-thumb {
+            position: absolute; top: 3px; left: 3px;
+            width: 16px; height: 16px; border-radius: 50%;
+            background: var(--muted); transition: transform 0.2s, background 0.2s;
+            pointer-events: none;
         }
-        .guide h2 {
-            margin: 0 0 6px;
-            font-size: 15px;
-        }
-        .guide p {
-            margin: 6px 0;
-            font-size: 12px;
-            color: var(--muted);
-            line-height: 1.5;
-        }
-        .robot-line {
-            margin-top: 12px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            align-items: center;
-        }
+        .toggle input:checked ~ .toggle-thumb { transform: translateX(20px); background: #fff; }
+
+        /* Robot status */
+        .robot-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 14px; }
         .pill {
-            display: inline-flex;
-            align-items: center;
-            border: 1px solid var(--border);
-            border-radius: 999px;
-            padding: 6px 10px;
-            font-size: 12px;
-            background: #0d1420;
+            display: inline-flex; align-items: center; gap: 6px;
+            border: 1px solid var(--border); border-radius: 999px;
+            padding: 6px 12px; font-size: 12px; font-weight: 500;
         }
-        .pill.on {
-            border-color: rgba(57, 192, 125, 0.55);
-            color: #9fe7c0;
+        .pill .dot { width: 7px; height: 7px; border-radius: 50%; }
+        .pill.on  { border-color: rgba(57,192,125,0.5); color: #9fe7c0; }
+        .pill.on .dot  { background: var(--ok); box-shadow: 0 0 5px var(--ok); }
+        .pill.off { border-color: rgba(224,123,123,0.4); color: #f6a9a9; }
+        .pill.off .dot { background: var(--warn); }
+        .robot-detail { font-size: 11px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
+
+        /* Action buttons */
+        .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 22px; }
+        .btn {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 11px 20px; border-radius: 12px; font: inherit; font-size: 14px; font-weight: 600;
+            cursor: pointer; border: 1px solid var(--border); transition: background 0.14s, border-color 0.14s, opacity 0.14s;
         }
-        .pill.off {
-            border-color: rgba(224, 123, 123, 0.55);
-            color: #f6a9a9;
-        }
+        .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 6px 20px rgba(31,122,224,0.3); }
+        .btn.primary:hover { background: #2a87f5; border-color: #2a87f5; }
+        .btn.secondary { background: var(--bg-soft); color: var(--text); }
+        .btn.secondary:hover { background: var(--panel); border-color: rgba(31,122,224,0.3); }
+        .btn.ghost { background: transparent; color: var(--muted); }
+        .btn.ghost:hover { background: var(--panel); color: var(--text); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Result feedback */
+        .result { margin-top: 14px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; padding: 12px 16px; border-radius: 10px; }
+        .result:empty { display: none; }
+        .result.ok    { background: rgba(57,192,125,0.1); border: 1px solid rgba(57,192,125,0.3); color: #9fe7c0; }
+        .result.error { background: rgba(224,123,123,0.1); border: 1px solid rgba(224,123,123,0.3); color: #f6a9a9; }
+
         @media (max-width: 760px) {
-            .grid { grid-template-columns: 1fr; }
+            .field-grid { grid-template-columns: 1fr; }
+            .header-nav { width: 100%; margin-left: 0; flex-wrap: wrap; }
+            .nav-btn { flex: 1; justify-content: center; }
+            .actions { flex-direction: column; }
+            .btn { justify-content: center; }
         }
     </style>
 </head>
 <body>
-<main class="wrap">
-    <section class="card">
-        <h1>Configuracion Inicial</h1>
-        <p class="sub">Define Ollama, modelos y fuentes web del scraper para activar chat + RAG sin tocar codigo.</p>
-        <div id="setupStatus" class="status warn" th:classappend="${configured} ? ' ok' : ' warn'">
-            <span class="dot"></span>
-            <span id="setupStatusText" th:text="${configured} ? 'Instalacion configurada' : 'Configuracion pendiente'">Configuracion pendiente</span>
-        </div>
+<div class="page">
 
-        <div class="guide">
-            <h2>Por que esta configuracion es critica</h2>
-            <p>Si la URL de Ollama o un modelo estan mal, el chat puede fallar, tardar demasiado o devolver respuestas vacias.</p>
-            <p>El modelo de embeddings alimenta el retrieval del RAG: si no es correcto, el sistema no encuentra contexto y baja la precision.</p>
-            <p>El scraper es opcional: sin URLs validas no ingesta conocimiento web y la base RAG no crece con informacion externa.</p>
-            <p>El preset inicial viene con nuestra configuracion recomendada, pero el cliente final puede cambiar todos los campos.</p>
+    <!-- Page header -->
+    <div class="page-header">
+        <div class="brand-badge">A</div>
+        <div class="header-text">
+            <h1>Configuración Inicial</h1>
+            <p>Ollama, modelos, scraper y robot RAG</p>
         </div>
+        <div class="header-nav">
+            <a href="/chat" class="nav-btn primary">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                Ir al chat
+            </a>
+        </div>
+    </div>
 
-        <div class="guide">
-            <h2>Robot RAG y Scraper</h2>
-            <p><strong>Robot RAG:</strong> revisa el corpus en segundo plano, detecta contenido degradado y mantiene la base util para retrieval.</p>
-            <p><strong>Scraper:</strong> extrae texto de webs que indiques y lo inserta como documentos del RAG.</p>
-            <div class="robot-line">
-                <span id="ragRobotState" class="pill off">Robot RAG apagado</span>
-                <button id="toggleRagRobotBtn" class="btn" type="button">Encender robot RAG</button>
+    <!-- Estado de configuración -->
+    <div id="setupStatus" class="status-bar warn"
+         th:classappend="${configured} ? ' ok' : ' warn'">
+        <span class="status-dot"></span>
+        <span id="setupStatusText" th:text="${configured} ? 'Instalación configurada y lista' : 'Configuración pendiente — completa los campos'">
+            Configuración pendiente
+        </span>
+    </div>
+
+    <!-- Sección: Ollama + Modelos -->
+    <div class="card">
+        <div class="section-header">
+            <div class="section-icon blue">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
             </div>
-            <div id="ragRobotDetail" class="hint">Cargando estado del robot RAG...</div>
+            <div>
+                <div class="section-title">Conexión Ollama</div>
+                <div class="section-sub">URL y modelos de lenguaje para el chat y los embeddings</div>
+            </div>
         </div>
 
-        <div class="grid">
-            <div class="field full">
+        <div class="guide">
+            <p>Si la URL de Ollama o un modelo están mal, el chat puede fallar, tardar demasiado o devolver respuestas vacías.</p>
+            <p>El <strong>modelo de embeddings</strong> alimenta el retrieval del RAG: si no es correcto, el sistema no encuentra contexto y baja la precisión.</p>
+        </div>
+
+        <div class="field-grid">
+            <div class="field field-full">
                 <label for="ollamaBaseUrl">Ollama Base URL</label>
                 <input id="ollamaBaseUrl" placeholder="http://localhost:11434/api"/>
-                <div class="hint">Si pones solo host/puerto, el sistema completa /api automaticamente.</div>
+                <div class="hint">Si pones solo host/puerto, el sistema completa /api automáticamente.</div>
             </div>
 
             <div class="field">
@@ -227,7 +257,7 @@
                 <input id="chatModel" placeholder="qwen3:14b"/>
             </div>
             <div class="field">
-                <label for="fastChatModel">Modelo chat rapido</label>
+                <label for="fastChatModel">Modelo chat rápido</label>
                 <input id="fastChatModel" placeholder="qwen2.5:7b"/>
             </div>
             <div class="field">
@@ -243,49 +273,110 @@
                 <input id="embedModel" placeholder="nomic-embed-text:latest"/>
             </div>
             <div class="field">
-                <label for="responseGuardModel">Modelo response guard (opcional)</label>
+                <label for="responseGuardModel">Modelo response guard <span style="opacity:.5;font-weight:400">(opcional)</span></label>
                 <input id="responseGuardModel" placeholder="mistral:7b"/>
             </div>
+        </div>
+    </div>
 
-            <div class="field full">
-                <label class="switch">
-                    <input id="scraperEnabled" type="checkbox"/>
-                    Activar scraper web automatico a RAG
-                </label>
-                <div class="hint">Opcional. Si el scraper vive en otro servicio, integralo contra la misma MySQL o via API RAG externa.</div>
+    <!-- Sección: Robot RAG -->
+    <div class="card">
+        <div class="section-header">
+            <div class="section-icon green">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M9 11V7a3 3 0 0 1 6 0v4"/><circle cx="12" cy="16" r="1"/></svg>
             </div>
+            <div>
+                <div class="section-title">Robot RAG</div>
+                <div class="section-sub">Mantenimiento automático del corpus en segundo plano</div>
+            </div>
+        </div>
+
+        <div class="guide">
+            <p><strong>Robot RAG:</strong> revisa el corpus en segundo plano, detecta contenido degradado y mantiene la base útil para retrieval.</p>
+        </div>
+
+        <div class="robot-row">
+            <span id="ragRobotState" class="pill off">
+                <span class="dot"></span>Robot RAG apagado
+            </span>
+            <button id="toggleRagRobotBtn" class="btn secondary" type="button">Encender robot RAG</button>
+        </div>
+        <div id="ragRobotDetail" class="robot-detail">Cargando estado del robot RAG...</div>
+    </div>
+
+    <!-- Sección: Scraper Web -->
+    <div class="card">
+        <div class="section-header">
+            <div class="section-icon teal">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+            </div>
+            <div>
+                <div class="section-title">Scraper Web → RAG</div>
+                <div class="section-sub">Extrae e ingesta contenido web automáticamente</div>
+            </div>
+        </div>
+
+        <div class="guide">
+            <p><strong>Scraper:</strong> extrae texto de las webs que indiques y lo inserta como documentos del RAG.</p>
+            <p>Opcional: sin URLs válidas no ingesta conocimiento web y la base RAG no crece con información externa.</p>
+        </div>
+
+        <div class="field-grid">
+            <div class="field field-full">
+                <label>Estado del scraper</label>
+                <div class="toggle-row">
+                    <label class="toggle">
+                        <input id="scraperEnabled" type="checkbox"/>
+                        <span class="toggle-track"></span>
+                        <span class="toggle-thumb"></span>
+                    </label>
+                    <span class="toggle-label">Activar scraper web automático a RAG</span>
+                </div>
+                <div class="hint" style="margin-top:6px">Opcional. Si el scraper vive en otro servicio, intégralo contra la misma MySQL o vía API RAG externa.</div>
+            </div>
+
             <div class="field">
-                <label for="scraperTickSec">Frecuencia scraper (segundos)</label>
+                <label for="scraperTickSec">Frecuencia (segundos)</label>
                 <input id="scraperTickSec" type="number" min="10" step="1" placeholder="300"/>
             </div>
             <div class="field">
-                <label for="scraperOwner">Owner RAG para scraper</label>
+                <label for="scraperOwner">Owner RAG</label>
                 <input id="scraperOwner" placeholder="global"/>
             </div>
             <div class="field">
-                <label for="scraperSource">Source del scraper</label>
+                <label for="scraperSource">Source</label>
                 <input id="scraperSource" placeholder="web-scraper"/>
             </div>
             <div class="field">
-                <label for="scraperTags">Tags del scraper</label>
+                <label for="scraperTags">Tags</label>
                 <input id="scraperTags" placeholder="scraper,web,knowledge"/>
             </div>
-            <div class="field full">
-                <label for="scraperUrls">URLs del scraper (una por linea o separadas por coma)</label>
+            <div class="field field-full">
+                <label for="scraperUrls">URLs (una por línea o separadas por coma)</label>
                 <textarea id="scraperUrls" placeholder="https://docs.spring.io/spring-boot/reference&#10;https://example.com/base-conocimiento"></textarea>
             </div>
         </div>
+    </div>
 
-        <div class="actions">
-            <button id="saveSetupBtn" class="btn primary">Guardar configuracion</button>
-            <button id="loadDefaultsBtn" class="btn">Cargar preset recomendado</button>
-            <button id="runScraperBtn" class="btn">Ejecutar scraper ahora</button>
-            <a href="/chat" class="btn" style="text-decoration:none; display:inline-flex; align-items:center;">Ir al chat</a>
-        </div>
+    <!-- Botones de acción -->
+    <div class="actions">
+        <button id="saveSetupBtn" class="btn primary">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            Guardar configuración
+        </button>
+        <button id="loadDefaultsBtn" class="btn secondary">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            Cargar preset recomendado
+        </button>
+        <button id="runScraperBtn" class="btn ghost">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Ejecutar scraper ahora
+        </button>
+    </div>
 
-        <div id="setupResult" class="result"></div>
-    </section>
-</main>
-<script src="/js/setup.js?v=1"></script>
+    <div id="setupResult" class="result"></div>
+
+</div>
+<script src="/js/setup.js?v=2"></script>
 </body>
 </html>

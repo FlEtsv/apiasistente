@@ -2,87 +2,352 @@
 <html lang="es" xmlns:th="http://www.thymeleaf.org">
 <head>
     <meta charset="UTF-8">
-    <title>Estado de Monitoreo</title>
+    <title>Estado de Monitoreo — ApiAsistente</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="_csrf" th:content="${_csrf != null ? _csrf.token : ''}">
     <meta name="_csrf_header" th:content="${_csrf != null ? _csrf.headerName : ''}">
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
     <style>
+        :root {
+            --bg: #0b1017;
+            --bg-soft: #0f1621;
+            --panel: #121a24;
+            --panel-2: #0f1a28;
+            --border: #1e2a3a;
+            --muted: #8fa3b8;
+            --text: #e7eef7;
+            --accent: #1f7ae0;
+            --accent-2: #18c0a6;
+            --ok: #39c07d;
+            --warn: #e3b341;
+            --bad: #e07b7b;
+            --shadow: 0 12px 30px rgba(0,0,0,0.35);
+        }
         * { box-sizing: border-box; }
-        body { font-family: Arial, sans-serif; margin: 0; background: #f5f7fb; color: #111; min-height: 100vh; min-height: 100dvh; overflow-x: hidden; }
-        .wrap { max-width: 1100px; margin: 0 auto; padding: clamp(12px, 2vw, 20px) clamp(12px, 2vw, 16px) 24px; }
-        h1 { margin-bottom: 8px; }
-        .meta { color: #555; margin-bottom: 16px; display: flex; flex-wrap: wrap; gap: 10px; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
-        .card { background: #fff; border: 1px solid #e0e4ec; border-radius: 8px; padding: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); min-width: 0; }
-        .label { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 0.4px; }
-        .value { font-size: 18px; margin: 6px 0; word-break: break-word; }
-        .status-up { color: #0a7a3f; font-weight: 700; }
-        .status-down { color: #b00020; font-weight: 700; }
-        .small { font-size: 12px; color: #666; word-break: break-word; }
-        .actions { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
-        .btn { display: inline-block; padding: 6px 10px; border-radius: 6px; border: 1px solid #d2d7e0; text-decoration: none; color: #111; background: #f7f9fc; white-space: nowrap; cursor: pointer; font: inherit; }
-        .btn:hover { background: #eef2f8; }
-        .error { color: #b00020; font-size: 12px; margin-top: 6px; }
+        html, body { height: 100%; }
+        body {
+            font-family: 'Sora', sans-serif;
+            margin: 0;
+            background:
+                radial-gradient(900px 420px at -10% -10%, rgba(31,122,224,0.18), transparent),
+                radial-gradient(720px 360px at 110% 110%, rgba(24,192,166,0.12), transparent),
+                var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            min-height: 100dvh;
+            overflow-x: hidden;
+        }
+        body::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+            background-size: 36px 36px;
+            pointer-events: none;
+            opacity: 0.4;
+            z-index: 0;
+        }
+
+        /* Layout */
+        .page { position: relative; z-index: 1; max-width: 1100px; margin: 0 auto; padding: clamp(16px, 2.5vw, 28px) clamp(12px, 2vw, 20px) 40px; }
+
+        /* Header */
+        .header { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; flex-wrap: wrap; }
+        .brand-badge {
+            width: 40px; height: 40px;
+            background: linear-gradient(135deg, var(--accent), #4da3ff);
+            border-radius: 12px;
+            display: grid; place-items: center;
+            font-weight: 700; font-size: 18px;
+            box-shadow: 0 8px 20px rgba(31,122,224,0.35);
+            flex-shrink: 0;
+        }
+        .header-text h1 { margin: 0; font-size: clamp(18px, 2.5vw, 22px); font-weight: 700; }
+        .header-text p { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+        .header-nav { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+        .nav-btn {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 8px 14px; border-radius: 10px;
+            border: 1px solid var(--border);
+            background: var(--panel); color: var(--text);
+            font: inherit; font-size: 13px; cursor: pointer;
+            text-decoration: none; white-space: nowrap;
+            transition: background 0.14s, border-color 0.14s;
+        }
+        .nav-btn:hover { background: var(--bg-soft); border-color: var(--accent); }
+        .nav-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+        .nav-btn.primary:hover { background: #2a87f5; }
+
+        /* Meta bar */
+        .meta-bar {
+            display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+            padding: 10px 14px; border-radius: 10px;
+            background: var(--panel); border: 1px solid var(--border);
+            font-size: 12px; color: var(--muted); margin-bottom: 20px;
+        }
+        .meta-bar span strong { color: var(--text); }
+        .meta-sep { color: var(--border); }
+
+        /* Grid */
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+
+        /* Card */
+        .card {
+            background: linear-gradient(165deg, rgba(18,26,36,0.96), rgba(11,17,25,0.92));
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: var(--shadow);
+            min-width: 0;
+            transition: border-color 0.2s;
+        }
+        .card:hover { border-color: rgba(31,122,224,0.35); }
+
+        .card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+        .card-icon {
+            width: 36px; height: 36px; border-radius: 10px;
+            display: grid; place-items: center; flex-shrink: 0;
+            font-size: 16px;
+        }
+        .card-icon.grafana { background: rgba(255, 120, 25, 0.18); color: #ff7819; }
+        .card-icon.prometheus { background: rgba(229, 84, 56, 0.18); color: #e55438; }
+        .card-icon.docker { background: rgba(31,122,224, 0.18); color: var(--accent); }
+
+        .card-title { font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+
+        /* Status */
+        .status-badge {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 4px 12px; border-radius: 999px; font-size: 13px; font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .status-badge .dot { width: 8px; height: 8px; border-radius: 50%; }
+        .status-badge.up { background: rgba(57,192,125,0.14); color: var(--ok); border: 1px solid rgba(57,192,125,0.3); }
+        .status-badge.up .dot { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+        .status-badge.down { background: rgba(224,123,123,0.14); color: var(--bad); border: 1px solid rgba(224,123,123,0.3); }
+        .status-badge.down .dot { background: var(--bad); }
+        .status-badge.warn { background: rgba(227,179,65,0.14); color: var(--warn); border: 1px solid rgba(227,179,65,0.3); }
+        .status-badge.warn .dot { background: var(--warn); }
+        .status-badge.neutral { background: rgba(143,163,184,0.12); color: var(--muted); border: 1px solid var(--border); }
+        .status-badge.neutral .dot { background: var(--muted); }
+
+        /* Info rows */
+        .info-row {
+            display: flex; justify-content: space-between; align-items: flex-start;
+            gap: 8px; font-size: 12px; color: var(--muted);
+            padding: 7px 0; border-bottom: 1px solid var(--border);
+            flex-wrap: wrap;
+        }
+        .info-row:last-of-type { border-bottom: none; }
+        .info-label { flex-shrink: 0; }
+        .info-val { color: var(--text); text-align: right; word-break: break-all; font-family: 'IBM Plex Mono', monospace; font-size: 11px; }
+
+        .error-msg { color: var(--bad); font-size: 12px; margin-top: 8px; padding: 8px 12px; border-radius: 8px; background: rgba(224,123,123,0.08); border: 1px solid rgba(224,123,123,0.2); }
+        .error-msg:empty { display: none; }
+
+        /* Actions */
+        .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+        .action-btn {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 8px 14px; border-radius: 10px;
+            border: 1px solid var(--border); background: var(--bg-soft);
+            color: var(--text); font: inherit; font-size: 12px;
+            cursor: pointer; text-decoration: none; white-space: nowrap;
+            transition: background 0.14s, border-color 0.14s;
+        }
+        .action-btn:hover { background: var(--panel); border-color: var(--accent); color: var(--accent); }
+        .action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .action-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+        .action-btn.primary:hover { background: #2a87f5; border-color: #2a87f5; color: #fff; }
+
+        /* Stack summary pills */
+        .stack-pills { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+        .stack-pill {
+            padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 500;
+        }
+        .stack-pill.on { background: rgba(57,192,125,0.14); color: var(--ok); border: 1px solid rgba(57,192,125,0.25); }
+        .stack-pill.off { background: rgba(224,123,123,0.1); color: var(--bad); border: 1px solid rgba(224,123,123,0.2); }
+        .stack-pill.warn { background: rgba(227,179,65,0.1); color: var(--warn); border: 1px solid rgba(227,179,65,0.2); }
+
+        /* Stack output */
+        .stack-output {
+            margin-top: 10px; padding: 10px 12px; border-radius: 10px;
+            background: var(--bg-soft); border: 1px solid var(--border);
+            font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+            color: var(--muted); max-height: 120px; overflow-y: auto;
+            white-space: pre-wrap; word-break: break-all; line-height: 1.5;
+        }
+        .stack-output:empty { display: none; }
+
+        /* Refresh pulse */
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        .live-dot {
+            display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+            background: var(--accent-2); animation: pulse-dot 2s ease-in-out infinite;
+        }
 
         @media (max-width: 640px) {
-            h1 { font-size: 22px; line-height: 1.2; }
-            .value { font-size: 16px; }
-            .actions { flex-direction: column; align-items: stretch; }
-            .btn { text-align: center; width: 100%; }
+            .grid { grid-template-columns: 1fr; }
+            .header { gap: 10px; }
+            .header-nav { width: 100%; margin-left: 0; }
+            .nav-btn { flex: 1; justify-content: center; }
+            .actions { flex-direction: column; }
+            .action-btn { justify-content: center; }
         }
     </style>
 </head>
 <body>
-<div class="wrap">
-<h1>Estado de Monitoreo</h1>
-<div class="meta">
-    <span>Grafana: <strong id="grafana-base" th:text="${grafanaBaseUrl}">-</strong></span>
-    <span>Prometheus: <strong id="prometheus-base" th:text="${prometheusBaseUrl}">-</strong></span>
-    <span>Actualizado: <strong id="timestamp">-</strong></span>
-</div>
+<div class="page">
 
-<div class="grid">
-    <div class="card">
-        <div class="label">Grafana</div>
-        <div class="value" id="grafana-status">-</div>
-        <div class="small">Health: <span id="grafana-health-url">-</span></div>
-        <div class="small">HTTP: <span id="grafana-http">-</span> · <span id="grafana-latency">-</span> ms</div>
-        <div class="error" id="grafana-error"></div>
-        <div class="actions">
-            <a class="btn" href="/ops/grafana" target="_blank" rel="noopener"
-               th:text="'Abrir Grafana (' + ${grafanaBaseUrl} + ')'">Abrir Grafana</a>
-            <a class="btn" href="/ops/grafana/config" target="_blank" rel="noopener">Config</a>
+    <!-- Header -->
+    <div class="header">
+        <div class="brand-badge">A</div>
+        <div class="header-text">
+            <h1>Estado de Monitoreo</h1>
+            <p>Grafana · Prometheus · Docker Stack</p>
+        </div>
+        <div class="header-nav">
+            <a class="nav-btn" href="/monitor">Monitor local</a>
+            <a class="nav-btn" href="/chat">← Chat</a>
         </div>
     </div>
-    <div class="card">
-        <div class="label">Prometheus</div>
-        <div class="value" id="prometheus-status">-</div>
-        <div class="small">Health: <span id="prometheus-health-url">-</span></div>
-        <div class="small">HTTP: <span id="prometheus-http">-</span> · <span id="prometheus-latency">-</span> ms</div>
-        <div class="error" id="prometheus-error"></div>
-        <div class="actions">
-            <a class="btn" href="/ops/prometheus" target="_blank" rel="noopener"
-               th:text="'Abrir Prometheus (' + ${prometheusBaseUrl} + ')'">Abrir Prometheus</a>
-            <a class="btn" href="/ops/prometheus/config" target="_blank" rel="noopener">Config</a>
-            <a class="btn" href="/actuator/prometheus" target="_blank" rel="noopener">Metricas app</a>
-        </div>
+
+    <!-- Meta bar -->
+    <div class="meta-bar">
+        <span>Grafana: <strong id="grafana-base" th:text="${grafanaBaseUrl}">-</strong></span>
+        <span class="meta-sep">·</span>
+        <span>Prometheus: <strong id="prometheus-base" th:text="${prometheusBaseUrl}">-</strong></span>
+        <span class="meta-sep">·</span>
+        <span><span class="live-dot"></span> Actualizado: <strong id="timestamp">-</strong></span>
     </div>
-    <div class="card">
-        <div class="label">Stack Docker</div>
-        <div class="value" id="stack-status">Sin datos</div>
-        <div class="small" id="stack-summary">-</div>
-        <div class="small">Proyecto: <span id="stack-project">-</span></div>
-        <div class="small">Compose: <span id="stack-compose">-</span></div>
-        <div class="small">Comando: <span id="stack-command">-</span></div>
-        <div class="small">Salida: <span id="stack-output">-</span></div>
-        <div class="error" id="stack-error"></div>
-        <div class="actions">
-            <button class="btn" id="stack-up-btn" type="button">Activar stack</button>
-            <button class="btn" id="stack-refresh-btn" type="button">Refrescar stack</button>
-            <a class="btn" href="/monitor" target="_blank" rel="noopener">Monitor local</a>
+
+    <div class="grid">
+
+        <!-- Grafana -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-icon grafana">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg>
+                </div>
+                <div>
+                    <div class="card-title">Grafana</div>
+                    <div id="grafana-status-badge" class="status-badge neutral" style="margin-top:4px; margin-bottom:0">
+                        <span class="dot"></span><span>Cargando...</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="info-row">
+                <span class="info-label">Health URL</span>
+                <span class="info-val" id="grafana-health-url">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">HTTP Status</span>
+                <span class="info-val" id="grafana-http">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Latencia</span>
+                <span class="info-val" id="grafana-latency">-</span>
+            </div>
+            <div class="error-msg" id="grafana-error"></div>
+
+            <div class="actions">
+                <a class="action-btn primary" href="/ops/grafana" target="_blank" rel="noopener">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                    Abrir Grafana
+                </a>
+                <a class="action-btn" href="/ops/grafana/config" target="_blank" rel="noopener">Config</a>
+            </div>
         </div>
+
+        <!-- Prometheus -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-icon prometheus">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>
+                </div>
+                <div>
+                    <div class="card-title">Prometheus</div>
+                    <div id="prometheus-status-badge" class="status-badge neutral" style="margin-top:4px; margin-bottom:0">
+                        <span class="dot"></span><span>Cargando...</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="info-row">
+                <span class="info-label">Health URL</span>
+                <span class="info-val" id="prometheus-health-url">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">HTTP Status</span>
+                <span class="info-val" id="prometheus-http">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Latencia</span>
+                <span class="info-val" id="prometheus-latency">-</span>
+            </div>
+            <div class="error-msg" id="prometheus-error"></div>
+
+            <div class="actions">
+                <a class="action-btn primary" href="/ops/prometheus" target="_blank" rel="noopener">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                    Abrir Prometheus
+                </a>
+                <a class="action-btn" href="/ops/prometheus/config" target="_blank" rel="noopener">Config</a>
+                <a class="action-btn" href="/actuator/prometheus" target="_blank" rel="noopener">Métricas app</a>
+            </div>
+        </div>
+
+        <!-- Docker Stack -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-icon docker">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M13 13h-2v-2h2v2zm0-4h-2V7h2v2zm-4 4H7v-2h2v2zm0-4H7V7h2v2zm-4 4H3v-2h2v2zm0-4H3V7h2v2zm8 0h-2V7h2v2zm5-5H1v9h21V8h-1zm-1 8H2V9h19v7z"/></svg>
+                </div>
+                <div>
+                    <div class="card-title">Docker Stack</div>
+                    <div id="stack-status-badge" class="status-badge neutral" style="margin-top:4px; margin-bottom:0">
+                        <span class="dot"></span><span id="stack-status-text">Sin datos</span>
+                    </div>
+                </div>
+            </div>
+
+            <div id="stack-pills" class="stack-pills"></div>
+
+            <div class="info-row">
+                <span class="info-label">Proyecto</span>
+                <span class="info-val" id="stack-project">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Compose</span>
+                <span class="info-val" id="stack-compose">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Último comando</span>
+                <span class="info-val" id="stack-command">-</span>
+            </div>
+            <div id="stack-output" class="stack-output"></div>
+            <div class="error-msg" id="stack-error"></div>
+
+            <div class="actions">
+                <button class="action-btn primary" id="stack-up-btn" type="button">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                    Activar stack
+                </button>
+                <button class="action-btn" id="stack-refresh-btn" type="button">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                    Refrescar
+                </button>
+                <a class="action-btn" href="/monitor" rel="noopener">Monitor local</a>
+            </div>
+        </div>
+
     </div>
-</div>
 </div>
 
 <script>
@@ -93,79 +358,84 @@
         const header = document.querySelector('meta[name="_csrf_header"]')?.getAttribute('content');
         return { token, header };
     }
-
     function withCsrf(headers = {}) {
         const { token, header } = getCsrf();
         if (token && header) headers[header] = token;
         return headers;
     }
 
-    function setStatus(prefix, data) {
-        const statusEl = document.getElementById(prefix + '-status');
+    function setServiceStatus(prefix, data) {
+        const badge = document.getElementById(prefix + '-status-badge');
         const httpEl = document.getElementById(prefix + '-http');
         const latencyEl = document.getElementById(prefix + '-latency');
         const healthUrlEl = document.getElementById(prefix + '-health-url');
         const errorEl = document.getElementById(prefix + '-error');
 
         if (!data) {
-            statusEl.textContent = 'Sin datos';
-            statusEl.className = 'status-down';
+            badge.className = 'status-badge neutral';
+            badge.innerHTML = '<span class="dot"></span><span>Sin datos</span>';
             return;
         }
 
-        statusEl.textContent = data.up ? 'OK' : 'CAIDO';
-        statusEl.className = data.up ? 'status-up' : 'status-down';
-        httpEl.textContent = data.status;
-        latencyEl.textContent = data.elapsedMs;
-        healthUrlEl.textContent = data.url;
-        errorEl.textContent = data.error || '';
+        const up = data.up;
+        badge.className = 'status-badge ' + (up ? 'up' : 'down');
+        badge.innerHTML = `<span class="dot"></span><span>${up ? 'ACTIVO' : 'CAÍDO'}</span>`;
+        if (httpEl) httpEl.textContent = data.status || '-';
+        if (latencyEl) latencyEl.textContent = data.elapsedMs != null ? data.elapsedMs + ' ms' : '-';
+        if (healthUrlEl) healthUrlEl.textContent = data.url || '-';
+        if (errorEl) errorEl.textContent = data.error || '';
     }
 
-    function stackSummary(data) {
-        if (!data) return 'Stack sin datos';
-        const docker = data.dockerReachable ? 'Docker OK' : (data.dockerInstalled ? 'Docker daemon OFF' : 'Docker CLI OFF');
-        const compose = data.composeAvailable ? 'Compose OK' : 'Compose OFF';
-        const api = data.apiContainerRunning ? 'API ON' : 'API OFF';
-        const prom = data.prometheusContainerRunning ? 'Prom ON' : 'Prom OFF';
-        const grafana = data.grafanaContainerRunning ? 'Grafana ON' : 'Grafana OFF';
-        return `${docker} | ${compose} | ${api} | ${prom} | ${grafana}`;
+    function buildStackPills(data) {
+        if (!data) return '';
+        const items = [
+            { label: 'Docker', on: data.dockerReachable, warn: data.dockerInstalled && !data.dockerReachable },
+            { label: 'Compose', on: data.composeAvailable },
+            { label: 'API', on: data.apiContainerRunning },
+            { label: 'Prometheus', on: data.prometheusContainerRunning },
+            { label: 'Grafana', on: data.grafanaContainerRunning },
+        ];
+        return items.map(i => {
+            const cls = i.warn ? 'warn' : (i.on ? 'on' : 'off');
+            return `<span class="stack-pill ${cls}">${i.label}</span>`;
+        }).join('');
     }
 
     function setStackStatus(data, error = '') {
-        const statusEl = document.getElementById('stack-status');
-        const summaryEl = document.getElementById('stack-summary');
+        const badge = document.getElementById('stack-status-badge');
+        const statusText = document.getElementById('stack-status-text');
+        const pillsEl = document.getElementById('stack-pills');
         const projectEl = document.getElementById('stack-project');
         const composeEl = document.getElementById('stack-compose');
         const commandEl = document.getElementById('stack-command');
         const outputEl = document.getElementById('stack-output');
         const errorEl = document.getElementById('stack-error');
-        if (!statusEl || !summaryEl || !projectEl || !composeEl || !commandEl || !outputEl || !errorEl) return;
 
         if (!data) {
-            statusEl.textContent = 'Sin datos';
-            summaryEl.textContent = '-';
-            projectEl.textContent = '-';
-            composeEl.textContent = '-';
-            commandEl.textContent = '-';
-            outputEl.textContent = '-';
-            errorEl.textContent = error || '';
+            badge.className = 'status-badge neutral';
+            statusText.textContent = 'Sin datos';
+            if (pillsEl) pillsEl.innerHTML = '';
+            if (errorEl) errorEl.textContent = error || '';
             return;
         }
-        statusEl.textContent = data.success ? 'LISTO' : (data.actionExecuted ? 'PARCIAL' : 'ESTADO');
-        summaryEl.textContent = stackSummary(data);
-        projectEl.textContent = data.projectDir || '-';
-        composeEl.textContent = data.composeFile || '-';
-        commandEl.textContent = data.command || '-';
-        outputEl.textContent = data.output ? String(data.output).slice(0, 1200) : '-';
-        errorEl.textContent = error || data.message || '';
+
+        const ok = data.success;
+        badge.className = 'status-badge ' + (ok ? 'up' : (data.actionExecuted ? 'warn' : 'neutral'));
+        statusText.textContent = ok ? 'LISTO' : (data.actionExecuted ? 'PARCIAL' : 'ESTADO');
+
+        if (pillsEl) pillsEl.innerHTML = buildStackPills(data);
+        if (projectEl) projectEl.textContent = data.projectDir || '-';
+        if (composeEl) composeEl.textContent = data.composeFile || '-';
+        if (commandEl) commandEl.textContent = data.command || '-';
+        if (outputEl) outputEl.textContent = data.output ? String(data.output).slice(0, 1200) : '';
+        if (errorEl) errorEl.textContent = error || data.message || '';
     }
 
     async function loadStackStatus() {
         try {
             const res = await fetch('/api/monitor/stack/status', { headers: withCsrf() });
             if (!res.ok) throw new Error('HTTP ' + res.status);
-            const data = await res.json();
-            setStackStatus(data);
+            setStackStatus(await res.json());
         } catch (e) {
             setStackStatus(null, 'Error stack: ' + e.message);
         }
@@ -179,8 +449,7 @@
         try {
             const res = await fetch('/api/monitor/stack/up', { method: 'POST', headers: withCsrf() });
             if (!res.ok) throw new Error('HTTP ' + res.status);
-            const data = await res.json();
-            setStackStatus(data);
+            setStackStatus(await res.json());
             await loadExternalStatus();
         } catch (e) {
             setStackStatus(null, 'No se pudo activar: ' + e.message);
@@ -194,9 +463,9 @@
             const res = await fetch('/ops/status', { credentials: 'include' });
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const data = await res.json();
-            document.getElementById('timestamp').textContent = new Date(data.timestamp).toLocaleTimeString();
-            setStatus('grafana', data.grafana);
-            setStatus('prometheus', data.prometheus);
+            document.getElementById('timestamp').textContent = new Date(data.timestamp).toLocaleTimeString('es-ES');
+            setServiceStatus('grafana', data.grafana);
+            setServiceStatus('prometheus', data.prometheus);
         } catch (e) {
             document.getElementById('timestamp').textContent = 'Error: ' + e.message;
         }
@@ -204,18 +473,14 @@
 
     async function load() {
         await loadExternalStatus();
-        if (Date.now() > stackActionPinnedUntil) {
-            await loadStackStatus();
-        }
+        if (Date.now() > stackActionPinnedUntil) await loadStackStatus();
     }
 
     document.getElementById('stack-up-btn')?.addEventListener('click', activateStack);
     document.getElementById('stack-refresh-btn')?.addEventListener('click', loadStackStatus);
 
     load();
-    setInterval(() => {
-        load();
-    }, 5000);
+    setInterval(load, 5000);
 </script>
 </body>
 </html>

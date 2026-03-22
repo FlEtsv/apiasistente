@@ -3,19 +3,135 @@
 <head>
     <meta charset="UTF-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>Acceso no autorizado</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <title>Acceso no autorizado — ApiAsistente</title>
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0b1017;
+            --panel: #121a24;
+            --border: #1e2a3a;
+            --muted: #8fa3b8;
+            --text: #e7eef7;
+            --accent: #1f7ae0;
+            --bad: #e07b7b;
+        }
+        * { box-sizing: border-box; }
+        html, body { height: 100%; min-height: 100%; min-height: 100dvh; }
+        body {
+            font-family: 'Sora', sans-serif;
+            margin: 0;
+            background:
+                radial-gradient(ellipse 900px 500px at 20% -20%, rgba(224,123,123,0.1), transparent),
+                radial-gradient(ellipse 700px 400px at 80% 110%, rgba(31,122,224,0.1), transparent),
+                var(--bg);
+            color: var(--text);
+            display: flex; align-items: center; justify-content: center;
+            padding: 24px 16px;
+            overflow-x: hidden;
+        }
+        body::before {
+            content: "";
+            position: fixed; inset: 0;
+            background-image:
+                linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+            background-size: 36px 36px;
+            pointer-events: none; opacity: 0.4; z-index: 0;
+        }
+        .card {
+            position: relative; z-index: 1;
+            width: 100%; max-width: 460px;
+            background: linear-gradient(165deg, rgba(18,26,36,0.97), rgba(11,17,25,0.93));
+            border: 1px solid rgba(224,123,123,0.25);
+            border-radius: 20px;
+            padding: clamp(28px, 5vw, 40px);
+            box-shadow: 0 24px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.03);
+            text-align: center;
+            animation: fadeUp 0.3s ease both;
+        }
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(12px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        .error-icon {
+            width: 64px; height: 64px; margin: 0 auto 20px;
+            background: rgba(224,123,123,0.12);
+            border: 1px solid rgba(224,123,123,0.3);
+            border-radius: 18px; display: grid; place-items: center;
+            color: var(--bad);
+        }
+        .brand {
+            display: flex; align-items: center; gap: 10px; justify-content: center;
+            margin-bottom: 20px;
+        }
+        .brand-badge {
+            width: 36px; height: 36px;
+            background: linear-gradient(135deg, var(--accent), #4da3ff);
+            border-radius: 10px; display: grid; place-items: center;
+            font-weight: 700; font-size: 16px;
+            box-shadow: 0 6px 18px rgba(31,122,224,0.35);
+        }
+        .brand-name { font-size: 15px; font-weight: 600; }
+
+        h1 { margin: 0 0 10px; font-size: clamp(20px, 3vw, 26px); font-weight: 700; }
+        .code {
+            display: inline-block; padding: 3px 10px; border-radius: 8px;
+            background: rgba(224,123,123,0.1); border: 1px solid rgba(224,123,123,0.25);
+            color: var(--bad); font-size: 13px; font-weight: 600; margin-bottom: 14px;
+        }
+        p { margin: 0 0 24px; font-size: 14px; color: var(--muted); line-height: 1.6; }
+
+        .actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+        .btn {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 11px 20px; border-radius: 12px; font: inherit; font-size: 14px; font-weight: 600;
+            cursor: pointer; text-decoration: none; border: 1px solid var(--border);
+            transition: background 0.14s, border-color 0.14s;
+        }
+        .btn.primary {
+            background: linear-gradient(135deg, var(--accent), #2a87f5);
+            border-color: var(--accent); color: #fff;
+            box-shadow: 0 6px 20px rgba(31,122,224,0.3);
+        }
+        .btn.primary:hover { opacity: 0.9; }
+        .btn.secondary { background: var(--panel); color: var(--muted); }
+        .btn.secondary:hover { background: rgba(30,42,58,0.8); color: var(--text); border-color: rgba(31,122,224,0.3); }
+
+        @media (max-width: 480px) {
+            .actions { flex-direction: column; }
+            .btn { justify-content: center; }
+        }
+    </style>
 </head>
-<body class="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
-<div class="w-full max-w-lg rounded-2xl border border-slate-700/60 bg-slate-900/70 p-6 space-y-4">
-    <h1 class="text-xl font-semibold">Acceso no autorizado</h1>
-    <p class="text-slate-300 text-sm">
-        Tu cuenta se creo sin vistas habilitadas para este panel.
-        Contacta al administrador para actualizar tus permisos.
-    </p>
-    <div class="flex gap-3 flex-wrap">
-        <a href="/login" class="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm">Volver a login</a>
+<body>
+<div class="card">
+
+    <div class="brand">
+        <div class="brand-badge">A</div>
+        <span class="brand-name">ApiAsistente</span>
     </div>
+
+    <div class="error-icon">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+    </div>
+
+    <span class="code">403 Acceso denegado</span>
+    <h1>Sin acceso</h1>
+    <p>Tu cuenta fue creada sin permisos habilitados para este panel.<br>
+       Contacta al administrador para actualizar tus permisos.</p>
+
+    <div class="actions">
+        <a href="/login" class="btn primary">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+            Volver a login
+        </a>
+        <a href="/chat" class="btn secondary">Ir al chat</a>
+    </div>
+
 </div>
 </body>
 </html>
