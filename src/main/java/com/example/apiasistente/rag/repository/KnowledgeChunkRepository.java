@@ -95,6 +95,23 @@ public interface KnowledgeChunkRepository extends JpaRepository<KnowledgeChunk, 
           and lower(c.tags) like concat('%', lower(:term), '%')
     """)
     long countActiveTagMatches(@Param("owners") List<String> owners, @Param("term") String term);
+
+    /**
+     * Devuelve true si ALGUNO de los terminos dados aparece en los tags activos.
+     * Una sola query en lugar de N queries individuales (patron batch).
+     */
+    @Query(value = """
+        SELECT CASE WHEN COUNT(*) > 0 THEN TRUE ELSE FALSE END
+        FROM knowledge_chunks c
+        INNER JOIN knowledge_documents d ON c.doc_id = d.id
+        WHERE d.active = 1
+          AND d.owner IN :owners
+          AND c.tags IS NOT NULL
+          AND REGEXP_LIKE(c.tags, :pattern, 'i')
+        LIMIT 1
+    """, nativeQuery = true)
+    boolean existsAnyActiveTagMatch(@Param("owners") List<String> owners,
+                                    @Param("pattern") String pattern);
 }
 
 

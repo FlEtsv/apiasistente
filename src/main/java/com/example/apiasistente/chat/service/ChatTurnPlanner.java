@@ -16,8 +16,9 @@ public class ChatTurnPlanner {
                          boolean hasImageMedia,
                          boolean hasDocumentMedia) {
         String text = normalize(rawText);
+        // Computar ragDecision una sola vez y reutilizarla en routeIntent para evitar doble escaneo.
         ChatPromptSignals.RagDecision ragDecision = ChatPromptSignals.ragDecision(text, hasDocumentMedia);
-        ChatPromptSignals.IntentRoute intentRoute = ChatPromptSignals.routeIntent(text, hasDocumentMedia);
+        ChatPromptSignals.IntentRoute intentRoute = ChatPromptSignals.routeIntentWithDecision(text, ragDecision, hasDocumentMedia);
         boolean complexQuery = ChatPromptSignals.isComplexQuery(text);
         boolean multiStepQuery = ChatPromptSignals.isMultiStepQuery(text);
         int words = countWords(text);

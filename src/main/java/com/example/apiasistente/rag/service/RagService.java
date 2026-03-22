@@ -51,6 +51,10 @@ public class RagService {
     public static final String GLOBAL_OWNER = "global";
     private static final Logger log = LoggerFactory.getLogger(RagService.class);
 
+    /** Patron compilado una sola vez para partir fragmentos dentro de un chunk. */
+    private static final java.util.regex.Pattern FRAGMENT_SPLIT_PATTERN =
+            java.util.regex.Pattern.compile("(?m)\\n\\s*\\n+|(?<=[.!?])\\s+");
+
     private static final Set<String> STOPWORDS = Set.of(
             "de", "la", "el", "los", "las", "y", "o", "u", "en", "por", "para", "con", "sin", "del", "al",
             "que", "como", "donde", "cuando", "cual", "cuales", "quien", "quienes", "porque", "sobre",
@@ -468,7 +472,12 @@ public class RagService {
             );
         }
 
-        List<CandidateChunk> hybridCandidates = applyHybridScoring(query, semanticCandidates, chunkById);
+        // Pre-computar tokens de la query una sola vez: se reutilizan en scoring hibrido y compresion.
+        String normalizedQueryForScoring = normalizeSearchText(query);
+        Set<String> queryTokensForScoring = tokenize(normalizedQueryForScoring);
+
+        List<CandidateChunk> hybridCandidates = applyHybridScoring(
+                normalizedQueryForScoring, queryTokensForScoring, semanticCandidates, chunkById);
         if (hybridCandidates.isEmpty()) {
             return finalizeRetrieval(
                     query,
@@ -499,7 +508,7 @@ public class RagService {
                 .toList();
 
         List<ScoredChunk> evidence = applyEvidenceThreshold(retrieved);
-        List<ScoredChunk> context = compressForPrompt(query, evidence);
+        List<ScoredChunk> context = compressForPrompt(normalizedQueryForScoring, queryTokensForScoring, evidence);
         double maxSimilarity = retrieved.stream().mapToDouble(ScoredChunk::score).max().orElse(0.0);
         double avgSimilarity = retrieved.stream().mapToDouble(ScoredChunk::score).average().orElse(0.0);
         List<Long> chunkIds = context.stream()
@@ -620,7 +629,9 @@ public class RagService {
                 .toList();
     }
 
-    private List<ScoredChunk> compressForPrompt(String query, List<ScoredChunk> evidence) {
+    private List<ScoredChunk> compressForPrompt(String normalizedQuery,
+                                                Set<String> queryTokens,
+                                                List<ScoredChunk> evidence) {
         if (evidence == null || evidence.isEmpty()) {
             return List.of();
         }
@@ -631,20 +642,20 @@ public class RagService {
             if (compressed.size() >= maxChunks) {
                 break;
             }
-            String promptText = compressChunkText(query, chunk.chunk().getText());
+            // normalizedQuery y queryTokens pre-computados: se reutilizan en cada chunk.
+            String promptText = compressChunkText(normalizedQuery, queryTokens, chunk.chunk().getText());
             compressed.add(chunk.withPromptText(promptText));
         }
         return List.copyOf(compressed);
     }
 
-    private String compressChunkText(String query, String chunkText) {
+    private String compressChunkText(String normalizedQuery, Set<String> queryTokens, String chunkText) {
         if (!hasText(chunkText)) {
             return "";
         }
 
-        String normalizedQuery = normalizeSearchText(query);
-        Set<String> queryTokens = tokenize(normalizedQuery);
-        String[] rawFragments = chunkText.split("(?m)\\n\\s*\\n+|(?<=[.!?])\\s+");
+        // Patron compilado estaticamente; split evita recompilar la expresion por cada chunk.
+        String[] rawFragments = FRAGMENT_SPLIT_PATTERN.split(chunkText);
         List<FragmentCandidate> candidates = new ArrayList<>(rawFragments.length);
 
         for (int i = 0; i < rawFragments.length; i++) {
@@ -706,15 +717,13 @@ public class RagService {
         return Math.max(0, chars / 4);
     }
 
-    private List<CandidateChunk> applyHybridScoring(String query,
+    private List<CandidateChunk> applyHybridScoring(String normalizedQuery,
+                                                    Set<String> queryTokens,
                                                     List<CandidateChunk> semanticCandidates,
                                                     Map<Long, KnowledgeChunk> chunkById) {
         if (semanticCandidates.isEmpty()) {
             return List.of();
         }
-
-        String normalizedQuery = normalizeSearchText(query);
-        Set<String> queryTokens = tokenize(normalizedQuery);
 
         double semWeight = Math.max(0.0, semanticWeight);
         double lexWeight = Math.max(0.0, lexicalWeight);
@@ -771,37 +780,52 @@ public class RagService {
         return clamp01((coverage * 0.75) + (jaccard * 0.25) + phraseBoost);
     }
 
+    /**
+     * Reranking con Maximal Marginal Relevance.
+     *
+     * Complejidad O(k x n) gracias al array maxSim: en vez de recomputar la similitud maxima
+     * con todos los seleccionados en cada iteracion (O(k^2 x n) del enfoque ingenuo), solo se
+     * actualiza el delta producido por el ultimo elemento seleccionado.
+     */
     private List<CandidateChunk> rerankWithMmr(List<CandidateChunk> candidates, int limit, double lambda) {
         if (candidates.isEmpty() || limit <= 0) {
             return List.of();
         }
 
         double lambdaClamped = Math.min(1.0, Math.max(0.0, lambda));
-        List<CandidateChunk> selected = new ArrayList<>();
+        int n = candidates.size();
+        List<CandidateChunk> selected = new ArrayList<>(Math.min(limit, n));
         Set<Long> selectedIds = new LinkedHashSet<>();
 
+        // maxSim[i] = similitud coseno maxima entre candidates[i] y cualquier chunk ya seleccionado.
+        // Inicializado a 0.0 (ningun seleccionado aun).
+        double[] maxSim = new double[n];
+
+        // Primer elemento: siempre el de mayor score (lista ya ordenada por score desc).
         CandidateChunk first = candidates.get(0);
         selected.add(first);
         selectedIds.add(first.chunkId());
 
-        while (selected.size() < limit && selected.size() < candidates.size()) {
+        // Inicializar maxSim usando la similitud con el primer seleccionado.
+        for (int i = 1; i < n; i++) {
+            maxSim[i] = safeCosineUnit(candidates.get(i).embedding(), first.embedding());
+        }
+
+        while (selected.size() < limit && selected.size() < n) {
             CandidateChunk best = null;
+            int bestIdx = -1;
             double bestScore = Double.NEGATIVE_INFINITY;
 
-            for (CandidateChunk candidate : candidates) {
+            for (int i = 0; i < n; i++) {
+                CandidateChunk candidate = candidates.get(i);
                 if (selectedIds.contains(candidate.chunkId())) {
                     continue;
                 }
-
-                double diversity = selected.stream()
-                        .mapToDouble(chosen -> safeCosineUnit(candidate.embedding(), chosen.embedding()))
-                        .max()
-                        .orElse(0.0);
-
-                double mmrScore = lambdaClamped * candidate.score() - (1 - lambdaClamped) * diversity;
+                double mmrScore = lambdaClamped * candidate.score() - (1 - lambdaClamped) * maxSim[i];
                 if (mmrScore > bestScore) {
                     bestScore = mmrScore;
                     best = candidate;
+                    bestIdx = i;
                 }
             }
 
@@ -811,6 +835,17 @@ public class RagService {
 
             selected.add(best);
             selectedIds.add(best.chunkId());
+
+            // Actualizar maxSim solo con el nuevo seleccionado: delta incremental O(n).
+            for (int i = 0; i < n; i++) {
+                if (i == bestIdx || selectedIds.contains(candidates.get(i).chunkId())) {
+                    continue;
+                }
+                double sim = safeCosineUnit(candidates.get(i).embedding(), best.embedding());
+                if (sim > maxSim[i]) {
+                    maxSim[i] = sim;
+                }
+            }
         }
 
         return selected;

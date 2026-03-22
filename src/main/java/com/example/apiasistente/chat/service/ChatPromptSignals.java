@@ -142,6 +142,25 @@ public final class ChatPromptSignals {
     }
 
     /**
+     * Variante que reutiliza una RagDecision ya computada para evitar calcularla dos veces.
+     * Usar cuando el caller ya llamo a {@link #ragDecision} para otras decisiones.
+     */
+    public static IntentRoute routeIntentWithDecision(String rawText,
+                                                      RagDecision ragDecision,
+                                                      boolean hasDocumentMedia) {
+        if (wantsTextRendering(rawText)) {
+            return IntentRoute.TEXT_RENDER;
+        }
+        if (isSmallTalk(rawText)) {
+            return IntentRoute.SMALL_TALK;
+        }
+        if (ragDecision != null && ragDecision.enabled()) {
+            return IntentRoute.FACTUAL_TECH;
+        }
+        return IntentRoute.TASK_SIMPLE;
+    }
+
+    /**
      * Detecta charla ligera para evitar rutas pesadas de modelo o RAG.
      */
     public static boolean isSmallTalk(String rawText) {

@@ -14,6 +14,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * Compuerta barata antes del retrieval RAG.
@@ -143,14 +144,15 @@ public class ChatRagGateService {
             return GateDecision.skip("preferred-query-generica", owners, activeDocuments, activeChunks, probeTerms, false, assessment);
         }
 
-        List<String> matchedTerms = new ArrayList<>();
-        for (String term : probeTerms) {
-            long metadataHits = documentRepository.countActiveMetadataMatches(owners, term);
-            long tagHits = chunkRepository.countActiveTagMatches(owners, term);
-            if (metadataHits > 0 || tagHits > 0) {
-                matchedTerms.add(term);
-            }
-        }
+        // Batch: una sola query por tabla en lugar de N queries individuales.
+        // Se construye un patron regex OR con los terminos escapados para MySQL REGEXP_LIKE.
+        String regexPattern = probeTerms.stream()
+                .map(Pattern::quote)
+                .collect(java.util.stream.Collectors.joining("|"));
+
+        boolean metadataHit = documentRepository.existsAnyActiveMetadataMatch(owners, regexPattern);
+        boolean tagHit = chunkRepository.existsAnyActiveTagMatch(owners, regexPattern);
+        List<String> matchedTerms = (metadataHit || tagHit) ? probeTerms : List.of();
 
         if (!matchedTerms.isEmpty()) {
             return GateDecision.allow("preferred-metadata-hit", owners, activeDocuments, activeChunks, matchedTerms, assessment);

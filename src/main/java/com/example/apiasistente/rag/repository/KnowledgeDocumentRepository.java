@@ -75,6 +75,26 @@ public interface KnowledgeDocumentRepository extends JpaRepository<KnowledgeDocu
           )
     """)
     long countActiveMetadataMatches(@Param("owners") Collection<String> owners, @Param("term") String term);
+
+    /**
+     * Devuelve true si ALGUNO de los terminos dados aparece en el metadata activo.
+     * Una sola query en lugar de N queries individuales (patron batch).
+     * Usa REGEXP de MySQL para evaluar todos los terminos en una sola pasada.
+     */
+    @Query(value = """
+        SELECT CASE WHEN COUNT(*) > 0 THEN TRUE ELSE FALSE END
+        FROM knowledge_documents d
+        WHERE d.active = 1
+          AND d.owner IN :owners
+          AND (
+            REGEXP_LIKE(d.title,  :pattern, 'i')
+            OR REGEXP_LIKE(d.source, :pattern, 'i')
+            OR REGEXP_LIKE(IFNULL(d.reference_url, ''), :pattern, 'i')
+          )
+        LIMIT 1
+    """, nativeQuery = true)
+    boolean existsAnyActiveMetadataMatch(@Param("owners") Collection<String> owners,
+                                         @Param("pattern") String pattern);
 }
 
 
