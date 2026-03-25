@@ -7,7 +7,7 @@ scrape_configs:
     metrics_path: /actuator/prometheus
     static_configs:
       - targets:
-          - api:8082
+          - host.docker.internal:8082
   - job_name: prometheus
     static_configs:
       - targets:

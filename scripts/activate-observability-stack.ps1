@@ -59,6 +59,10 @@ if ($composeBase.Count -gt 1) {
     $invokeArgs += $composeBase[1]
 }
 $invokeArgs += @("-f", $ComposeFile, "up", "-d")
+$includesApi = $serviceList | Where-Object { $_.ToLowerInvariant() -eq "api" }
+if (-not $includesApi) {
+    $invokeArgs += "--no-deps"
+}
 $invokeArgs += $serviceList
 
 & $composeBase[0] @invokeArgs

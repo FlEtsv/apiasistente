@@ -41,7 +41,19 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
   SERVICES=(api prometheus grafana)
 fi
 
-"${COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" up -d "${SERVICES[@]}"
+NO_DEPS=()
+includes_api=0
+for service in "${SERVICES[@]}"; do
+  if [[ "${service,,}" == "api" ]]; then
+    includes_api=1
+    break
+  fi
+done
+if [[ $includes_api -eq 0 ]]; then
+  NO_DEPS=(--no-deps)
+fi
+
+"${COMPOSE_CMD[@]}" -f "$COMPOSE_FILE" up -d "${NO_DEPS[@]}" "${SERVICES[@]}"
 
 echo "Estado actual de contenedores relevantes:"
 docker ps --format '{{.Names}}\t{{.Status}}' | grep -E 'apiasistente|prometheus|grafana|mysql' || true

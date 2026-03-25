@@ -331,6 +331,10 @@ public class MonitoringStackService {
         command.add(before.composeFile());
         command.add("up");
         command.add("-d");
+        boolean includesApi = servicesToStart.stream().anyMatch(s -> "api".equalsIgnoreCase(s));
+        if (!includesApi) {
+            command.add("--no-deps");
+        }
         command.addAll(servicesToStart);
         return new ExecutionPlan(command, String.join(" ", command));
     }
