@@ -9,6 +9,7 @@ public record ChatMessageDto(
         Long id,
         String role,
         String content,
-        Instant createdAt
+        Instant createdAt,
+        String metadata
 ) {}
 

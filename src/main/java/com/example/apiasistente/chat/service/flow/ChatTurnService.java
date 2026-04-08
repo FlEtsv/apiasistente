@@ -5,7 +5,9 @@ import com.example.apiasistente.chat.dto.ChatResponse;
 import com.example.apiasistente.chat.entity.ChatMessage;
 import com.example.apiasistente.chat.service.ChatAuditTrailService;
 import com.example.apiasistente.chat.service.ChatRuntimeAdaptationService;
+import com.example.apiasistente.chat.service.RouterFeedbackStore;
 import com.example.apiasistente.monitoring.service.AppMetricsService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -14,8 +16,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import java.util.List;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -27,6 +29,8 @@ public class ChatTurnService {
 
     private static final Logger log = LoggerFactory.getLogger(ChatTurnService.class);
 
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
     private final ChatTurnContextFactory contextFactory;
     private final ChatRagFlowService ragFlowService;
     private final ChatAssistantService assistantService;
@@ -37,6 +41,7 @@ public class ChatTurnService {
     private final ChatRagTelemetryService telemetryService;
     private final ChatAuditTrailService auditTrailService;
     private ChatRuntimeAdaptationService runtimeAdaptationService;
+    private RouterFeedbackStore feedbackStore;
     private AppMetricsService metricsService;
 
     public ChatTurnService(ChatTurnContextFactory contextFactory,
@@ -65,6 +70,11 @@ public class ChatTurnService {
     }
 
     @Autowired(required = false)
+    void setFeedbackStore(RouterFeedbackStore feedbackStore) {
+        this.feedbackStore = feedbackStore;
+    }
+
+    @Autowired(required = false)
     void setMetricsService(AppMetricsService metricsService) {
         this.metricsService = metricsService;
     }
@@ -80,6 +90,7 @@ public class ChatTurnService {
                              String externalUserId,
                              List<ChatMediaInput> media) {
         long turnStartNanos = System.nanoTime();
+        Map<String, Long> stageTimes = new LinkedHashMap<>();
         String stage = "context";
         ChatTurnContext context = null;
         try {
@@ -100,6 +111,7 @@ public class ChatTurnService {
             ));
 
             // 1. Fija sesion, historial, adjuntos y plan heuristico del turno.
+            long t0 = System.nanoTime();
             context = contextFactory.create(
                     username,
                     maybeSessionId,
@@ -108,42 +120,58 @@ public class ChatTurnService {
                     externalUserId,
                     media
             );
+            stageTimes.put("context", elapsedMillis(t0));
             log.info(
-                    "chat_turn_stage stage=context_ready sessionId={} route={} ragNeeded={} reasoningLevel={} mediaCount={}",
+                    "chat_turn_stage stage=context_ready sessionId={} route={} ragNeeded={} reasoningLevel={} mediaCount={} ms={}",
                     context.session().getId(),
                     context.intentRoute(),
                     context.ragNeeded(),
                     context.turnPlan().reasoningLevel(),
-                    context.preparedMedia().size()
+                    context.preparedMedia().size(),
+                    stageTimes.get("context")
             );
             auditTrailService.record("chat.turn.context_ready", turnContextPayload(context));
 
             // 2. Decide si el turno usa RAG y con que fuerza entra al contexto recuperado.
             stage = "rag";
+            long t1 = System.nanoTime();
             ChatRagContext ragContext = ragFlowService.resolve(context);
+            stageTimes.put("rag", elapsedMillis(t1));
             log.info(
-                    "chat_turn_stage stage=rag_resolved sessionId={} ragUsed={} missingEvidence={} route={} sourceCount={} contextTokens={}",
+                    "chat_turn_stage stage=rag_resolved sessionId={} ragUsed={} missingEvidence={} route={} sourceCount={} contextTokens={} ms={}",
                     context.session().getId(),
                     ragContext.ragUsed(),
                     ragContext.missingEvidence(),
                     ragContext.ragRoute(),
                     ragContext.sources().size(),
-                    ragContext.retrievalStats().contextTokens()
+                    ragContext.retrievalStats().contextTokens(),
+                    stageTimes.get("rag")
             );
             auditTrailService.record("chat.turn.rag_resolved", turnRagPayload(context, ragContext));
 
             // 3. Genera la respuesta final del asistente aplicando guardrails y retries si corresponden.
             stage = "assistant";
+            long t2 = System.nanoTime();
             ChatAssistantOutcome outcome = assistantService.answer(context, ragContext);
+            stageTimes.put("assistant", elapsedMillis(t2));
             stage = "post-check";
+            long t3 = System.nanoTime();
             ChatRagPostCheckFlowService.PostCheckResult postCheck = postCheckFlowService.run(context, ragContext, outcome);
+            stageTimes.put("post-check", elapsedMillis(t3));
             ragContext = postCheck.ragContext();
             outcome = postCheck.outcome();
             ChatRagDecisionEngine.AnswerVerification answerVerification = postCheck.answerVerification();
 
-            // 4. Persiste la salida del asistente y enlaza fuentes cuando hubo grounding real.
+            // Si el post-check forzó un reintento con RAG, significa que la ruta inicial fue subóptima.
+            if (answerVerification.reviewed() && answerVerification.retryWithRag()) {
+                recordRouteFeedback(userText, "CHAT", "RAG", "post-check-rag-retry");
+            }
+
+            // 4. Persiste la salida del asistente con metadata de ejecucion para trazabilidad del historial.
             stage = "persist";
-            ChatMessage assistantMsg = historyService.saveAssistantMessage(context.session(), outcome.assistantText());
+            String assistantMetadata = buildAssistantMetadata(context, ragContext, stageTimes);
+            ChatMessage assistantMsg = historyService.saveAssistantMessage(
+                    context.session(), outcome.assistantText(), assistantMetadata);
             if (ragContext.ragUsed()) {
                 deferSourceSnapshotPersistence(context.session().getId(), assistantMsg.getId(), ragContext.scored());
             }
@@ -176,6 +204,15 @@ public class ChatTurnService {
                     ragContext.ragUsed(),
                     ragNeeded,
                     context.turnPlan().reasoningLevel().name()
+            );
+            stageTimes.put("total", elapsedMillis(turnStartNanos));
+            log.info(
+                    "chat_turn_trace sessionId={} stages={} mediaCount={} ragUsed={} postCheckRetry={}",
+                    context.session().getId(),
+                    stageTimes,
+                    context.preparedMedia().size(),
+                    ragContext.ragUsed(),
+                    answerVerification.reviewed() && answerVerification.retryWithRag()
             );
             log.info(
                     "chat_turn_done sessionId={} ragUsed={} ragNeeded={} safe={} groundedSources={} confidence={} replyPreview={}",
@@ -362,6 +399,49 @@ public class ChatTurnService {
         payload.put("errorType", ex == null ? "" : ex.getClass().getSimpleName());
         payload.put("errorMessage", ex == null ? "" : safe(ex.getMessage()));
         return payload;
+    }
+
+    /**
+     * Registra feedback al RouterFeedbackStore cuando se detecta que la ruta inicial fue suboptima.
+     */
+    private void recordRouteFeedback(String userText,
+                                     String decidedRoute,
+                                     String correctRoute,
+                                     String reason) {
+        if (feedbackStore == null) {
+            return;
+        }
+        try {
+            feedbackStore.recordCorrection(userText, decidedRoute, correctRoute, reason);
+        } catch (Exception ex) {
+            log.debug("router_feedback_record_failed cause={}", ex.getMessage());
+        }
+    }
+
+    /**
+     * Construye el JSON de metadata para el mensaje del asistente.
+     * Incluye modelo usado, ruta, pipeline, timing de etapas y uso de RAG.
+     */
+    private String buildAssistantMetadata(ChatTurnContext context,
+                                          ChatRagContext ragContext,
+                                          Map<String, Long> stageTimes) {
+        try {
+            LinkedHashMap<String, Object> meta = new LinkedHashMap<>();
+            meta.put("requestedModel", safe(context.requestedModel()));
+            meta.put("intentRoute", context.intentRoute().name());
+            meta.put("ragUsed", ragContext.ragUsed());
+            meta.put("ragRoute", ragContext.ragRoute().name());
+            meta.put("sourceCount", ragContext.sources().size());
+            meta.put("reasoningLevel", context.turnPlan().reasoningLevel().name());
+            meta.put("hasImageMedia", context.preparedMedia().stream()
+                    .anyMatch(m -> m != null && m.imageBase64() != null && !m.imageBase64().isBlank()));
+            meta.put("hasDocumentMedia", context.preparedMedia().stream()
+                    .anyMatch(m -> m != null && m.documentText() != null && !m.documentText().isBlank()));
+            meta.put("stageTimes", stageTimes);
+            return MAPPER.writeValueAsString(meta);
+        } catch (Exception ex) {
+            return null;
+        }
     }
 
     private void recordTurnLatency(long turnStartNanos) {

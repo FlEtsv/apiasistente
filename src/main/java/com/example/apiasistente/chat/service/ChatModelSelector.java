@@ -118,9 +118,9 @@ public class ChatModelSelector {
             }
             return resolved;
         }
-        // Alias "visual": el modelo final sigue siendo el principal.
+        // Alias "visual": el puente visual ya hizo el trabajo pesado; el texto final usa modelo rapido.
         if (VISUAL_ALIAS.equalsIgnoreCase(trimmed)) {
-            String resolved = firstNonBlank(defaultModel, fastModel, null);
+            String resolved = firstNonBlank(fastModel, defaultModel, null);
             if (resolved == null) {
                 throw new IllegalArgumentException("No hay modelos de chat configurados.");
             }

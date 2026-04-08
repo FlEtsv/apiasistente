@@ -146,7 +146,8 @@ public class ChatImageGenerationService {
                         + "`.";
             }
 
-            historyService.saveAssistantMessage(session, reply);
+            String genMetadata = buildImageGenMetadata(effectiveModel, requestedModel, img2img, imageId, generated);
+            historyService.saveAssistantMessage(session, reply, genMetadata);
             sessionService.touchSession(session);
             log.info(
                     "chat_image_generation_done sessionId={} requestedModel={} effectiveModel={} fallback={} mode={} imageId={} mimeType={}",
@@ -200,6 +201,33 @@ public class ChatImageGenerationService {
         AppUser user = sessionService.requireUser(username);
         sessionService.requireOwnedGenericSession(user, sessionId);
         return imageStoreService.load(sessionId, imageId);
+    }
+
+    /**
+     * Construye metadata JSON para la respuesta de generacion de imagen.
+     * Permite que el historial identifique este mensaje como una generacion y muestre el modelo/modo usados.
+     */
+    private String buildImageGenMetadata(String effectiveModel,
+                                         String requestedModel,
+                                         boolean img2img,
+                                         String imageId,
+                                         ChatImageGeneratorClient.GeneratedImage generated) {
+        try {
+            java.util.LinkedHashMap<String, Object> meta = new java.util.LinkedHashMap<>();
+            meta.put("type", "image_generation");
+            meta.put("mode", img2img ? "img2img" : "txt2img");
+            meta.put("effectiveModel", safe(effectiveModel));
+            meta.put("requestedModel", safe(requestedModel));
+            meta.put("imageId", safe(imageId));
+            meta.put("mimeType", safe(generated.mimeType()));
+            meta.put("fallbackApplied", generated.fallbackApplied());
+            if (generated.fallbackApplied()) {
+                meta.put("requestedCheckpoint", safe(generated.requestedCheckpoint()));
+            }
+            return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(meta);
+        } catch (Exception ex) {
+            return null;
+        }
     }
 
     private String normalizePrompt(String value) {

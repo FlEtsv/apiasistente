@@ -39,6 +39,12 @@ public class ChatRagPostCheckFlowService {
             return new PostCheckResult(ragContext, outcome, verification);
         }
 
+        // El RAG no puede ayudar a describir imagenes: el conocimiento interno no contiene imagenes adjuntas.
+        // Reintentar con RAG aqui solo re-ejecuta el visual bridge innecesariamente.
+        if (hasImageMedia(context)) {
+            return new PostCheckResult(ragContext, outcome, ChatRagDecisionEngine.AnswerVerification.skip("post-check-image-media"));
+        }
+
         ChatRagContext effectiveRagContext = ragContext;
         ChatAssistantOutcome effectiveOutcome = outcome;
         if (!effectiveRagContext.ragUsed() && !effectiveRagContext.missingEvidence()) {
@@ -83,6 +89,16 @@ public class ChatRagPostCheckFlowService {
                 context.intentRoute(),
                 ragMode
         );
+    }
+
+    private boolean hasImageMedia(ChatTurnContext context) {
+        if (context == null || context.preparedMedia() == null) {
+            return false;
+        }
+        return context.preparedMedia().stream()
+                .anyMatch(item -> item != null
+                        && item.imageBase64() != null
+                        && !item.imageBase64().isBlank());
     }
 
     public record PostCheckResult(ChatRagContext ragContext,

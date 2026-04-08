@@ -6,12 +6,16 @@ import com.example.apiasistente.chat.entity.ChatMessage;
 import com.example.apiasistente.chat.entity.ChatSession;
 import com.example.apiasistente.chat.service.ChatPromptSignals;
 import com.example.apiasistente.chat.service.ChatTurnPlanner;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * Construye el contexto inmutable de un turno antes de invocar RAG o modelo.
@@ -21,6 +25,7 @@ import java.util.Locale;
 public class ChatTurnContextFactory {
 
     private static final Logger log = LoggerFactory.getLogger(ChatTurnContextFactory.class);
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final ChatSessionService sessionService;
     private final ChatHistoryService historyService;
@@ -56,7 +61,8 @@ public class ChatTurnContextFactory {
         sessionService.touchSession(session);
         sessionService.autoTitleIfDefault(session, userText);
 
-        ChatMessage userMsg = historyService.saveUserMessage(session, userText);
+        String userMediaMetadata = buildUserMediaMetadata(preparedMedia);
+        ChatMessage userMsg = historyService.saveUserMessage(session, userText, userMediaMetadata);
 
         // Deriva las señales que gobiernan modelo, uso de RAG y modo de ejecucion de la respuesta.
         boolean hasImageMedia = mediaService.hasImageMedia(preparedMedia);
@@ -114,8 +120,7 @@ public class ChatTurnContextFactory {
                     ragDecision.reason()
             );
         }
-        log.info(
-                "chat_turn_matrix hasImageMedia={} hasDocumentMedia={} intent={} ragMode={} reasoningLevel={} expectedPath={}",
+        log.info("chat_turn_matrix hasImageMedia={} hasDocumentMedia={} intent={} ragMode={} reasoningLevel={} expectedPath={}",
                 hasImageMedia,
                 hasDocumentMedia,
                 intentRoute,
@@ -141,6 +146,50 @@ public class ChatTurnContextFactory {
                 directExecutionMode,
                 taskCompletionMode
         );
+    }
+
+    /**
+     * Construye JSON de metadata para el mensaje del usuario con referencias de media adjunta.
+     * Permite que el historial muestre que habia imagenes o documentos en el turno.
+     */
+    private String buildUserMediaMetadata(List<ChatMediaService.PreparedMedia> preparedMedia) {
+        if (preparedMedia == null || preparedMedia.isEmpty()) {
+            return null;
+        }
+
+        boolean hasImages = false;
+        boolean hasDocs = false;
+        List<String> imageNames = new ArrayList<>();
+        List<String> docNames = new ArrayList<>();
+
+        for (ChatMediaService.PreparedMedia m : preparedMedia) {
+            if (m == null) continue;
+            boolean isImage = m.imageBase64() != null && !m.imageBase64().isBlank();
+            boolean isDoc = m.documentText() != null && !m.documentText().isBlank();
+            if (isImage) {
+                hasImages = true;
+                if (m.name() != null && !m.name().isBlank()) imageNames.add(m.name());
+            } else if (isDoc) {
+                hasDocs = true;
+                if (m.name() != null && !m.name().isBlank()) docNames.add(m.name());
+            }
+        }
+
+        if (!hasImages && !hasDocs) {
+            return null;
+        }
+
+        try {
+            Map<String, Object> meta = new LinkedHashMap<>();
+            meta.put("mediaCount", preparedMedia.size());
+            meta.put("hasImages", hasImages);
+            meta.put("hasDocuments", hasDocs);
+            if (!imageNames.isEmpty()) meta.put("imageNames", imageNames);
+            if (!docNames.isEmpty()) meta.put("documentNames", docNames);
+            return MAPPER.writeValueAsString(meta);
+        } catch (Exception ex) {
+            return null;
+        }
     }
 }
 

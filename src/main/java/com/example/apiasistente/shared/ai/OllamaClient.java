@@ -200,6 +200,17 @@ public class OllamaClient {
         if (numPredict != null && numPredict > 0) {
             options.put("num_predict", numPredict);
         }
+        // Limitar ventana de contexto a lo configurado para evitar que modelos grandes consuman
+        // toda la RAM/VRAM con historiales largos. 0 = usa el default del modelo.
+        int numCtx = props.getNumCtx();
+        if (numCtx > 0) {
+            options.put("num_ctx", numCtx);
+        }
+        // Mantener siempre el system prompt en contexto aunque se rote la ventana
+        int numKeep = props.getNumKeep();
+        if (numKeep > 0) {
+            options.put("num_keep", numKeep);
+        }
         return options;
     }
 

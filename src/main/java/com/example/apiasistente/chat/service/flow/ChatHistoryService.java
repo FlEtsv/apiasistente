@@ -44,10 +44,18 @@ public class ChatHistoryService {
      * Persiste el mensaje del usuario al inicio del turno para que el historial quede consistente.
      */
     public ChatMessage saveUserMessage(ChatSession session, String userText) {
+        return saveUserMessage(session, userText, null);
+    }
+
+    /**
+     * Persiste el mensaje del usuario con metadata adicional (referencias de media, flags de turno).
+     */
+    public ChatMessage saveUserMessage(ChatSession session, String userText, String metadata) {
         ChatMessage userMsg = new ChatMessage();
         userMsg.setSession(session);
         userMsg.setRole(ChatMessage.Role.USER);
         userMsg.setContent(userText);
+        userMsg.setMetadata(metadata);
         return messageRepo.save(userMsg);
     }
 
@@ -55,10 +63,18 @@ public class ChatHistoryService {
      * Persiste la respuesta final del asistente cuando el turno ya termino.
      */
     public ChatMessage saveAssistantMessage(ChatSession session, String assistantText) {
+        return saveAssistantMessage(session, assistantText, null);
+    }
+
+    /**
+     * Persiste la respuesta final del asistente con metadata de ejecucion (modelo, ruta, pipeline).
+     */
+    public ChatMessage saveAssistantMessage(ChatSession session, String assistantText, String metadata) {
         ChatMessage assistantMsg = new ChatMessage();
         assistantMsg.setSession(session);
         assistantMsg.setRole(ChatMessage.Role.ASSISTANT);
         assistantMsg.setContent(assistantText);
+        assistantMsg.setMetadata(metadata);
         return messageRepo.save(assistantMsg);
     }
 
@@ -130,7 +146,8 @@ public class ChatHistoryService {
                         message.getId(),
                         message.getRole().name(),
                         message.getContent(),
-                        message.getCreatedAt()
+                        message.getCreatedAt(),
+                        message.getMetadata()
                 ))
                 .toList();
     }

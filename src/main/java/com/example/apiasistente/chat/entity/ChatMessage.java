@@ -33,6 +33,14 @@ public class ChatMessage {
     @Column(nullable = false)
     private Instant createdAt = Instant.now();
 
+    /**
+     * JSON de metadatos del mensaje. Para mensajes de usuario: referencias de media adjunta.
+     * Para respuestas del asistente: modelo usado, ruta, pipeline, info de generacion de imagen.
+     */
+    @Lob
+    @Column(nullable = true, columnDefinition = "LONGTEXT")
+    private String metadata;
+
     @OneToMany(mappedBy = "message", cascade = CascadeType.REMOVE, orphanRemoval = true)
     private List<ChatMessageSource> sources = new ArrayList<>();
 
@@ -48,6 +56,9 @@ public class ChatMessage {
     public void setContent(String content) { this.content = content; }
 
     public Instant getCreatedAt() { return createdAt; }
+
+    public String getMetadata() { return metadata; }
+    public void setMetadata(String metadata) { this.metadata = metadata; }
 
     public List<ChatMessageSource> getSources() { return sources; }
 }

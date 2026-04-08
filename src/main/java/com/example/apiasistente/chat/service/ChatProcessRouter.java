@@ -37,7 +37,7 @@ public class ChatProcessRouter {
     private static final Logger log = LoggerFactory.getLogger(ChatProcessRouter.class);
 
     private static final Pattern IMAGE_ACTION_HINTS = Pattern.compile(
-            "\\b(genera(?:r)?|crea(?:r)?|dibuja(?:r)?|pinta(?:r)?|ilustra(?:r)?|renderiza(?:r)?|haz(?:me)?\\s+(?:una\\s+)?imagen|dame\\s+(?:una\\s+)?(?:imagen|foto|ilustracion|render)|muestrame\\s+(?:una\\s+)?(?:imagen|foto|ilustracion|render)|quiero\\s+(?:una\\s+)?(?:imagen|foto|ilustracion|render)|show\\s+me\\s+(?:an?\\s+)?(?:image|picture|photo)|make\\s+(?:an\\s+)?image|generate\\s+(?:an\\s+)?image|text\\s*to\\s*image|txt2img|img2img)\\b",
+            "\\b(genera(?:r)?|crea(?:r)?|dibuja(?:r)?|pinta(?:r)?|ilustra(?:r)?|renderiza(?:r)?|haz(?:me)?\\s+(?:una\\s+)?imagen|dame\\s+(?:una\\s+)?(?:imagen|foto|ilustracion|render)|muestrame\\s+(?:una\\s+)?(?:imagen|foto|ilustracion|render)|quiero\\s+(?:una\\s+)?(?:imagen|foto|ilustracion|render)|quiero\\s+que\\s+(?:me\\s+)?(?:des|hagas|generes|crees|dibujes|pongas|muestres)\\s+(?:una\\s+)?(?:imagen|foto|fotografia|ilustracion|render)|(?:puedes|podrias|podes)\\s+(?:hacerme|crearme|generarme|darme|dibujarme|pintarme)\\s+(?:una\\s+)?(?:imagen|foto|ilustracion|render)|show\\s+me\\s+(?:an?\\s+)?(?:image|picture|photo)|make\\s+(?:an\\s+)?image|generate\\s+(?:an\\s+)?image|text\\s*to\\s*image|txt2img|img2img)\\b",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
     );
 
@@ -107,6 +107,7 @@ public class ChatProcessRouter {
     private final OllamaClient ollamaClient;
     private final ChatProcessRouterProperties properties;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private RouterFeedbackStore feedbackStore;
 
     public ChatProcessRouter(ChatModelSelector modelSelector,
                              OllamaClient ollamaClient,
@@ -114,6 +115,11 @@ public class ChatProcessRouter {
         this.modelSelector = modelSelector;
         this.ollamaClient = ollamaClient;
         this.properties = properties;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setFeedbackStore(RouterFeedbackStore feedbackStore) {
+        this.feedbackStore = feedbackStore;
     }
 
     /**
@@ -165,6 +171,14 @@ public class ChatProcessRouter {
         }
 
         HeuristicAssessment heuristic = assessHeuristically(normalizedPrompt, signals, mediaFlags);
+
+        // Consulta el historial de errores antes de usar la decision heuristica.
+        // Si hay correcciones previas para prompts similares, las aplica con alta confianza.
+        ProcessDecision feedbackDecision = applyFeedbackCorrection(normalizedPrompt, heuristic, mediaFlags, signals);
+        if (feedbackDecision != null) {
+            return enforceGuardrails(feedbackDecision, normalizedPrompt, signals, mediaFlags);
+        }
+
         ProcessDecision heuristicDecision = new ProcessDecision(
                 heuristic.route(),
                 "heuristic",
@@ -807,6 +821,58 @@ public class ChatProcessRouter {
                     : PipelineHint.MIXED_RAG_THEN_ACTION;
             case CHAT -> classifyChatPipeline(normalizedPrompt, mediaFlags);
         };
+    }
+
+    /**
+     * Consulta el feedback store para ver si hay correcciones conocidas para este prompt.
+     * Devuelve una decision corregida si hay evidencia suficiente, null si no hay datos o feedback desactivado.
+     */
+    private ProcessDecision applyFeedbackCorrection(String normalizedPrompt,
+                                                    HeuristicAssessment heuristic,
+                                                    MediaFlags mediaFlags,
+                                                    PromptSignals signals) {
+        if (feedbackStore == null) {
+            return null;
+        }
+        String suggestedRoute = feedbackStore.suggestCorrection(normalizedPrompt);
+        if (suggestedRoute == null) {
+            return null;
+        }
+        ProcessRoute correctedRoute;
+        try {
+            correctedRoute = ProcessRoute.valueOf(suggestedRoute);
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
+        if (correctedRoute == heuristic.route()) {
+            return null;  // ya coincide, no hace falta correccion
+        }
+
+        PipelineHint pipeline = pipelineForRoute(correctedRoute, normalizedPrompt, mediaFlags);
+        String alias = recommendedAliasForRoute(correctedRoute, pipeline, mediaFlags);
+        boolean needsRag = correctedRoute == ProcessRoute.RAG || correctedRoute == ProcessRoute.MIXED_PIPELINE
+                || signals.ragDecision().enabled();
+        boolean needsAction = correctedRoute == ProcessRoute.ACTION || correctedRoute == ProcessRoute.MIXED_PIPELINE;
+        String expectedOutput = correctedRoute == ProcessRoute.IMAGE_GENERATE ? "image" : expectedOutputFromSignals(signals);
+
+        log.info(
+                "process_router_feedback_applied heuristic={} corrected={} alias={}",
+                heuristic.route(),
+                correctedRoute,
+                alias
+        );
+        return new ProcessDecision(
+                correctedRoute,
+                "feedback",
+                Math.max(heuristic.confidence(), 0.88),
+                "feedback-correction:heuristic=" + heuristic.route(),
+                false,
+                pipeline,
+                alias,
+                needsRag,
+                needsAction,
+                expectedOutput
+        );
     }
 
     private ProcessDecision safeFallbackDecision(MediaFlags mediaFlags,

@@ -16,6 +16,10 @@ public class OllamaProperties {
     private String embedModel;
     private Double temperature;
     private boolean stream;
+    /** Ventana de contexto en tokens. 0 = default del modelo. Reduce VRAM/RAM en modelos grandes. */
+    private int numCtx = 0;
+    /** Tokens del system prompt a mantener fijos al rotar la ventana. 0 = default del modelo. */
+    private int numKeep = 0;
 
     public String getBaseUrl() { return baseUrl; }
     public void setBaseUrl(String baseUrl) { this.baseUrl = baseUrl; }
@@ -43,5 +47,11 @@ public class OllamaProperties {
 
     public boolean isStream() { return stream; }
     public void setStream(boolean stream) { this.stream = stream; }
+
+    public int getNumCtx() { return numCtx; }
+    public void setNumCtx(int numCtx) { this.numCtx = numCtx; }
+
+    public int getNumKeep() { return numKeep; }
+    public void setNumKeep(int numKeep) { this.numKeep = numKeep; }
 }
 
