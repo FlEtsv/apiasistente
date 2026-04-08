@@ -146,8 +146,7 @@ public class ChatHistoryService {
                         message.getId(),
                         message.getRole().name(),
                         message.getContent(),
-                        message.getCreatedAt(),
-                        message.getMetadata()
+                        message.getCreatedAt()
                 ))
                 .toList();
     }

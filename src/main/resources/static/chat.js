@@ -436,19 +436,42 @@ function renderInlineMedia(media = []) {
   return container.childElementCount ? container : null;
 }
 
+function msgTimestamp() {
+  const now = new Date();
+  return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function addCopyButton(div, text) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'msg-copy';
+  btn.textContent = 'Copiar';
+  btn.addEventListener('click', () => {
+    navigator.clipboard?.writeText(text || '').then(() => {
+      btn.textContent = 'Copiado';
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.textContent = 'Copiar';
+        btn.classList.remove('copied');
+      }, 1800);
+    }).catch(() => {});
+  });
+  return btn;
+}
+
 function addMsg(who, text, sources = [], meta = null, media = []) {
   clearWelcomeIfNeeded();
 
   const wrapper = document.createElement('div');
-  wrapper.className = `flex ${who === 'user' ? 'justify-end' : 'justify-start'} animate-msg mb-6`;
+  wrapper.className = `msg-wrapper flex ${who === 'user' ? 'justify-end' : 'justify-start'} animate-msg mb-5`;
 
   const div = document.createElement('div');
   const isUser = who === 'user';
   const ragUsed = !isUser && meta && meta.ragUsed === true;
 
-  const baseClasses = "max-w-[92%] sm:max-w-[85%] lg:max-w-[75%] px-5 py-3 rounded-2xl shadow-xl text-sm leading-relaxed transition-all";
-  const userClasses = "bg-blue-600 text-white rounded-tr-none ml-3 sm:ml-12";
-  const aiClasses = "glass text-slate-100 rounded-tl-none mr-3 sm:mr-12 border border-slate-700/50";
+  const baseClasses = "max-w-[92%] sm:max-w-[85%] lg:max-w-[78%] px-5 py-3 rounded-2xl shadow-xl text-sm leading-relaxed";
+  const userClasses = "bg-blue-600 text-white rounded-tr-none ml-3 sm:ml-10";
+  const aiClasses = "glass text-slate-100 rounded-tl-none mr-3 sm:mr-10 border border-slate-700/50";
   div.className = `${baseClasses} ${isUser ? userClasses : aiClasses}`;
 
   const content = document.createElement('div');
@@ -467,60 +490,67 @@ function addMsg(who, text, sources = [], meta = null, media = []) {
 
   if (isUser) {
     const inlineMedia = renderInlineMedia(media);
-    if (inlineMedia) {
-      div.appendChild(inlineMedia);
-    }
+    if (inlineMedia) div.appendChild(inlineMedia);
   }
 
+  // RAG sources
   if (!isUser && ragUsed && sources && sources.length > 0) {
     const sourcesDiv = document.createElement('div');
-    sourcesDiv.className = "mt-4 pt-3 border-t border-slate-700/50 space-y-2";
+    sourcesDiv.className = 'rag-sources';
 
-    const title = document.createElement('p');
-    title.className = "text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-2";
-    title.textContent = "Fuentes Consultadas";
+    const title = document.createElement('div');
+    title.className = 'rag-sources-title';
+    title.textContent = 'Fuentes consultadas';
     sourcesDiv.appendChild(title);
 
     sources.forEach((s, idx) => {
-      const sourceCard = document.createElement('div');
-      sourceCard.className = "text-[11px] bg-slate-800/50 p-2 rounded-lg border border-slate-700/30 hover:border-blue-500/30 transition-colors";
-      sourceCard.innerHTML = `
-        <div class="flex justify-between font-bold text-blue-400 mb-1">
-          <span>${s.documentTitle || ('Documento ' + (idx + 1))}</span>
-          <span class="opacity-60 text-[9px]">Relevancia: ${((s.score || 0) * 100).toFixed(0)}%</span>
+      const card = document.createElement('div');
+      card.className = 'rag-source-card';
+      const scoreVal = ((s.score || 0) * 100).toFixed(0);
+      const titleText = escapeHtml(s.documentTitle || `Documento ${idx + 1}`);
+      const snippetText = escapeHtml(s.snippet || '');
+      card.innerHTML = `
+        <div class="rag-source-head">
+          <span class="rag-source-title">${titleText}</span>
+          <span class="rag-source-score">${scoreVal}%</span>
         </div>
-        <div class="text-slate-400 italic font-light">"${s.snippet || ''}"</div>
+        <div class="rag-source-snippet">"${snippetText}"</div>
       `;
-      sourcesDiv.appendChild(sourceCard);
+      sourcesDiv.appendChild(card);
     });
-
     div.appendChild(sourcesDiv);
   }
 
+  // Meta badge
   if (!isUser && meta && typeof meta === 'object') {
     if (ragUsed) {
       const safe = meta.safe !== false;
       const confidence = Number.isFinite(meta.confidence) ? Math.max(0, Math.min(1, meta.confidence)) : 0;
       const groundedSources = Number.isFinite(meta.groundedSources) ? Math.max(0, meta.groundedSources) : 0;
-      const reasoning = reasoningLabel(meta.reasoningLevel);
-
       const badge = document.createElement('div');
-      badge.className = `mt-3 text-[10px] px-2 py-1 inline-flex items-center gap-2 rounded-full border ${
-        safe
-          ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
-          : 'border-amber-500/40 bg-amber-500/10 text-amber-200'
-      }`;
-      badge.textContent = `${safe ? 'Grounding OK' : 'No seguro'} - Confianza ${Math.round(confidence * 100)}% - Fuentes ${groundedSources} - Razonamiento ${reasoning}`;
+      badge.className = `msg-rag-badge ${safe ? 'rag-ok' : 'rag-warn'}`;
+      badge.innerHTML = `<span>${safe ? '✓' : '!'}</span> ${safe ? 'RAG ok' : 'No seguro'} · ${Math.round(confidence * 100)}% · ${groundedSources} fuente${groundedSources !== 1 ? 's' : ''}`;
       div.appendChild(badge);
     } else {
       const reasoning = reasoningLabel(meta.reasoningLevel);
-      const plan = meta.ragNeeded === true ? 'Plan: RAG' : 'Plan: sin RAG';
       const badge = document.createElement('div');
-      badge.className = 'mt-3 text-[10px] px-2 py-1 inline-flex items-center gap-2 rounded-full border border-slate-600/50 bg-slate-700/20 text-slate-300';
-      badge.textContent = `${plan} - Razonamiento ${reasoning}`;
+      badge.className = 'msg-rag-badge rag-plain';
+      badge.textContent = `${reasoning === 'ALTO' ? '◈' : reasoning === 'MEDIO' ? '◇' : '·'} ${reasoning}`;
       div.appendChild(badge);
     }
   }
+
+  // Footer: timestamp + copy
+  const footer = document.createElement('div');
+  footer.className = `msg-footer ${isUser ? 'justify-end' : 'justify-start'}`;
+  const ts = document.createElement('span');
+  ts.className = 'msg-ts';
+  ts.textContent = msgTimestamp();
+  footer.appendChild(ts);
+  if (!isUser) {
+    footer.appendChild(addCopyButton(div, text));
+  }
+  div.appendChild(footer);
 
   wrapper.appendChild(div);
   chatEl.appendChild(wrapper);
@@ -529,12 +559,11 @@ function addMsg(who, text, sources = [], meta = null, media = []) {
 function showTyping() {
   const id = 'typing-' + Date.now();
   const html = `
-    <div id="${id}" class="flex justify-start animate-msg mb-6 animate-pulse-slow">
-      <div class="glass px-5 py-4 rounded-2xl rounded-tl-none mr-3 sm:mr-12 border border-slate-700/50">
-        <div class="flex gap-1.5">
-          <div class="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
-          <div class="w-2 h-2 bg-blue-500 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
-          <div class="w-2 h-2 bg-blue-500 rounded-full animate-bounce [animation-delay:-0.5s]"></div>
+    <div id="${id}" class="msg-wrapper flex justify-start animate-msg mb-5">
+      <div class="glass px-5 py-4 rounded-2xl rounded-tl-none mr-3 sm:mr-10 border border-slate-700/50">
+        <div class="thinking-row">
+          <div class="thinking-dots"><span></span><span></span><span></span></div>
+          <span>Procesando...</span>
         </div>
       </div>
     </div>
@@ -718,8 +747,22 @@ async function triggerMonitorProvisionShortcut() {
   await activateMonitorStack();
 }
 
+const aiStatusOverlayEl = document.getElementById('aiStatusOverlay');
+const aiStatusTextEl = document.getElementById('aiStatusText');
+
+function updateAiStatusOverlay(docs, chunks, hasContent) {
+  if (!aiStatusOverlayEl) return;
+  const hasRag = hasContent && (docs > 0 || chunks > 0);
+  aiStatusOverlayEl.classList.toggle('has-rag', hasRag);
+  if (aiStatusTextEl) {
+    aiStatusTextEl.textContent = hasRag
+      ? `RAG · ${docs}d / ${chunks}c`
+      : 'RAG sin datos';
+  }
+}
+
 function setRagContextLoading() {
-  if (ragContextPillEl) ragContextPillEl.textContent = 'Contexto RAG: cargando...';
+  if (ragContextPillEl) ragContextPillEl.textContent = 'RAG: cargando...';
   if (ragTotalContextEl) ragTotalContextEl.textContent = '-';
   if (ragGlobalContextEl) ragGlobalContextEl.textContent = '-';
   if (ragOwnerContextEl) ragOwnerContextEl.textContent = '-';
@@ -733,25 +776,29 @@ function renderRagContextStats(data) {
   const global = `${data.globalDocuments || 0} docs / ${data.globalChunks || 0} chunks`;
   const owner = `${data.ownerDocuments || 0} docs / ${data.ownerChunks || 0} chunks`;
   const chunkCfg = `${data.chunkSize || '-'} (+${data.chunkOverlap || '-'})`;
+  const docs = data.totalDocuments || 0;
+  const chunks = data.totalChunks || 0;
 
-  if (ragContextPillEl) ragContextPillEl.textContent = `Contexto RAG: ${total}`;
+  if (ragContextPillEl) ragContextPillEl.textContent = `RAG: ${docs}d / ${chunks}c`;
   if (ragTotalContextEl) ragTotalContextEl.textContent = total;
   if (ragGlobalContextEl) ragGlobalContextEl.textContent = global;
   if (ragOwnerContextEl) ragOwnerContextEl.textContent = owner;
   if (ragTopKEl) ragTopKEl.textContent = String(data.topK ?? '-');
   if (ragChunkConfigEl) ragChunkConfigEl.textContent = chunkCfg;
   if (ragLastUpdatedEl) ragLastUpdatedEl.textContent = formatDateTime(data.lastUpdatedAt);
+  updateAiStatusOverlay(docs, chunks, true);
 }
 
 function renderRagContextError(message) {
   const text = message || 'No disponible';
-  if (ragContextPillEl) ragContextPillEl.textContent = `Contexto RAG: ${text}`;
+  if (ragContextPillEl) ragContextPillEl.textContent = `RAG: ${text}`;
   if (ragTotalContextEl) ragTotalContextEl.textContent = text;
   if (ragGlobalContextEl) ragGlobalContextEl.textContent = text;
   if (ragOwnerContextEl) ragOwnerContextEl.textContent = text;
   if (ragTopKEl) ragTopKEl.textContent = text;
   if (ragChunkConfigEl) ragChunkConfigEl.textContent = text;
   if (ragLastUpdatedEl) ragLastUpdatedEl.textContent = text;
+  updateAiStatusOverlay(0, 0, false);
 }
 
 function renderRagDecisionLoading() {

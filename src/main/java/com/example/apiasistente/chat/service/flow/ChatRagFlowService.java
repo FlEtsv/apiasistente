@@ -89,14 +89,23 @@ public class ChatRagFlowService {
                 historyService.recentUserTurnsForRetrieval(context.session().getId()),
                 context.preparedMedia()
         );
-        // Si hay usuario externo aislado se restringe el retrieval a su scope y al conocimiento global permitido.
-        RagService.RetrievalResult retrieval = hasText(context.normalizedExternalUserId())
-                ? ragService.retrieveForOwnerScopedAndGlobal(
-                retrievalQuery,
-                context.username(),
-                context.normalizedExternalUserId()
-        )
-                : ragService.retrieveForOwnerOrGlobal(retrievalQuery, context.username());
+
+        RagService.RetrievalResult retrieval;
+        try {
+            // Si hay usuario externo aislado se restringe el retrieval a su scope y al conocimiento global permitido.
+            retrieval = hasText(context.normalizedExternalUserId())
+                    ? ragService.retrieveForOwnerScopedAndGlobal(
+                    retrievalQuery,
+                    context.username(),
+                    context.normalizedExternalUserId()
+            )
+                    : ragService.retrieveForOwnerOrGlobal(retrievalQuery, context.username());
+        } catch (Exception e) {
+            // Si el embedding o el indice fallan, respondemos sin RAG en lugar de romper el turno.
+            log.warn("rag_retrieval_error sessionId={} reason={} fallback=noRag",
+                    context.session().getId(), e.getMessage());
+            return ChatRagContext.noRag(groundingService);
+        }
 
         logRetrievalTelemetry(
                 ragDecision,

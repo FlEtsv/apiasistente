@@ -1,7 +1,6 @@
 package com.example.apiasistente.chat.service.flow;
 
 import com.example.apiasistente.chat.service.ChatModelSelector;
-import com.example.apiasistente.chat.service.ChatPromptSignals;
 import com.example.apiasistente.shared.ai.OllamaClient;
 import com.example.apiasistente.rag.service.RagService;
 import org.slf4j.Logger;
@@ -38,9 +37,6 @@ public class ChatGroundingService {
 
     @Value("${chat.response-guard.enabled:true}")
     private boolean responseGuardEnabled;
-
-    @Value("${chat.response-guard.min-answer-chars:260}")
-    private int responseGuardMinAnswerChars;
 
     @Value("${chat.response-guard.strict-mode:false}")
     private boolean responseGuardStrictMode;
@@ -214,12 +210,10 @@ public class ChatGroundingService {
             return original;
         }
 
-        // El guard solo se activa cuando hay señales reales de riesgo: longitud, relleno o grounding.
-        int lengthThreshold = Math.max(500, responseGuardMinAnswerChars);
-        boolean triggeredByLength = original.length() > lengthThreshold;
-        boolean triggeredByFiller = ChatPromptSignals.hasLikelyFiller(original);
-        boolean triggeredByGrounding = ragUsed;
-        if (!triggeredByLength && !triggeredByFiller && !triggeredByGrounding) {
+        // El guard solo se activa para respuestas RAG: verificar que las citas y el contenido
+        // esten respaldados. Para respuestas directas (sin RAG) el modelo responde correctamente
+        // con el system prompt y no se necesita un segundo paso de refinamiento.
+        if (!ragUsed) {
             return original;
         }
 
@@ -243,47 +237,31 @@ public class ChatGroundingService {
         guardPrompt.append("- Elimina cualquier frase no respaldada claramente por el contexto.\n");
         guardPrompt.append("- Elimina especulacion, ambiguedad o relleno.\n");
         guardPrompt.append("- Conserva SOLO informacion verificable.\n");
-        if (triggeredByGrounding) {
-            guardPrompt.append("- Mantiene citas [S#] validas en cada afirmacion factual.\n");
-        }
+        guardPrompt.append("- Mantiene citas [S#] validas en cada afirmacion factual.\n");
 
-        String guardSystemPrompt;
-        if (triggeredByGrounding) {
-            guardSystemPrompt = responseGuardStrictMode
-                    ? """
-                            Eres un verificador factual ultra-estricto para respuestas RAG.
-                            Reglas obligatorias:
-                            - No inventes ni agregues informacion nueva.
-                            - Conserva solo contenido claramente respaldado por el contexto provisto.
-                            - Elimina todo lo especulativo o ambiguo.
-                            - Conserva citas [S#] y bloques de codigo cuando esten respaldados.
-                            - Si no queda contenido verificable, responde exactamente: "%s"
-                            - Devuelve solo la version final en Markdown limpio.
-                            """
-                    : """
-                            Eres un verificador factual estricto para respuestas RAG.
-                            Reglas obligatorias:
-                            - No inventes ni agregues informacion nueva.
-                            - Conserva solo contenido respaldado por el contexto provisto.
-                            - Elimina texto especulativo, ambiguo o irrelevante.
-                            - Conserva citas [S#] validas cuando existan fuentes.
-                            - Si no queda contenido verificable, responde exactamente: "%s"
-                            - Devuelve solo la version final en Markdown limpio.
-                            """;
-        } else {
-            guardSystemPrompt = """
-                    Eres un editor de respuestas breves y precisas.
-                    Reglas obligatorias:
-                    - No inventes ni agregues informacion nueva.
-                    - Elimina relleno, repeticiones y frases vagas.
-                    - Conserva la intencion original del mensaje.
-                    - Devuelve solo la version final en Markdown limpio.
-                    """;
-        }
+        String guardSystemPrompt = responseGuardStrictMode
+                ? """
+                        Eres un verificador factual ultra-estricto para respuestas RAG.
+                        Reglas obligatorias:
+                        - No inventes ni agregues informacion nueva.
+                        - Conserva solo contenido claramente respaldado por el contexto provisto.
+                        - Elimina todo lo especulativo o ambiguo.
+                        - Conserva citas [S#] y bloques de codigo cuando esten respaldados.
+                        - Si no queda contenido verificable, responde exactamente: "%s"
+                        - Devuelve solo la version final en Markdown limpio.
+                        """
+                : """
+                        Eres un verificador factual estricto para respuestas RAG.
+                        Reglas obligatorias:
+                        - No inventes ni agregues informacion nueva.
+                        - Conserva solo contenido respaldado por el contexto provisto.
+                        - Elimina texto especulativo, ambiguo o irrelevante.
+                        - Conserva citas [S#] validas cuando existan fuentes.
+                        - Si no queda contenido verificable, responde exactamente: "%s"
+                        - Devuelve solo la version final en Markdown limpio.
+                        """;
 
-        String systemPrompt = triggeredByGrounding
-                ? String.format(Locale.ROOT, guardSystemPrompt, fallbackMessage())
-                : guardSystemPrompt;
+        String systemPrompt = String.format(Locale.ROOT, guardSystemPrompt, fallbackMessage());
 
         List<OllamaClient.Message> guardMessages = List.of(
                 new OllamaClient.Message("system", systemPrompt),
@@ -304,7 +282,9 @@ public class ChatGroundingService {
             if (isFallbackMessage(clean)) {
                 return fallbackMessage();
             }
-            if (triggeredByGrounding && !containsValidSourceCitation(clean, scored == null ? 0 : scored.size())) {
+            // En modo estricto se exigen citas [S#]; en modo normal se acepta la respuesta
+            // aunque el modelo no haya incluido citas explicitamente.
+            if (responseGuardStrictMode && !containsValidSourceCitation(clean, scored == null ? 0 : scored.size())) {
                 return fallbackMessage();
             }
             return clean;

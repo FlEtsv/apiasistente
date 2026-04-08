@@ -268,6 +268,39 @@ public class ChatProcessRouter {
             );
         }
 
+        // Imagen con intencion clara de analisis: describe, explica, que ves, etc.
+        if (mediaFlags.hasImageMedia() && signals.hasImageAnalysisIntent() && !signals.hasImageGenerateIntent()) {
+            return new ProcessDecision(
+                    ProcessRoute.CHAT,
+                    "hard-rule",
+                    0.97,
+                    "Analisis visual explicito solicitado",
+                    false,
+                    PipelineHint.VISION_ANALYZE,
+                    ChatModelSelector.VISUAL_ALIAS,
+                    false,
+                    false,
+                    "text"
+            );
+        }
+
+        // Imagen con pregunta generica: por defecto analizar el contenido visual
+        if (mediaFlags.hasImageMedia() && signals.isQuestionLike()
+                && !signals.hasExtractIntent() && !signals.hasImageGenerateIntent()) {
+            return new ProcessDecision(
+                    ProcessRoute.CHAT,
+                    "hard-rule",
+                    0.92,
+                    "Imagen con pregunta: analisis visual por defecto",
+                    false,
+                    PipelineHint.VISION_ANALYZE,
+                    ChatModelSelector.VISUAL_ALIAS,
+                    false,
+                    false,
+                    "text"
+            );
+        }
+
         if (!mediaFlags.hasImageMedia() && signals.hasImageGenerateIntent()) {
             return new ProcessDecision(
                     ProcessRoute.IMAGE_GENERATE,
@@ -390,12 +423,14 @@ public class ChatProcessRouter {
         }
 
         if (mediaFlags.hasImageMedia()) {
+            // Fallback seguro: imagen sin intencion clara → analizar el contenido visual.
+            // IMAGE_EXTRACT solo se activa con intencion explicita (OCR, tabla, datos).
             return new HeuristicAssessment(
-                    ProcessRoute.IMAGE_EXTRACT,
-                    0.64,
-                    true,
-                    "Adjunto visual ambiguo: prioridad a extraccion segura",
-                    PipelineHint.VISION_EXTRACT,
+                    ProcessRoute.CHAT,
+                    0.88,
+                    false,
+                    "Adjunto visual sin intencion especifica: analisis visual por defecto",
+                    PipelineHint.VISION_ANALYZE,
                     ChatModelSelector.VISUAL_ALIAS,
                     false,
                     false,
@@ -477,6 +512,11 @@ public class ChatProcessRouter {
                                            HeuristicAssessment heuristic,
                                            MediaFlags mediaFlags) {
         if (!properties.isLlmAssessmentEnabled()) {
+            return false;
+        }
+        // Los turnos con imagen tienen rutas deterministas (hard rules + heuristica).
+        // No se necesita LLM: eliminar la latencia adicional completamente.
+        if (mediaFlags.hasImageMedia()) {
             return false;
         }
         if (mediaFlags.hasDocumentMedia()) {
@@ -880,16 +920,16 @@ public class ChatProcessRouter {
                                                  String reason) {
         if (mediaFlags.hasImageMedia()) {
             return new ProcessDecision(
-                    ProcessRoute.IMAGE_EXTRACT,
+                    ProcessRoute.CHAT,
                     "fallback",
                     SAFE_FALLBACK_CONFIDENCE,
                     reason,
                     false,
-                    PipelineHint.VISION_EXTRACT,
+                    PipelineHint.VISION_ANALYZE,
                     ChatModelSelector.VISUAL_ALIAS,
                     false,
                     false,
-                    expectedOutputFromSignals(signals)
+                    "text"
             );
         }
         return new ProcessDecision(
