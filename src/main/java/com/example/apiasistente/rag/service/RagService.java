@@ -30,6 +30,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.stream.Collectors;
 
 /**
@@ -50,6 +52,14 @@ public class RagService {
 
     public static final String GLOBAL_OWNER = "global";
     private static final Logger log = LoggerFactory.getLogger(RagService.class);
+
+    // Cache de embeddings de queries: evita llamar a Ollama para la misma consulta repetida.
+    // TTL de 30 minutos es adecuado: las queries tipicas de chat se repiten dentro de una sesion.
+    private static final int EMBEDDING_CACHE_MAX = 500;
+    private static final long EMBEDDING_CACHE_TTL_MS = 1_800_000L; // 30 min
+    private record CachedEmbedding(double[] vec, long expiresAt) {}
+    private final ConcurrentHashMap<String, CachedEmbedding> embeddingCache = new ConcurrentHashMap<>();
+    private final ConcurrentLinkedDeque<String> embeddingCacheOrder = new ConcurrentLinkedDeque<>();
 
     private static final Set<String> STOPWORDS = Set.of(
             "de", "la", "el", "los", "las", "y", "o", "u", "en", "por", "para", "con", "sin", "del", "al",
@@ -393,7 +403,7 @@ public class RagService {
      */
     public RetrievalResult retrieveForOwners(String query, List<String> owners) {
         long embeddingStartNanos = System.nanoTime();
-        double[] queryEmbedding = VectorMath.normalize(ollama.embedOne(query));
+        double[] queryEmbedding = getCachedEmbedding(query);
         double queryEmbeddingTimeMs = nanosToMillis(embeddingStartNanos);
         List<String> ownersClean = normalizeOwners(owners);
         if (queryEmbedding.length == 0) {
@@ -1143,6 +1153,38 @@ public class RagService {
         }
         String[] parts = text.trim().split("\\s+");
         return Math.max(0, parts.length);
+    }
+
+    /**
+     * Devuelve el embedding normalizado para la query dada, usando cache si esta disponible.
+     * El cache evita llamar a Ollama para la misma consulta dentro de la ventana de TTL.
+     */
+    private double[] getCachedEmbedding(String query) {
+        if (query == null || query.isBlank()) {
+            return new double[0];
+        }
+        String key = normalizeSearchText(query);
+        if (key.isBlank()) {
+            return VectorMath.normalize(ollama.embedOne(query));
+        }
+        long now = System.currentTimeMillis();
+        CachedEmbedding cached = embeddingCache.get(key);
+        if (cached != null && cached.expiresAt() > now) {
+            return cached.vec();
+        }
+        double[] fresh = VectorMath.normalize(ollama.embedOne(query));
+        if (fresh.length > 0) {
+            embeddingCache.put(key, new CachedEmbedding(fresh, now + EMBEDDING_CACHE_TTL_MS));
+            embeddingCacheOrder.addLast(key);
+            // Eviccion FIFO cuando se supera el maximo.
+            while (embeddingCacheOrder.size() > EMBEDDING_CACHE_MAX) {
+                String evicted = embeddingCacheOrder.pollFirst();
+                if (evicted != null) {
+                    embeddingCache.remove(evicted);
+                }
+            }
+        }
+        return fresh;
     }
 
     private static double nanosToMillis(long startNanos) {

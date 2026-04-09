@@ -1095,6 +1095,8 @@
             display: flex;
             flex-direction: column;
             min-height: 0;
+            height: 100%;
+            overflow: hidden;
             position: relative;
             z-index: 50;
         }
@@ -1126,11 +1128,8 @@
         }
 
         .ops-details {
-            display: grid;
-            grid-template-rows: auto minmax(0, 1fr);
-            min-height: 0;
-            height: 100%;
-            overflow: hidden;
+            display: block;
+            flex-shrink: 0;
         }
 
         .ops-details > summary {
@@ -1167,7 +1166,7 @@
             margin-left: auto;
         }
 
-        .ops-panel .panel-body {
+        .ops-panel > .panel-body {
             flex: 1 1 auto;
             min-height: 0;
             overflow-y: auto;
@@ -1176,7 +1175,8 @@
             touch-action: pan-y;
         }
 
-        .ops-details:not([open]) .panel-body {
+        /* Ocultar panel-body cuando el details esta cerrado */
+        #opsPanelDetails:not([open]) + .panel-body {
             display: none;
         }
 
@@ -1589,16 +1589,11 @@
                 touch-action: pan-y;
             }
             .ops-details {
-                display: grid;
-                grid-template-rows: auto minmax(0, 1fr);
-                min-height: 0;
-                height: 100%;
-                overflow: hidden;
+                display: block;
+                flex-shrink: 0;
             }
-            .ops-panel .panel-body {
+            .ops-panel > .panel-body {
                 min-height: 0;
-                height: 100%;
-                max-height: 100%;
                 overflow-y: auto;
                 overscroll-behavior-y: contain;
                 -webkit-overflow-scrolling: touch;
@@ -1973,7 +1968,8 @@
                             <button id="closeOps" type="button" class="ops-close-btn">Cerrar</button>
                         </span>
                     </summary>
-                    <div class="panel-body ops-grid">
+                </details>
+                <div class="panel-body ops-grid" id="opsPanelBody">
                     <div class="stat" sec:authorize="hasAuthority('PERM_MONITOR')">
                         <strong>Estado Grafana</strong>
                         <span id="grafana-status" class="status-down">Sin datos</span>
@@ -2186,8 +2182,7 @@
                             </div>
                         </div>
                     </div>
-                    </div>
-                </details>
+                </div>
             </aside>
         </section>
     </main>

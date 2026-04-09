@@ -101,6 +101,12 @@ public class ChatProcessRouter {
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
     );
 
+    // Indicadores de salida tipo documento/texto: bloquean el path "genera sin sujeto imagen"
+    private static final Pattern TEXT_DOCUMENT_HINTS = Pattern.compile(
+            "\\b(informe|reporte|documento|texto|email|correo|carta|resumen|lista|codigo|script|funcion|clase|sql|consulta|query|formula|expresion|algoritmo|plantilla|template|borrador|ensayo|articulo|post|tweet|mensaje|nota)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
+    );
+
     private static final double SAFE_FALLBACK_CONFIDENCE = 0.60;
 
     private final ChatModelSelector modelSelector;
@@ -747,10 +753,18 @@ public class ChatProcessRouter {
         boolean tableHint = TABLE_HINTS.matcher(text).find();
         boolean jsonHint = JSON_HINTS.matcher(text).find();
         boolean hasImperativeImageHint = IMAGE_IMPERATIVE_HINTS.matcher(text).find();
+        boolean hasTextDocumentHint = TEXT_DOCUMENT_HINTS.matcher(text).find();
 
-        boolean imageGenerateIntent = ((hasActionHint || hasEditHint || (mediaFlags.hasImageMedia() && hasImperativeImageHint))
-                && (hasSubjectHint || hasEditHint || promptStyle || hasImperativeImageHint || mediaFlags.hasImageMedia()))
-                || (!mediaFlags.hasImageMedia() && hasSubjectHint && promptStyle && !questionLike && !technicalDebug);
+        // Caso 1: verbo de accion/edicion + sujeto imagen explicito (imagen, foto, render, etc.)
+        boolean imageByExplicitSubject = (hasActionHint || hasEditHint || (mediaFlags.hasImageMedia() && hasImperativeImageHint))
+                && (hasSubjectHint || hasEditHint || promptStyle || hasImperativeImageHint || mediaFlags.hasImageMedia());
+        // Caso 2: "genera/crea un gato" sin "imagen" pero sin senales de documento/texto/extraccion/pregunta
+        boolean imageByVerbAlone = hasActionHint && !hasSubjectHint && !hasExtractHint
+                && !questionLike && !technicalDebug && !hasTextDocumentHint && !tableHint && !jsonHint;
+        // Caso 3: sujeto imagen + estilo fotografico (prompt puramente descriptivo txt2img)
+        boolean imageByStyle = !mediaFlags.hasImageMedia() && hasSubjectHint && promptStyle && !questionLike && !technicalDebug;
+
+        boolean imageGenerateIntent = imageByExplicitSubject || imageByVerbAlone || imageByStyle;
 
         ChatPromptSignals.RagDecision ragDecision = ChatPromptSignals.ragDecision(normalizedPrompt, mediaFlags.hasDocumentMedia());
         return new PromptSignals(

@@ -37,6 +37,9 @@ import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * Capa de indice vectorial HNSW.
@@ -64,6 +67,8 @@ public class RagVectorIndexService {
     private final Path indexPath;
     private final boolean rebuildOnStartup;
     private final ObjectProvider<RagOpsService> ragOpsServiceProvider;
+    // ReadWriteLock: multiples busquedas concurrentes (readLock), escrituras exclusivas (writeLock).
+    private final ReadWriteLock indexLock = new ReentrantReadWriteLock();
 
     public RagVectorIndexService(KnowledgeVectorRepository vectorRepo,
                                  OllamaClient ollamaClient,
@@ -83,31 +88,51 @@ public class RagVectorIndexService {
     }
 
     /**
-     * El arranque fuerza una reconstruccion para alinear el indice HNSW con la verdad durable en `vectors`.
-     * Es deliberado: la consistencia importa mas que reciclar un indice posiblemente viejo.
+     * El arranque lanza el rebuild en un hilo daemon para no bloquear el arranque ni las primeras
+     * peticiones. El indice queda vacio/parcial hasta que el rebuild termina: las busquedas devuelven
+     * resultados vacios (noRag) en ese intervalo, lo cual es preferible a bloquear indefinidamente.
      */
     @EventListener(ApplicationReadyEvent.class)
-    public synchronized void rebuildOnStartup() {
+    public void rebuildOnStartup() {
         if (!rebuildOnStartup) {
             return;
         }
-        rebuildFromDatabase("startup");
+        Executors.newVirtualThreadPerTaskExecutor().execute(() -> rebuildFromDatabase("startup"));
     }
 
-    public synchronized void rebuildFromDatabase() {
+    public void rebuildFromDatabase() {
         rebuildFromDatabase("system");
     }
 
     /**
      * Recorre `vectors` como fuente durable y recompone el HNSW completo.
      * Se expone con trigger explicito para poder auditar si fue un arranque o una accion manual.
+     *
+     * Diseño de locking: el writeLock NO se sostiene durante el fetch de paginas de BD porque
+     * con corpus grandes (>100k vectores) el rebuild tarda minutos y bloquea todas las busquedas.
+     * En cambio: se borra todo en un unico lock, luego se indexa batch a batch (lock por batch),
+     * lo que permite que las busquedas vean datos parciales/vacios durante el rebuild en lugar de
+     * bloquearse indefinidamente.
      */
-    public synchronized void rebuildFromDatabase(String trigger) {
+    public void rebuildFromDatabase(String trigger) {
+        // Paso 1: borrar el indice viejo bajo lock (operacion rapida).
+        indexLock.writeLock().lock();
         try {
             writer.deleteAll();
+            writer.commit();
+        } catch (Exception e) {
+            log.warn("No se pudo limpiar el indice HNSW del RAG antes de rebuild", e);
+            ragOps().ifPresent(ops -> ops.recordFailure("rag-index-rebuild", "No se pudo limpiar el indice HNSW.", e));
+            return;
+        } finally {
+            indexLock.writeLock().unlock();
+        }
 
-            int page = 0;
-            int indexedVectors = 0;
+        // Paso 2: paginar BD y escribir en Lucene batch a batch.
+        // El fetch de BD ocurre SIN lock para no bloquear busquedas durante el rebuild.
+        int page = 0;
+        int indexedVectors = 0;
+        try {
             while (true) {
                 var slice = vectorRepo.findActiveIndexPage(PageRequest.of(page, REBUILD_PAGE_SIZE));
                 if (slice.isEmpty()) {
@@ -127,17 +152,25 @@ public class RagVectorIndexService {
                             Instant.now()
                     ));
                 }
-                indexedVectors += batch.size();
-                indexBatchInternal(batch);
 
+                if (!batch.isEmpty()) {
+                    indexLock.writeLock().lock();
+                    try {
+                        indexBatchInternal(batch);
+                        writer.commit();
+                    } finally {
+                        indexLock.writeLock().unlock();
+                    }
+                }
+
+                indexedVectors += batch.size();
                 if (!slice.hasNext()) {
                     break;
                 }
                 page++;
             }
 
-            writer.commit();
-            log.info("RAG HNSW rebuild completado");
+            log.info("RAG HNSW rebuild completado pages={} vectors={}", page + 1, indexedVectors);
             int finalIndexedVectors = indexedVectors;
             ragOps().ifPresent(ops -> ops.recordIndexRebuild(trigger, finalIndexedVectors));
         } catch (Exception e) {
@@ -150,10 +183,11 @@ public class RagVectorIndexService {
      * Inserta o actualiza vectores de chunks activos.
      * Siempre se borra primero por `chunk_id` para mantener idempotencia simple.
      */
-    public synchronized void indexBatch(List<IndexedVectorRecord> vectors) {
+    public void indexBatch(List<IndexedVectorRecord> vectors) {
         if (vectors == null || vectors.isEmpty()) {
             return;
         }
+        indexLock.writeLock().lock();
         try {
             indexBatchInternal(vectors);
             writer.commit();
@@ -161,13 +195,16 @@ public class RagVectorIndexService {
         } catch (IOException e) {
             ragOps().ifPresent(ops -> ops.recordFailure("rag-index-write", "No se pudieron indexar vectores RAG.", e));
             throw new IllegalStateException("No se pudieron indexar vectores RAG.", e);
+        } finally {
+            indexLock.writeLock().unlock();
         }
     }
 
-    public synchronized void deleteChunkIds(Collection<Long> chunkIds) {
+    public void deleteChunkIds(Collection<Long> chunkIds) {
         if (chunkIds == null || chunkIds.isEmpty()) {
             return;
         }
+        indexLock.writeLock().lock();
         try {
             for (Long chunkId : chunkIds) {
                 if (chunkId == null) {
@@ -180,18 +217,21 @@ public class RagVectorIndexService {
         } catch (IOException e) {
             ragOps().ifPresent(ops -> ops.recordFailure("rag-index-delete", "No se pudieron borrar vectores del indice HNSW.", e));
             throw new IllegalStateException("No se pudieron borrar vectores del indice HNSW.", e);
+        } finally {
+            indexLock.writeLock().unlock();
         }
     }
 
     /**
      * Busca candidatos semanticos en HNSW y filtra owners al final.
-     * El filtro tardio evita depender de APIs de Lucene menos estables entre versiones.
+     * Usa readLock para permitir busquedas concurrentes sin bloquear entre si.
      */
-    public synchronized List<SearchHit> search(List<String> owners, double[] queryVector, int limit) {
+    public List<SearchHit> search(List<String> owners, double[] queryVector, int limit) {
         if (queryVector == null || queryVector.length == 0 || limit <= 0) {
             return List.of();
         }
 
+        indexLock.readLock().lock();
         try {
             if (!DirectoryReader.indexExists(directory)) {
                 return List.of();
@@ -227,6 +267,8 @@ public class RagVectorIndexService {
             }
         } catch (Exception e) {
             throw new IllegalStateException("Fallo buscando en el indice HNSW del RAG.", e);
+        } finally {
+            indexLock.readLock().unlock();
         }
     }
 
@@ -261,12 +303,15 @@ public class RagVectorIndexService {
     }
 
     @PreDestroy
-    public synchronized void shutdown() {
+    public void shutdown() {
+        indexLock.writeLock().lock();
         try {
             writer.close();
             directory.close();
         } catch (IOException e) {
             log.debug("No se pudo cerrar el indice HNSW del RAG", e);
+        } finally {
+            indexLock.writeLock().unlock();
         }
     }
 

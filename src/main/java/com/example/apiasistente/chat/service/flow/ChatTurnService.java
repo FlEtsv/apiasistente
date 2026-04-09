@@ -259,6 +259,32 @@ public class ChatTurnService {
                         elapsedMillis(turnStartNanos)
                 );
             }
+            // Si el fallo ocurrio en RAG, generacion o post-check, el contexto de sesion ya esta
+            // establecido y el mensaje del usuario ya fue guardado. En lugar de propagar la excepcion
+            // (que haria rollback y perderia el mensaje del usuario), guardamos un mensaje de error
+            // amigable y devolvemos una respuesta degradada al cliente.
+            if (context != null && isRecoverableStage(stage)) {
+                try {
+                    String fallback = buildLlmErrorFallback(stage, ex);
+                    historyService.saveAssistantMessage(context.session(), fallback, null);
+                    sessionService.touchSession(context.session());
+                    log.info("chat_turn_degraded_response stage={} sessionId={}", stage, context.session().getId());
+                    return new ChatResponse(
+                            context.session().getId(),
+                            fallback,
+                            List.of(),
+                            false,
+                            0.0,
+                            0,
+                            false,
+                            context.ragNeeded(),
+                            context.turnPlan().reasoningLevel().name()
+                    );
+                } catch (RuntimeException fallbackEx) {
+                    log.warn("chat_turn_fallback_save_failed sessionId={} cause={}",
+                            context.session().getId(), fallbackEx.getMessage());
+                }
+            }
             throw ex;
         } finally {
             recordTurnLatency(turnStartNanos);
@@ -454,6 +480,30 @@ public class ChatTurnService {
 
     private long elapsedMillis(long startNanos) {
         return Math.max(0L, (System.nanoTime() - startNanos) / 1_000_000L);
+    }
+
+    /**
+     * Etapas desde las que se puede recuperar devolviendo un mensaje degradado al usuario.
+     * El contexto ya esta establecido y el mensaje del usuario ya fue guardado.
+     */
+    private boolean isRecoverableStage(String stage) {
+        return "rag".equals(stage) || "assistant".equals(stage) || "post-check".equals(stage);
+    }
+
+    /**
+     * Construye el mensaje de error amigable segun el tipo de fallo.
+     */
+    private String buildLlmErrorFallback(String stage, RuntimeException ex) {
+        String cause = ex.getMessage();
+        boolean isTimeout = cause != null && (cause.contains("timed out") || cause.contains("timeout") || cause.contains("Read timed out"));
+        boolean isUnavailable = cause != null && (cause.contains("Connection refused") || cause.contains("no disponible") || cause.contains("not available"));
+        if (isTimeout) {
+            return "El modelo tardó demasiado en responder. Prueba con una pregunta más corta o espera un momento.";
+        }
+        if (isUnavailable) {
+            return "El modelo de IA no está disponible en este momento. Verifica que Ollama esté activo e intenta de nuevo.";
+        }
+        return "No pude procesar tu consulta" + ("rag".equals(stage) ? " (error en retrieval)" : "") + ". Intenta de nuevo.";
     }
 }
 

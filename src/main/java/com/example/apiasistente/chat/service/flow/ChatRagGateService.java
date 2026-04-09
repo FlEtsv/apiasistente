@@ -14,6 +14,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Compuerta barata antes del retrieval RAG.
@@ -52,6 +53,12 @@ public class ChatRagGateService {
     @Value("${chat.rag-gate.max-probe-terms:3}")
     private int maxProbeTerms;
 
+    // Cache del tamano del corpus por lista de owners: evita 2 COUNT queries por turno.
+    // TTL corto (30s) porque los documentos cambian poco durante una sesion de chat.
+    private static final long CORPUS_CACHE_TTL_MS = 30_000L;
+    private record CorpusCacheEntry(long docs, long chunks, long expiresAt) {}
+    private final ConcurrentHashMap<String, CorpusCacheEntry> corpusCache = new ConcurrentHashMap<>();
+
     public ChatRagGateService(KnowledgeDocumentRepository documentRepository,
                               KnowledgeChunkRepository chunkRepository,
                               ChatRagDecisionEngine decisionEngine) {
@@ -86,8 +93,19 @@ public class ChatRagGateService {
             return GateDecision.allow("gate-disabled", owners, 0, 0, List.of(), assessment);
         }
 
-        long activeDocuments = documentRepository.countByOwnerInAndActiveTrue(owners);
-        long activeChunks = chunkRepository.countActiveByOwners(owners);
+        String corpusCacheKey = String.join(",", owners);
+        long now = System.currentTimeMillis();
+        CorpusCacheEntry cached = corpusCache.get(corpusCacheKey);
+        long activeDocuments;
+        long activeChunks;
+        if (cached != null && cached.expiresAt() > now) {
+            activeDocuments = cached.docs();
+            activeChunks = cached.chunks();
+        } else {
+            activeDocuments = documentRepository.countByOwnerInAndActiveTrue(owners);
+            activeChunks = chunkRepository.countActiveByOwners(owners);
+            corpusCache.put(corpusCacheKey, new CorpusCacheEntry(activeDocuments, activeChunks, now + CORPUS_CACHE_TTL_MS));
+        }
 
         // Si no hay corpus activo, no tiene sentido pagar la latencia del embedding.
         if (activeDocuments <= 0 || activeChunks <= 0) {
@@ -146,9 +164,12 @@ public class ChatRagGateService {
         List<String> matchedTerms = new ArrayList<>();
         for (String term : probeTerms) {
             long metadataHits = documentRepository.countActiveMetadataMatches(owners, term);
-            long tagHits = chunkRepository.countActiveTagMatches(owners, term);
+            long tagHits = metadataHits > 0 ? 0 : chunkRepository.countActiveTagMatches(owners, term);
             if (metadataHits > 0 || tagHits > 0) {
                 matchedTerms.add(term);
+                // Un solo termino coincidente es suficiente para habilitar RAG.
+                // No seguimos buscando para evitar queries innecesarias.
+                break;
             }
         }
 
