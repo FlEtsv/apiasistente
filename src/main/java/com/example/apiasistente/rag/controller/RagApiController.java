@@ -10,6 +10,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.ArrayList;
 import java.util.List;
 import java.security.Principal;
 
@@ -23,6 +27,8 @@ import java.security.Principal;
 @RestController
 @RequestMapping("/api/rag")
 public class RagApiController {
+
+    private static final Logger log = LoggerFactory.getLogger(RagApiController.class);
 
     private final RagService ragService;
 
@@ -38,12 +44,16 @@ public class RagApiController {
 
     @PostMapping("/documents/batch")
     public List<UpsertDocumentResponse> upsertBatch(@Valid @RequestBody List<UpsertDocumentRequest> reqs) {
-        return reqs.stream()
-                .map(r -> {
-                    var doc = upsertWithOptionalMetadata(RagService.GLOBAL_OWNER, r);
-                    return new UpsertDocumentResponse(doc.getId(), doc.getTitle());
-                })
-                .toList();
+        List<UpsertDocumentResponse> results = new ArrayList<>(reqs.size());
+        for (var r : reqs) {
+            try {
+                var doc = upsertWithOptionalMetadata(RagService.GLOBAL_OWNER, r);
+                results.add(new UpsertDocumentResponse(doc.getId(), doc.getTitle()));
+            } catch (Exception e) {
+                log.warn("rag_batch_item_fail title='{}' cause={}", r.getTitle(), e.getMessage());
+            }
+        }
+        return results;
     }
 
     @PostMapping("/users/{username}/documents")
@@ -62,12 +72,16 @@ public class RagApiController {
                                                            Principal principal) {
         String target = normalizePathUser(username);
         enforceSameUser(principal, target);
-        return reqs.stream()
-                .map(r -> {
-                    var doc = upsertWithOptionalMetadata(target, r);
-                    return new UpsertDocumentResponse(doc.getId(), doc.getTitle());
-                })
-                .toList();
+        List<UpsertDocumentResponse> results = new ArrayList<>(reqs.size());
+        for (var r : reqs) {
+            try {
+                var doc = upsertWithOptionalMetadata(target, r);
+                results.add(new UpsertDocumentResponse(doc.getId(), doc.getTitle()));
+            } catch (Exception e) {
+                log.warn("rag_batch_user_item_fail user='{}' title='{}' cause={}", target, r.getTitle(), e.getMessage());
+            }
+        }
+        return results;
     }
 
     @GetMapping("/stats")
@@ -78,26 +92,27 @@ public class RagApiController {
 
     @PostMapping("/memory")
     public UpsertDocumentResponse storeMemory(@Valid @RequestBody MemoryRequest req, Principal principal) {
+        if (principal == null || principal.getName() == null || principal.getName().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Usuario autenticado requerido.");
+        }
         var doc = storeMemoryWithOptionalMetadata(principal.getName(), req);
         return new UpsertDocumentResponse(doc.getId(), doc.getTitle());
     }
 
     private com.example.apiasistente.rag.entity.KnowledgeDocument upsertWithOptionalMetadata(String owner,
                                                                                               UpsertDocumentRequest req) {
-        // Si el cliente sigue hablando el contrato viejo, mantenemos el camino simple.
-        if (!req.hasExplicitChunks()
-                && (req.getSource() == null || req.getSource().isBlank())
-                && (req.getTags() == null || req.getTags().isBlank())
-                && (req.getUrl() == null || req.getUrl().isBlank())) {
-            return RagService.GLOBAL_OWNER.equals(owner)
-                    ? ragService.upsertDocument(req.getTitle(), req.getContent())
-                    : ragService.upsertDocumentForOwner(owner, req.getTitle(), req.getContent());
-        }
+        // Siempre usa el camino estructurado para que los docs manuales tengan la misma
+        // metadata que los del scraper: source visible, tags indexables por la gate probe.
+        // Si el cliente no manda source, usamos "manual" en lugar de "api" para que sea
+        // legible en el panel y no quede como un campo técnico sin significado.
+        String source = (req.getSource() != null && !req.getSource().isBlank())
+                ? req.getSource()
+                : "manual";
         return ragService.upsertStructuredDocumentForOwner(
                 owner,
                 req.getTitle(),
                 req.getContent(),
-                req.getSource(),
+                source,
                 req.getTags(),
                 req.getUrl(),
                 mapChunks(req)

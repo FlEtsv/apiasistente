@@ -12,10 +12,7 @@ function getXsrfFromCookie() {
 }
 
 async function postJson(url, body) {
-  // Preferimos meta (Thymeleaf) -> es lo más fiable
   const meta = getCsrfFromMeta();
-
-  // Fallback cookie (si un día cambias el render o la estrategia)
   const xsrf = meta ? null : getXsrfFromCookie();
 
   const headers = { "Content-Type": "application/json" };
@@ -24,9 +21,9 @@ async function postJson(url, body) {
 
   const res = await fetch(url, {
     method: "POST",
-    credentials: "same-origin", // CLAVE: manda cookies (JSESSIONID / XSRF-TOKEN)
+    credentials: "same-origin",
     headers,
-    body: JSON.stringify(body)
+    body: body !== undefined ? JSON.stringify(body) : undefined
   });
 
   const data = await res.json().catch(() => ({}));
@@ -58,13 +55,22 @@ function log(msg) {
   el.textContent += msg + "\n";
 }
 
+function buildDocPayload(title, content) {
+  const source = document.getElementById("source")?.value.trim() || undefined;
+  const tags   = document.getElementById("tags")?.value.trim()   || undefined;
+  const payload = { title, content };
+  if (source) payload.source = source;
+  if (tags)   payload.tags   = tags;
+  return payload;
+}
+
 document.getElementById("btnUpload")?.addEventListener("click", async () => {
   const title = document.getElementById("title").value.trim();
   const content = document.getElementById("content").value;
   if (!title || !content.trim()) return log("❌ Falta título o contenido.");
 
   try {
-    const out = await postJson("/api/rag/documents", { title, content });
+    const out = await postJson("/api/rag/documents", buildDocPayload(title, content));
     log("✅ Subido: " + JSON.stringify(out));
   } catch (e) {
     log("❌ Error: " + e.message);
@@ -76,7 +82,13 @@ document.getElementById("btnUploadSplit")?.addEventListener("click", async () =>
   const content = document.getElementById("content").value;
   if (!title || !content.trim()) return log("❌ Falta título o contenido.");
 
-  const docs = splitIntoDocs(title, content, 6000);
+  const source = document.getElementById("source")?.value.trim() || undefined;
+  const tags   = document.getElementById("tags")?.value.trim()   || undefined;
+  const docs = splitIntoDocs(title, content, 6000).map(d => {
+    if (source) d.source = source;
+    if (tags)   d.tags   = tags;
+    return d;
+  });
   log(`ℹ️ Troceado en ${docs.length} docs...`);
 
   try {
@@ -102,5 +114,32 @@ document.getElementById("btnUploadFiles")?.addEventListener("click", async () =>
     log("✅ Subidos: " + JSON.stringify(out));
   } catch (e) {
     log("❌ Error: " + e.message);
+  }
+});
+
+function logReset(msg) {
+  const el = document.getElementById("logReset");
+  if (el) el.textContent += msg + "\n";
+}
+
+document.getElementById("btnResetRag")?.addEventListener("click", async () => {
+  const first = confirm("¿Seguro que quieres eliminar TODO el corpus RAG?\n\nEsta acción borra todos los documentos, chunks, vectores e índice HNSW.\n\nNo se puede deshacer.");
+  if (!first) return;
+  const second = confirm("Confirmación final: el corpus quedará completamente vacío.\n\n¿Continuar?");
+  if (!second) return;
+
+  const btn = document.getElementById("btnResetRag");
+  btn.disabled = true;
+  btn.textContent = "Reiniciando...";
+  logReset("⏳ Enviando reset...");
+
+  try {
+    const out = await postJson("/api/rag/ops/reset");
+    logReset("✅ Reset completado. Docs activos: " + (out.activeDocuments ?? 0) + ", Chunks: " + (out.activeChunks ?? 0) + ", Vectores: " + (out.activeVectors ?? 0));
+  } catch (e) {
+    logReset("❌ Error en reset: " + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Reiniciar RAG desde cero";
   }
 });

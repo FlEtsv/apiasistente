@@ -57,17 +57,20 @@ public class WebSecurityConfig {
         http
                 .csrf(csrf -> csrf.csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse()))
                 .authorizeHttpRequests(auth -> auth
-                        // pÃ¡ginas pÃºblicas
+                        // páginas públicas
                         .requestMatchers("/login", "/register", "/error").permitAll()
 
-                        // estÃ¡ticos tÃ­picos
+                        // estáticos típicos
                         .requestMatchers("/css/**", "/js/**", "/images/**", "/favicon.ico").permitAll()
 
-                        // estÃ¡ticos sueltos (TU caso real)
+                        // Angular SPA static bundle
+                        .requestMatchers("/app/**").hasAuthority("PERM_CHAT")
+
+                        // estáticos sueltos
                         .requestMatchers("/chat.js", "/api-keys.js", "/rag-admin.js", "/rag-maintenance.js").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/info", "/actuator/prometheus").permitAll()
 
-                        // NO permitas "/" si ahÃ­ estÃ¡ el chat. Debe pedir login
+                        // El chat requiere login
                         .requestMatchers("/chat", "/api/chat/**").hasAuthority("PERM_CHAT")
                         .requestMatchers("/rag-admin", "/api/rag/**").hasAuthority("PERM_RAG")
                         .requestMatchers("/monitor", "/api/monitor/**", "/ops/**").hasAuthority("PERM_MONITOR")

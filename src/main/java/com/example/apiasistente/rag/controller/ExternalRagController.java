@@ -16,7 +16,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.security.Principal;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Function;
 
@@ -30,6 +34,8 @@ import java.util.function.Function;
 @RestController
 @RequestMapping("/api/ext/rag")
 public class ExternalRagController {
+
+    private static final Logger log = LoggerFactory.getLogger(ExternalRagController.class);
 
     private final RagService ragService;
 
@@ -47,7 +53,7 @@ public class ExternalRagController {
     public List<UpsertDocumentResponse> upsertBatch(@Valid @RequestBody List<UpsertDocumentRequest> reqs,
                                                     Principal principal) {
         resolveUsername(principal);
-        return mapUpsertResponses(reqs, req -> toUpsertResponse(upsertWithOptionalMetadata(RagService.GLOBAL_OWNER, req)));
+        return mapUpsertResponsesSafe(reqs, req -> toUpsertResponse(upsertWithOptionalMetadata(RagService.GLOBAL_OWNER, req)));
     }
 
     @PostMapping("/users/{externalUserId}/documents")
@@ -67,7 +73,7 @@ public class ExternalRagController {
                                                                    HttpServletRequest request) {
         resolveUsername(principal);
         String scopedOwner = resolveScopedExternalOwner(externalUserId, request);
-        return mapUpsertResponses(
+        return mapUpsertResponsesSafe(
                 reqs,
                 req -> toUpsertResponse(upsertWithOptionalMetadata(scopedOwner, req))
         );
@@ -169,9 +175,21 @@ public class ExternalRagController {
                 .toList();
     }
 
-    private List<UpsertDocumentResponse> mapUpsertResponses(List<UpsertDocumentRequest> requests,
-                                                            Function<UpsertDocumentRequest, UpsertDocumentResponse> mapper) {
-        return requests.stream().map(mapper).toList();
+    /**
+     * Procesa cada documento de forma aislada: un fallo en un item no cancela el resto.
+     * Los items fallidos se omiten del resultado; el caller recibe los que sí se ingresaron.
+     */
+    private List<UpsertDocumentResponse> mapUpsertResponsesSafe(List<UpsertDocumentRequest> requests,
+                                                                Function<UpsertDocumentRequest, UpsertDocumentResponse> mapper) {
+        List<UpsertDocumentResponse> results = new ArrayList<>(requests.size());
+        for (UpsertDocumentRequest req : requests) {
+            try {
+                results.add(mapper.apply(req));
+            } catch (Exception e) {
+                log.warn("ext_rag batch_item_fail title='{}' cause={}", req.getTitle(), e.getMessage());
+            }
+        }
+        return results;
     }
 
     private boolean hasText(String value) {

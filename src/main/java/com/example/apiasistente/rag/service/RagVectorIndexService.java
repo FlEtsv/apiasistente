@@ -19,6 +19,7 @@ import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
+import org.apache.lucene.store.NIOFSDirectory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -83,8 +84,11 @@ public class RagVectorIndexService {
         Path dir = Path.of(indexDir).toAbsolutePath().normalize();
         Files.createDirectories(dir);
         this.indexPath = dir;
-        this.directory = FSDirectory.open(dir);
-        this.writer = new IndexWriter(directory, new IndexWriterConfig(new KeywordAnalyzer()));
+        // NIOFSDirectory en lugar de MMapDirectory/FSDirectory para evitar el crash 0xC0000005 en Windows.
+        // MMapDirectory mantiene handles de memoria mapeada que el JVM libera en shutdown y puede causar
+        // EXCEPTION_ACCESS_VIOLATION cuando los ficheros fueron eliminados o el proceso fue terminado bruscamente.
+        this.directory = openDirectory(dir);
+        this.writer = openIndexWriter(directory);
     }
 
     /**
@@ -128,19 +132,24 @@ public class RagVectorIndexService {
             indexLock.writeLock().unlock();
         }
 
-        // Paso 2: paginar BD y escribir en Lucene batch a batch.
+        // Paso 2: paginar BD por cursor (chunk_id) y escribir en Lucene batch a batch.
+        // Paginacion por cursor evita el coste O(offset) de OFFSET en corpus grandes (>100k vectores).
         // El fetch de BD ocurre SIN lock para no bloquear busquedas durante el rebuild.
-        int page = 0;
+        Long afterChunkId = null;
+        int pages = 0;
         int indexedVectors = 0;
         try {
             while (true) {
-                var slice = vectorRepo.findActiveIndexPage(PageRequest.of(page, REBUILD_PAGE_SIZE));
-                if (slice.isEmpty()) {
+                var rows = vectorRepo.findActiveIndexPageCursor(
+                        afterChunkId,
+                        PageRequest.of(0, REBUILD_PAGE_SIZE)
+                );
+                if (rows.isEmpty()) {
                     break;
                 }
 
-                List<IndexedVectorRecord> batch = new ArrayList<>(slice.getNumberOfElements());
-                for (var view : slice.getContent()) {
+                List<IndexedVectorRecord> batch = new ArrayList<>(rows.size());
+                for (var view : rows) {
                     double[] normalized = VectorMath.normalize(ollamaClient.fromJson(view.getEmbeddingJson()));
                     if (normalized.length == 0) {
                         continue;
@@ -153,6 +162,8 @@ public class RagVectorIndexService {
                     ));
                 }
 
+                afterChunkId = rows.get(rows.size() - 1).getChunkId();
+
                 if (!batch.isEmpty()) {
                     indexLock.writeLock().lock();
                     try {
@@ -164,13 +175,13 @@ public class RagVectorIndexService {
                 }
 
                 indexedVectors += batch.size();
-                if (!slice.hasNext()) {
+                pages++;
+                if (rows.size() < REBUILD_PAGE_SIZE) {
                     break;
                 }
-                page++;
             }
 
-            log.info("RAG HNSW rebuild completado pages={} vectors={}", page + 1, indexedVectors);
+            log.info("RAG HNSW rebuild completado pages={} vectors={}", pages, indexedVectors);
             int finalIndexedVectors = indexedVectors;
             ragOps().ifPresent(ops -> ops.recordIndexRebuild(trigger, finalIndexedVectors));
         } catch (Exception e) {
@@ -223,6 +234,24 @@ public class RagVectorIndexService {
     }
 
     /**
+     * Vacía el índice HNSW por completo sin tocar la BD.
+     * Usado exclusivamente por el reset total del corpus RAG.
+     */
+    public void clearIndex() {
+        indexLock.writeLock().lock();
+        try {
+            writer.deleteAll();
+            writer.commit();
+            log.info("RAG HNSW index vaciado (reset).");
+        } catch (IOException e) {
+            ragOps().ifPresent(ops -> ops.recordFailure("rag-index-clear", "No se pudo vaciar el indice HNSW en reset.", e));
+            throw new IllegalStateException("No se pudo vaciar el indice HNSW.", e);
+        } finally {
+            indexLock.writeLock().unlock();
+        }
+    }
+
+    /**
      * Busca candidatos semanticos en HNSW y filtra owners al final.
      * Usa readLock para permitir busquedas concurrentes sin bloquear entre si.
      */
@@ -245,7 +274,10 @@ public class RagVectorIndexService {
                 if (owners != null) {
                     ownerFilter.addAll(owners);
                 }
-                int fetchK = Math.max(limit, limit * Math.max(2, ownerFilter.size() * 3));
+                // Sin filtro de owner (corpus global) usamos 4x para mejorar el recall antes del reranking.
+                // Con filtro escalamos segun el numero de owners como antes.
+                int ownerMultiplier = ownerFilter.isEmpty() ? 4 : Math.max(3, ownerFilter.size() * 3);
+                int fetchK = Math.max(limit, limit * ownerMultiplier);
                 IndexSearcher searcher = new IndexSearcher(reader);
                 var query = new KnnFloatVectorQuery(VECTOR_FIELD, toFloatArray(queryVector), fetchK);
                 ScoreDoc[] docs = searcher.search(query, fetchK).scoreDocs;
@@ -300,6 +332,36 @@ public class RagVectorIndexService {
      */
     public String indexLocation() {
         return indexPath.toString();
+    }
+
+    /**
+     * Abre el directorio Lucene usando NIOFSDirectory, que no usa memory-mapped files.
+     * Esto evita el crash 0xC0000005 en Windows que ocurre cuando MMapDirectory intenta
+     * liberar handles de memoria después de que los ficheros del índice fueron eliminados
+     * o el proceso fue terminado bruscamente.
+     */
+    private static Directory openDirectory(Path dir) throws IOException {
+        return new NIOFSDirectory(dir);
+    }
+
+    /**
+     * Abre el IndexWriter, limpiando el índice si está corrupto.
+     * Un índice corrupto ocurre cuando el proceso fue matado mientras escribía (Lucene deja
+     * el write.lock y segmentos a medias). En ese caso lo borramos y empezamos desde cero:
+     * el rebuild desde BD recupera el estado al arrancar.
+     */
+    private static IndexWriter openIndexWriter(Directory directory) throws IOException {
+        IndexWriterConfig config = new IndexWriterConfig(new KeywordAnalyzer());
+        try {
+            return new IndexWriter(directory, config);
+        } catch (Exception e) {
+            log.warn("Indice HNSW corrupto o bloqueado, limpiando para rebuild desde BD: {}", e.getMessage());
+            // Borrar todos los ficheros del directorio y reabrir con índice vacío.
+            for (String file : directory.listAll()) {
+                try { directory.deleteFile(file); } catch (Exception ignored) {}
+            }
+            return new IndexWriter(directory, new IndexWriterConfig(new KeywordAnalyzer()));
+        }
     }
 
     @PreDestroy

@@ -322,63 +322,53 @@ public class RagService {
 
     // ----------------- RETRIEVAL -----------------
 
+    /**
+     * Retrieval sin filtro de propietario: busca en todo el corpus compartido.
+     * Punto de entrada principal del chat RAG. No hay aislamiento por usuario en RAG.
+     */
+    public RetrievalResult retrieveShared(String query) {
+        return retrieveForOwners(query, null);
+    }
+
+    /** Alias de compatibilidad — redirige al corpus compartido. */
     public List<ScoredChunk> retrieveTopK(String query) {
-        return retrieveForOwners(query, List.of(GLOBAL_OWNER)).contextChunks();
+        return retrieveShared(query).contextChunks();
     }
 
     public List<ScoredChunk> retrieveTopKForOwnerOrGlobal(String query, String owner) {
-        return retrieveForOwnerOrGlobal(query, owner).contextChunks();
+        return retrieveShared(query).contextChunks();
     }
 
     public RetrievalResult retrieveForOwnerOrGlobal(String query, String owner) {
-        String normalizedOwner = normalizeOwner(owner);
-        if (GLOBAL_OWNER.equalsIgnoreCase(normalizedOwner)) {
-            return retrieveForOwners(query, List.of(GLOBAL_OWNER));
-        }
-        return retrieveForOwners(query, List.of(GLOBAL_OWNER, normalizedOwner));
+        return retrieveShared(query);
     }
 
     public List<ScoredChunk> retrieveTopKForOwnerScopedAndGlobal(String query,
                                                                  String owner,
                                                                  String scopedOwner) {
-        return retrieveForOwnerScopedAndGlobal(query, owner, scopedOwner).contextChunks();
+        return retrieveShared(query).contextChunks();
     }
 
     public RetrievalResult retrieveForOwnerScopedAndGlobal(String query,
                                                            String owner,
                                                            String scopedOwner) {
-        List<String> owners = new ArrayList<>();
-        owners.add(GLOBAL_OWNER);
-
-        String normalizedOwner = normalizeOwner(owner);
-        if (!GLOBAL_OWNER.equalsIgnoreCase(normalizedOwner)) {
-            owners.add(normalizedOwner);
-        }
-
-        if (hasText(scopedOwner)) {
-            owners.add(scopedOwner.trim());
-        }
-
-        return retrieveForOwners(query, owners);
+        return retrieveShared(query);
     }
 
     public RagContextStatsDto contextStatsForOwnerOrGlobal(String owner) {
-        String normalizedOwner = normalizeOwner(owner);
-        List<String> owners = normalizeOwners(List.of(normalizedOwner));
+        // Corpus unificado: se devuelven siempre las metricas globales del corpus completo.
+        long totalDocuments = docRepo.countByActiveTrue();
+        long totalChunks = chunkRepo.countActive();
 
-        long totalDocuments = docRepo.countByOwnerInAndActiveTrue(owners);
-        long totalChunks = chunkRepo.countActiveByOwners(owners);
+        long globalDocuments = totalDocuments;
+        long globalChunks = totalChunks;
+        long ownerDocuments = 0;
+        long ownerChunks = 0;
 
-        long globalDocuments = docRepo.countByOwnerAndActiveTrue(GLOBAL_OWNER);
-        long globalChunks = chunkRepo.countActiveByOwner(GLOBAL_OWNER);
-
-        long ownerDocuments = GLOBAL_OWNER.equals(normalizedOwner) ? 0 : docRepo.countByOwnerAndActiveTrue(normalizedOwner);
-        long ownerChunks = GLOBAL_OWNER.equals(normalizedOwner) ? 0 : chunkRepo.countActiveByOwner(normalizedOwner);
-
-        Instant lastUpdatedAt = docRepo.findLastUpdateAtByOwners(owners);
+        Instant lastUpdatedAt = docRepo.findLastActiveUpdateAt();
 
         return new RagContextStatsDto(
-                normalizedOwner,
+                GLOBAL_OWNER,
                 totalDocuments,
                 totalChunks,
                 globalDocuments,
@@ -393,19 +383,20 @@ public class RagService {
     }
 
     public List<ScoredChunk> retrieveTopKForOwners(String query, List<String> owners) {
-        return retrieveForOwners(query, owners).contextChunks();
+        return retrieveShared(query).contextChunks();
     }
 
     /**
-     * Retrieval hibrido:
-     * - HNSW nos da candidatos semanticos rapidos.
-     * - Luego hacemos rescoring lexical y MMR sobre un conjunto pequeno.
+     * Retrieval hibrido sin filtro de propietario cuando owners == null.
+     * owners == null => busca en TODO el corpus (sin filtrar por owner en HNSW).
+     * owners != null (legacy) => filtra por los owners indicados.
      */
     public RetrievalResult retrieveForOwners(String query, List<String> owners) {
         long embeddingStartNanos = System.nanoTime();
         double[] queryEmbedding = getCachedEmbedding(query);
         double queryEmbeddingTimeMs = nanosToMillis(embeddingStartNanos);
-        List<String> ownersClean = normalizeOwners(owners);
+        boolean noOwnerFilter = owners == null;
+        List<String> ownersClean = noOwnerFilter ? List.of(GLOBAL_OWNER) : normalizeOwners(owners);
         if (queryEmbedding.length == 0) {
             return finalizeRetrieval(
                     query,
@@ -418,12 +409,15 @@ public class RagService {
         }
 
         int retrievalTopK = Math.max(1, topK);
-        int semanticCandidateLimit = Math.max(retrievalTopK, rerankCandidates) * Math.max(2, ownersClean.size());
+        // Sin filtro de propietario usamos factor 2 fijo; con filtro escalamos por numero de owners.
+        int semanticCandidateLimit = Math.max(retrievalTopK, rerankCandidates)
+                * (noOwnerFilter ? 2 : Math.max(2, ownersClean.size()));
         long retrievalStartNanos = System.nanoTime();
 
         // Fase 1: recuperamos candidatos semanticos baratos desde HNSW.
+        // null como owners => sin filtro de propietario => todos los documentos activos.
         List<RagVectorIndexService.SearchHit> searchHits = vectorIndexService.search(
-                ownersClean,
+                noOwnerFilter ? null : ownersClean,
                 queryEmbedding,
                 semanticCandidateLimit
         );

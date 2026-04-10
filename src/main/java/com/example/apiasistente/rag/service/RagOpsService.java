@@ -39,6 +39,7 @@ public class RagOpsService {
     private final KnowledgeChunkRepository chunkRepo;
     private final KnowledgeVectorRepository vectorRepo;
     private final ObjectProvider<RagVectorIndexService> vectorIndexServiceProvider;
+    private final ObjectProvider<RagMaintenanceService> maintenanceServiceProvider;
     private final int topK;
     private final int chunkSize;
     private final int chunkOverlap;
@@ -70,6 +71,7 @@ public class RagOpsService {
                          KnowledgeChunkRepository chunkRepo,
                          KnowledgeVectorRepository vectorRepo,
                          ObjectProvider<RagVectorIndexService> vectorIndexServiceProvider,
+                         ObjectProvider<RagMaintenanceService> maintenanceServiceProvider,
                          @Value("${rag.top-k:10}") int topK,
                          @Value("${rag.chunk.size:900}") int chunkSize,
                          @Value("${rag.chunk.overlap:150}") int chunkOverlap,
@@ -81,6 +83,7 @@ public class RagOpsService {
         this.chunkRepo = chunkRepo;
         this.vectorRepo = vectorRepo;
         this.vectorIndexServiceProvider = vectorIndexServiceProvider;
+        this.maintenanceServiceProvider = maintenanceServiceProvider;
         this.topK = topK;
         this.chunkSize = chunkSize;
         this.chunkOverlap = chunkOverlap;
@@ -292,6 +295,68 @@ public class RagOpsService {
             recentEvents.clear();
         }
         return status();
+    }
+
+    /**
+     * Borra todo el corpus RAG: documentos, chunks, vectores e índice HNSW.
+     * Operación irreversible. Pensada para reiniciar desde cero el conocimiento del sistema.
+     *
+     * Sin @Transactional externo: cada deleteAllInBatch() tiene su propia transacción corta
+     * para no retener locks durante toda la operación y evitar el lock wait timeout de MySQL.
+     */
+    public RagOpsStatusDto resetAll() {
+        // 1. Pausar el scheduler de mantenimiento para que no compita por locks durante el borrado.
+        RagMaintenanceService maintenanceService = maintenanceServiceProvider.getIfAvailable();
+        boolean maintenancePaused = false;
+        if (maintenanceService != null) {
+            maintenanceService.pause();
+            maintenancePaused = true;
+            // Esperar a que termine el barrido en curso (máx 10 s).
+            long deadline = System.currentTimeMillis() + 10_000L;
+            while (maintenanceService.isRunning() && System.currentTimeMillis() < deadline) {
+                try { Thread.sleep(250); } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+
+        try {
+            long docCount = docRepo.count();
+            long chunkCount = chunkRepo.count();
+            long vectorCount = vectorRepo.count();
+
+            // 2. Borrar en orden de FK (cada llamada es su propia transacción corta).
+            vectorRepo.deleteAllInBatch();
+            chunkRepo.deleteAllInBatch();
+            docRepo.deleteAllInBatch();
+
+            // 3. Limpiar el índice HNSW.
+            RagVectorIndexService indexService = vectorIndexServiceProvider.getIfAvailable();
+            if (indexService != null) {
+                try {
+                    indexService.clearIndex();
+                } catch (Exception e) {
+                    log.warn("RAG reset: error al limpiar indice HNSW (la BD ya fue vaciada)", e);
+                }
+            }
+
+            deletedDocuments.addAndGet(docCount);
+            lastDeleteAt = Instant.now();
+            lastDeleteSummary = "Reset completo: " + docCount + " docs, " + chunkCount + " chunks, " + vectorCount + " vectores.";
+            recordEvent(
+                    "WARN",
+                    "RESET_ALL",
+                    "Reset completo del corpus RAG",
+                    "docs=" + docCount + " chunks=" + chunkCount + " vectors=" + vectorCount
+            );
+            return status();
+        } finally {
+            // 4. Reanudar el scheduler independientemente de si el reset fue exitoso o no.
+            if (maintenancePaused && maintenanceService != null) {
+                maintenanceService.resume();
+            }
+        }
     }
 
     /**

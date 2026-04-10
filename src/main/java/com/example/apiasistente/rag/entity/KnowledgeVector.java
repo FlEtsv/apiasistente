@@ -6,7 +6,6 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
-import jakarta.persistence.Lob;
 import jakarta.persistence.MapsId;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.PrePersist;
@@ -44,7 +43,6 @@ public class KnowledgeVector {
     @JoinColumn(name = "chunk_id")
     private KnowledgeChunk chunk;
 
-    @Lob
     @Column(name = "embedding_json", columnDefinition = "LONGTEXT", nullable = false)
     private String embeddingJson;
 

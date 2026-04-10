@@ -8,9 +8,19 @@ server:
 spring:
   # ConfiguraciÃƒÂ³n de base de datos para persistir sesiones, documentos y embeddings.
   datasource:
-    url: jdbc:mysql://${MYSQL_HOST:apiasistente_mysql}:${MYSQL_PORT:3306}/${MYSQL_DB:apiasistente_db}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DB:apiasistente_db}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
     username: ${MYSQL_USER:apiuser}
     password: ${MYSQL_PASSWORD:apipassword}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 8000
+      idle-timeout: 60000
+      max-lifetime: 180000
+      keepalive-time: 30000
+      validation-timeout: 3000
+      leak-detection-threshold: 15000
+      initialization-fail-timeout: -1
 
   jpa:
     hibernate:
@@ -76,9 +86,9 @@ rag:
     # Cuantos chunks comprimidos terminan dentro del prompt final.
     max-chunks: 5
     # Maximo de fragmentos relevantes que se conservan por chunk.
-    max-snippets-per-chunk: 2
+    max-snippets-per-chunk: 3
     # Recorte maximo por chunk una vez comprimido.
-    max-chars-per-chunk: 420
+    max-chars-per-chunk: 600
   rerank:
     # Numero de candidatos semÃƒÂ¡nticos previos al rerank con MMR.
     candidates: 10
@@ -100,7 +110,7 @@ rag:
     # Puntaje minimo para aceptar un chunk en la busqueda inicial.
     min: 0.22
     # Umbral minimo para considerar que existe evidencia util en la base.
-    evidence-threshold: 0.45
+    evidence-threshold: 0.38
   maintenance:
     # Activa el robot que recorre el corpus en segundo plano.
     enabled: true

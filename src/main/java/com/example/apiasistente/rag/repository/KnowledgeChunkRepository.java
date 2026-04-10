@@ -95,6 +95,16 @@ public interface KnowledgeChunkRepository extends JpaRepository<KnowledgeChunk, 
           and lower(c.tags) like concat('%', lower(:term), '%')
     """)
     long countActiveTagMatches(@Param("owners") List<String> owners, @Param("term") String term);
+
+    /** Busqueda de tags sin filtro de propietario: busca en todo el corpus compartido. */
+    @Query("""
+        select count(c)
+        from KnowledgeChunk c
+        where c.document.active = true
+          and c.tags is not null
+          and lower(c.tags) like concat('%', lower(:term), '%')
+    """)
+    long countActiveTagMatchesAll(@Param("term") String term);
 }
 
 

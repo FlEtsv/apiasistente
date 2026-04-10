@@ -219,7 +219,9 @@ public final class ChatPromptSignals {
             );
         }
 
-        return RagDecision.off("Consulta general sin dependencia de conocimiento externo");
+        // Por defecto se intenta RAG en modo PREFERRED: la compuerta decide si hay contenido relevante.
+        // Esto permite que preguntas sobre temas del corpus (ej: "nasa") activen retrieval via metadata probe.
+        return RagDecision.preferred("Corpus disponible; la compuerta decidira si hay contenido relevante", List.of());
     }
 
     /**

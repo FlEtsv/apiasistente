@@ -2,7 +2,6 @@ package com.example.apiasistente.rag.repository;
 
 import com.example.apiasistente.rag.entity.KnowledgeVector;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Slice;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -33,12 +32,18 @@ public interface KnowledgeVectorRepository extends JpaRepository<KnowledgeVector
     """)
     List<VectorPayloadView> findPayloadByChunkIds(@Param("chunkIds") Collection<Long> chunkIds);
 
+    /**
+     * Paginacion por cursor (afterChunkId) para evitar el coste O(offset) de OFFSET en corpus grandes.
+     * Pasar afterChunkId=null para obtener la primera pagina.
+     */
     @Query("""
         select v.chunkId as chunkId, v.chunk.document.owner as owner, v.embeddingJson as embeddingJson
         from KnowledgeVector v
         where v.chunk.document.active = true
+          and (:afterChunkId is null or v.chunkId > :afterChunkId)
+        order by v.chunkId asc
     """)
-    Slice<IndexedVectorView> findActiveIndexPage(Pageable pageable);
+    List<IndexedVectorView> findActiveIndexPageCursor(@Param("afterChunkId") Long afterChunkId, Pageable pageable);
 
     @Query("""
         select coalesce(sum(length(v.embeddingJson)), 0)

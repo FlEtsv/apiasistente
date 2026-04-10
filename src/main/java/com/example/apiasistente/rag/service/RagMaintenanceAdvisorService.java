@@ -23,6 +23,7 @@ import java.util.Locale;
 public class RagMaintenanceAdvisorService {
 
     private static final int MAX_CONTENT_CHARS = 2800;
+    private static final int INCOHERENCE_SAMPLE_CHARS = 1200;
 
     private final OllamaClient ollamaClient;
     private final ChatModelSelector chatModelSelector;
@@ -104,6 +105,7 @@ public class RagMaintenanceAdvisorService {
             case BAD_STRUCTURE -> "problema de estructura, redundancia o chunking deficiente";
             case DUPLICATE_DOCUMENT -> "documento duplicado o muy redundante";
             case UNUSED_DOCUMENT -> "documento sin uso reciente";
+            case INCOHERENT_CONTENT -> "fragmentos contradictorios o incoherentes dentro del mismo documento";
             default -> "hallazgo de mantenimiento";
         };
 
@@ -162,6 +164,76 @@ public class RagMaintenanceAdvisorService {
                 clip(ragCase.getOriginalSnippet()),
                 clip(ragCase.getProposedContent())
         );
+    }
+
+    /**
+     * Analiza una muestra de chunks del mismo documento y detecta incoherencias semanticas.
+     * Devuelve un Advice con decision=RESTRUCTURE si hay contradicciones, KEEP si es coherente.
+     */
+    public Advice detectIncoherence(String documentTitle, String owner, List<String> chunkSamples) {
+        if (chunkSamples == null || chunkSamples.size() < 2) {
+            return Advice.fallback(RagMaintenanceAction.KEEP, "Muestra insuficiente para detectar incoherencias.", null, "fallback");
+        }
+
+        String model = chatModelSelector.resolveChatModel(ChatModelSelector.FAST_ALIAS);
+        String systemPrompt = incoherenceSystemPrompt();
+        String userPrompt = buildIncoherenceUserPrompt(documentTitle, owner, chunkSamples);
+
+        try {
+            String raw = ollamaClient.chat(
+                    List.of(
+                            new OllamaClient.Message("system", systemPrompt),
+                            new OllamaClient.Message("user", userPrompt)
+                    ),
+                    model
+            );
+            DecisionPayload payload = parsePayload(raw);
+            RagMaintenanceAction decision = payload.decision == null
+                    ? RagMaintenanceAction.KEEP
+                    : parseAction(payload.decision, RagMaintenanceAction.KEEP);
+
+            return new Advice(
+                    decision,
+                    trimToNull(payload.reason) == null ? "Sin razon detallada." : payload.reason.trim(),
+                    trimToNull(payload.normalizedContent),
+                    raw == null ? "" : raw.trim(),
+                    model
+            );
+        } catch (Exception e) {
+            return Advice.fallback(RagMaintenanceAction.KEEP, "Fallo analisis de incoherencia: " + safeMessage(e), null, model);
+        }
+    }
+
+    private String incoherenceSystemPrompt() {
+        return """
+                Eres un auditor de coherencia de corpus RAG.
+                Tu objetivo es detectar contradicciones, inconsistencias factuales o fragmentos que se contradicen entre si dentro del mismo documento.
+                Analiza los fragmentos del documento y decide:
+                - RESTRUCTURE: si hay contradicciones claras, datos contradictorios, o el documento mezcla informacion incompatible que confunde al retrieval.
+                - KEEP: si los fragmentos son coherentes entre si, aunque traten temas variados.
+                - DELETE: solo si la incoherencia es tan grave que el documento entero carece de valor.
+                Si recomiendas RESTRUCTURE, devuelve en normalizedContent una version reconciliada y limpia del contenido util.
+                Devuelve solo JSON valido con este esquema exacto:
+                {"decision":"DELETE|RESTRUCTURE|KEEP","reason":"texto corto describiendo la incoherencia o la razon","normalizedContent":"texto reconciliado o vacio si KEEP"}
+                No uses markdown. No anadas texto fuera del JSON.
+                """;
+    }
+
+    private String buildIncoherenceUserPrompt(String documentTitle, String owner, List<String> chunkSamples) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Documento: ").append(documentTitle).append("\n");
+        sb.append("Propietario: ").append(owner).append("\n\n");
+        sb.append("Fragmentos a analizar (").append(chunkSamples.size()).append(" muestras):\n\n");
+        for (int i = 0; i < chunkSamples.size(); i++) {
+            String sample = chunkSamples.get(i);
+            String trimmed = sample == null ? "" : sample.trim();
+            if (trimmed.length() > INCOHERENCE_SAMPLE_CHARS) {
+                trimmed = trimmed.substring(0, INCOHERENCE_SAMPLE_CHARS) + "...";
+            }
+            sb.append("--- Fragmento ").append(i + 1).append(" ---\n");
+            sb.append(trimmed).append("\n\n");
+        }
+        return sb.toString();
     }
 
     private DecisionPayload parsePayload(String raw) throws Exception {

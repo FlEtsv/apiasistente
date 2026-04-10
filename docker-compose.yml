@@ -3,11 +3,27 @@ services:
     image: mysql:8.4
     container_name: apiasistente_mysql
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
     environment:
       MYSQL_DATABASE: apiasistente_db
       MYSQL_USER: apiuser
       MYSQL_PASSWORD: apipassword
       MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_INNODB_BUFFER_POOL_SIZE: 256M
+    command: >
+      --innodb-buffer-pool-size=256M
+      --max-connections=100
+      --thread-pool-size=8
+      --innodb-flush-log-at-trx-commit=2
+      --query-cache-type=0
+      --performance-schema=OFF
     volumes:
       - mysql-data:/var/lib/mysql
     healthcheck:

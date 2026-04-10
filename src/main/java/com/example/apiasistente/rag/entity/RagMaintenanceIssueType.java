@@ -8,5 +8,7 @@ public enum RagMaintenanceIssueType {
     DUPLICATE_DOCUMENT,
     UNUSED_DOCUMENT,
     ILLEGIBLE_CONTENT,
-    LOW_VALUE_CONTENT
+    LOW_VALUE_CONTENT,
+    /** Chunks del mismo documento contienen hechos contradictorios o incoherentes entre si. */
+    INCOHERENT_CONTENT
 }

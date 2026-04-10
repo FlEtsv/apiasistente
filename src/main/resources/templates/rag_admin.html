@@ -23,6 +23,12 @@
         <h2 class="font-semibold">Subir documento</h2>
         <input id="title" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2"
                placeholder="Titulo (ej: Contexto - Endpoints)"/>
+        <div class="flex flex-col sm:flex-row gap-2">
+            <input id="source" class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm"
+                   placeholder="Fuente (ej: manual, docs, notas) — opcional"/>
+            <input id="tags" class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm"
+                   placeholder="Tags (ej: java,spring,config) — opcional"/>
+        </div>
         <textarea id="content" rows="10"
                   class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 font-mono text-xs"
                   placeholder="Pega aqui el contenido... (SANITIZA passwords)"></textarea>
@@ -52,6 +58,23 @@
             Subir archivos como docs
         </button>
         <div id="log" class="text-xs text-slate-300 font-mono whitespace-pre-wrap break-words"></div>
+    </div>
+
+    <!-- Zona de peligro -->
+    <div class="bg-red-950/40 border border-red-700/50 rounded-2xl p-4 space-y-3">
+        <div class="flex items-center gap-2">
+            <h2 class="font-semibold text-red-400">Zona de peligro</h2>
+            <span class="text-xs text-red-500 bg-red-950 px-2 py-0.5 rounded-full">IRREVERSIBLE</span>
+        </div>
+        <p class="text-xs text-slate-400">
+            Elimina <strong class="text-slate-200">todos</strong> los documentos, chunks, vectores e índice HNSW.
+            El corpus quedará vacío. No se puede deshacer.
+        </p>
+        <button id="btnResetRag"
+                class="px-4 py-2 rounded-xl bg-red-700 hover:bg-red-600 border border-red-500 text-white font-semibold w-full sm:w-auto">
+            Reiniciar RAG desde cero
+        </button>
+        <div id="logReset" class="text-xs text-slate-300 font-mono whitespace-pre-wrap break-words"></div>
     </div>
 </div>
 

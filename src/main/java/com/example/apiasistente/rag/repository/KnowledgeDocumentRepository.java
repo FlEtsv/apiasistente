@@ -75,6 +75,19 @@ public interface KnowledgeDocumentRepository extends JpaRepository<KnowledgeDocu
           )
     """)
     long countActiveMetadataMatches(@Param("owners") Collection<String> owners, @Param("term") String term);
+
+    /** Busqueda de metadata sin filtro de propietario: busca en todo el corpus compartido. */
+    @Query("""
+        select count(d)
+        from KnowledgeDocument d
+        where d.active = true
+          and (
+            lower(d.title) like concat('%', lower(:term), '%')
+            or lower(d.source) like concat('%', lower(:term), '%')
+            or lower(coalesce(d.referenceUrl, '')) like concat('%', lower(:term), '%')
+          )
+    """)
+    long countActiveMetadataMatchesAll(@Param("term") String term);
 }
 
 

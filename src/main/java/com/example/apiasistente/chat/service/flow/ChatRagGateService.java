@@ -67,6 +67,9 @@ public class ChatRagGateService {
         this.decisionEngine = decisionEngine;
     }
 
+    /**
+     * Evaluates RAG eligibility using cached corpus stats; checks query validity and metadata matches
+     */
     public GateDecision evaluate(ChatTurnPlanner.TurnPlan turnPlan,
                                  ChatPromptSignals.RagDecision requestedRagDecision,
                                  String userText,
@@ -79,10 +82,13 @@ public class ChatRagGateService {
                 ? ChatPromptSignals.RagDecision.off("Sin plan de turno")
                 : turnPlan.ragDecision());
         if (ragDecision == null || !ragDecision.enabled()) {
-            return GateDecision.skip("rag-off", resolveOwners(owner, scopedOwner), 0, 0, List.of(), false);
+            return GateDecision.skip("rag-off", List.of(RagService.GLOBAL_OWNER), 0, 0, List.of(), false);
         }
 
-        List<String> owners = resolveOwners(owner, scopedOwner);
+        // Corpus unificado: no hay aislamiento por usuario en RAG.
+        // Todos los documentos son accesibles a cualquier usuario del sistema.
+        List<String> owners = List.of(RagService.GLOBAL_OWNER);
+
         ChatRagDecisionEngine.DecisionAssessment assessment = decisionEngine.assessQuery(
                 userText,
                 turnPlan,
@@ -93,18 +99,18 @@ public class ChatRagGateService {
             return GateDecision.allow("gate-disabled", owners, 0, 0, List.of(), assessment);
         }
 
-        String corpusCacheKey = String.join(",", owners);
+        // Cache de tamano del corpus compartido (sin filtro de propietario).
         long now = System.currentTimeMillis();
-        CorpusCacheEntry cached = corpusCache.get(corpusCacheKey);
+        CorpusCacheEntry cached = corpusCache.get("shared");
         long activeDocuments;
         long activeChunks;
         if (cached != null && cached.expiresAt() > now) {
             activeDocuments = cached.docs();
             activeChunks = cached.chunks();
         } else {
-            activeDocuments = documentRepository.countByOwnerInAndActiveTrue(owners);
-            activeChunks = chunkRepository.countActiveByOwners(owners);
-            corpusCache.put(corpusCacheKey, new CorpusCacheEntry(activeDocuments, activeChunks, now + CORPUS_CACHE_TTL_MS));
+            activeDocuments = documentRepository.countByActiveTrue();
+            activeChunks = chunkRepository.countActive();
+            corpusCache.put("shared", new CorpusCacheEntry(activeDocuments, activeChunks, now + CORPUS_CACHE_TTL_MS));
         }
 
         // Si no hay corpus activo, no tiene sentido pagar la latencia del embedding.
@@ -133,7 +139,12 @@ public class ChatRagGateService {
             return GateDecision.allow("adjunto-documental", owners, activeDocuments, activeChunks, List.of("adjunto"), assessment);
         }
 
-        if (!assessment.needsRag()) {
+        // Solo saltamos con la decision del engine si el LLM lo confirmo o si la query es claramente general.
+        // Para TECHNICAL y OTHER con assessment solo heuristico dejamos pasar al probe y al HNSW:
+        // el assessment heuristico no puede saber si el corpus tiene contenido relevante para esas queries.
+        if (!assessment.needsRag()
+                && (assessment.usedLlm()
+                || assessment.queryType() == ChatRagDecisionEngine.QueryType.GENERAL)) {
             return GateDecision.skip(
                     "decision-engine-no-rag",
                     owners,
@@ -161,14 +172,14 @@ public class ChatRagGateService {
             return GateDecision.skip("preferred-query-generica", owners, activeDocuments, activeChunks, probeTerms, false, assessment);
         }
 
+        // Probe contra el corpus completo (sin filtro de propietario).
         List<String> matchedTerms = new ArrayList<>();
         for (String term : probeTerms) {
-            long metadataHits = documentRepository.countActiveMetadataMatches(owners, term);
-            long tagHits = metadataHits > 0 ? 0 : chunkRepository.countActiveTagMatches(owners, term);
+            long metadataHits = documentRepository.countActiveMetadataMatchesAll(term);
+            long tagHits = metadataHits > 0 ? 0 : chunkRepository.countActiveTagMatchesAll(term);
             if (metadataHits > 0 || tagHits > 0) {
                 matchedTerms.add(term);
                 // Un solo termino coincidente es suficiente para habilitar RAG.
-                // No seguimos buscando para evitar queries innecesarias.
                 break;
             }
         }
@@ -192,19 +203,14 @@ public class ChatRagGateService {
                 || assessment.queryType() == ChatRagDecisionEngine.QueryType.REALTIME) {
             return true;
         }
+        // Para TECHNICAL y OTHER no podemos descartar el corpus con la probe de metadata:
+        // los documentos del scraper o fuentes externas pueden tener contenido relevante aunque
+        // sus titulos/fuentes/tags no coincidan con los terminos de la query. Dejamos que HNSW decida.
+        if (assessment.queryType() == ChatRagDecisionEngine.QueryType.TECHNICAL
+                || assessment.queryType() == ChatRagDecisionEngine.QueryType.OTHER) {
+            return true;
+        }
         return assessment.needsExternalContext() || assessment.confidence() < 0.65;
-    }
-
-    private List<String> resolveOwners(String owner, String scopedOwner) {
-        LinkedHashSet<String> owners = new LinkedHashSet<>();
-        owners.add(RagService.GLOBAL_OWNER);
-        if (owner != null && !owner.isBlank()) {
-            owners.add(owner.trim());
-        }
-        if (scopedOwner != null && !scopedOwner.isBlank()) {
-            owners.add(scopedOwner.trim());
-        }
-        return List.copyOf(owners);
     }
 
     private List<String> selectProbeTerms(String text) {

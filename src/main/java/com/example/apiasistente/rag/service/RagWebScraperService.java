@@ -1,6 +1,7 @@
 package com.example.apiasistente.rag.service;
 
 import com.example.apiasistente.rag.config.RagWebScraperProperties;
+import com.example.apiasistente.rag.repository.KnowledgeDocumentRepository;
 import com.example.apiasistente.setup.service.SetupConfigService;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
@@ -10,13 +11,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.time.Instant;
-import java.util.HexFormat;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -30,17 +25,19 @@ public class RagWebScraperService {
     private final RagWebScraperProperties properties;
     private final SetupConfigService setupConfigService;
     private final RagService ragService;
+    private final KnowledgeDocumentRepository docRepo;
 
     private final AtomicBoolean running = new AtomicBoolean(false);
-    private final ConcurrentHashMap<String, String> lastHashByUrl = new ConcurrentHashMap<>();
     private volatile long lastRunAtMs = 0L;
 
     public RagWebScraperService(RagWebScraperProperties properties,
                                 SetupConfigService setupConfigService,
-                                RagService ragService) {
+                                RagService ragService,
+                                KnowledgeDocumentRepository docRepo) {
         this.properties = properties;
         this.setupConfigService = setupConfigService;
         this.ragService = ragService;
+        this.docRepo = docRepo;
     }
 
     @Scheduled(
@@ -120,38 +117,76 @@ public class RagWebScraperService {
         if (title.isBlank()) {
             title = fallbackTitleFromUrl(url);
         }
-        String bodyText = doc.body() != null ? trim(doc.body().text()) : trim(doc.text());
+
+        // Extrae el contenido principal ignorando nav, footer, aside y scripts.
+        // Prioriza etiquetas semánticas (article, main, section[role=main]);
+        // si no hay ninguna, cae al body completo como fallback.
+        String bodyText = extractMainContent(doc);
         if (bodyText.isBlank()) {
             return false;
         }
 
-        String clippedBody = clip(bodyText, Math.max(1000, properties.getMaxCharsPerPage()));
-        String content = """
-                Fuente web: %s
-                Titulo: %s
-                Extraido en: %s
-
-                %s
-                """.formatted(url, title, Instant.now(), clippedBody).trim();
-
-        String hash = sha256(content);
-        String previous = lastHashByUrl.get(url);
-        if (hash.equals(previous)) {
+        // Descartamos páginas con contenido insignificante (error pages, redirects con body mínimo).
+        if (bodyText.length() < 120) {
+            log.debug("rag_scraper url='{}' skip=contenido-minimo chars={}", url, bodyText.length());
             return false;
         }
 
-        String documentTitle = "Web :: " + title;
-        ragService.upsertStructuredDocumentForOwner(
+        // Clip respetando límite de párrafo/frase para no cortar a mitad.
+        String clippedBody = clipAtBoundary(bodyText, Math.max(1000, properties.getMaxCharsPerPage()));
+
+        // No incluimos Instant.now() en el contenido: variaría en cada run aunque la página no haya cambiado,
+        // impidiendo la deduplicación por fingerprint de RagService.
+        String content = """
+                Fuente web: %s
+                Titulo: %s
+
+                %s
+                """.formatted(url, title, clippedBody).trim();
+
+        // BUG FIX: dos URLs con el mismo <title> colisionarían en el mismo documentTitle
+        // → RagService archiva y recrea en cada scrape (loop infinito).
+        // Solución: incluimos un tag corto del URL para garantizar unicidad por URL.
+        String urlTag = "[" + Integer.toHexString(url.hashCode() & 0x0FFFFFFF) + "]";
+        String documentTitle = trim("Web :: " + title, 188) + " " + urlTag;
+
+        // Snapshot del fingerprint antes del upsert para detectar si hubo cambio real.
+        String fingerprintBefore = docRepo
+                .findFirstByOwnerAndTitleIgnoreCaseAndActiveTrue(config.owner(), documentTitle)
+                .map(d -> d.getContentFingerprint() == null ? "" : d.getContentFingerprint())
+                .orElse(null); // null = doc no existía → siempre es nuevo
+
+        var after = ragService.upsertStructuredDocumentForOwner(
                 config.owner(),
-                trim(documentTitle, 200),
+                documentTitle,
                 content,
                 config.source(),
                 config.tags(),
                 url,
                 List.of()
         );
-        lastHashByUrl.put(url, hash);
-        return true;
+        // "actualizado" = doc nuevo (fingerprintBefore null) o fingerprint cambió.
+        String fingerprintAfter = after.getContentFingerprint() == null ? "" : after.getContentFingerprint();
+        return fingerprintBefore == null || !fingerprintBefore.equals(fingerprintAfter);
+    }
+
+    /**
+     * Extrae el contenido semántico principal de la página.
+     * Elimina nav, header, footer, aside, scripts e iframes antes de leer el texto,
+     * y prioriza etiquetas de contenido (article, main, [role=main]) si existen.
+     */
+    private String extractMainContent(Document doc) {
+        // Clonar para no mutar el documento original.
+        Document clean = doc.clone();
+        clean.select("nav, header, footer, aside, script, style, noscript, iframe, [role=navigation], [role=banner], [role=contentinfo], .cookie-banner, .ads, .advertisement").remove();
+
+        // Buscar contenedor principal semántico.
+        String mainText = clean.select("article, main, [role=main], .main-content, .post-content, .entry-content, #content, #main").text();
+        if (!mainText.isBlank() && mainText.length() >= 100) {
+            return mainText.trim();
+        }
+        // Fallback al body limpio.
+        return trim(clean.body() != null ? clean.body().text() : "");
     }
 
     private String safeUserAgent(String value) {
@@ -173,11 +208,31 @@ public class RagWebScraperService {
         }
     }
 
-    private String clip(String value, int maxChars) {
-        if (value == null || value.length() <= maxChars) {
-            return value;
+    /**
+     * Recorta el texto respetando límites de párrafo o frase para no cortar a mitad de contenido.
+     * Si no hay ningún límite natural en el último 30% del texto, corta duro como fallback.
+     */
+    private String clipAtBoundary(String text, int maxChars) {
+        if (text == null || text.length() <= maxChars) {
+            return text == null ? "" : text;
         }
-        return value.substring(0, maxChars).trim();
+        // Buscar último salto de párrafo o fin de frase antes del límite.
+        int lastParagraph = text.lastIndexOf("\n\n", maxChars);
+        int lastNewline   = text.lastIndexOf('\n', maxChars);
+        int lastSentence  = Math.max(
+                text.lastIndexOf(". ", maxChars),
+                Math.max(text.lastIndexOf("? ", maxChars), text.lastIndexOf("! ", maxChars))
+        );
+        // Priorizar párrafo > frase > línea, siempre que estén en el último 30% del rango.
+        int floor = (int) (maxChars * 0.70);
+        int boundary = -1;
+        if (lastParagraph > floor)  boundary = lastParagraph;
+        else if (lastSentence > floor) boundary = lastSentence + 1; // incluir el punto
+        else if (lastNewline > floor)  boundary = lastNewline;
+        if (boundary > 0) {
+            return text.substring(0, boundary).trim();
+        }
+        return text.substring(0, maxChars).trim();
     }
 
     private String trim(String value) {
@@ -190,16 +245,6 @@ public class RagWebScraperService {
             return clean;
         }
         return clean.substring(0, maxChars).trim();
-    }
-
-    private String sha256(String value) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(value.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(hash);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 no disponible", e);
-        }
     }
 
     public record ScrapeRunResult(boolean executed,

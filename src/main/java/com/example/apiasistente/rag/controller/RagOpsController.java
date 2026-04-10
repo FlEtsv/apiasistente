@@ -44,4 +44,9 @@ public class RagOpsController {
     public RagOpsStatusDto purgeOldestDocuments(@RequestParam(name = "count", defaultValue = "25") int count) {
         return ragOpsService.purgeOldestDocuments(count);
     }
+
+    @PostMapping("/reset")
+    public RagOpsStatusDto resetAll() {
+        return ragOpsService.resetAll();
+    }
 }

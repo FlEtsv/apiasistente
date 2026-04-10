@@ -241,6 +241,10 @@ public class RagMaintenanceService {
         return toDto(caseRepo.save(ragCase));
     }
 
+    public boolean isRunning() {
+        return running.get();
+    }
+
     public RagMaintenanceStatusDto pause() {
         if (paused.compareAndSet(false, true)) {
             currentStep = running.get() ? currentStep : "Pausado";
@@ -443,8 +447,12 @@ public class RagMaintenanceService {
             );
         }
 
+        // CRITICAL: auto-execute via IA inmediatamente.
         if (assessment.severity() == RagMaintenanceSeverity.CRITICAL) {
             reviewCaseWithAi(ragCase, true, acc, null);
+        } else {
+            // WARNING: la IA tambien revisa, pero la auto-aplicacion espera al ventana configurada.
+            reviewCaseWithAi(ragCase, false, acc, null);
         }
     }
 
@@ -530,6 +538,65 @@ public class RagMaintenanceService {
                     usageCount,
                     lastUsedAt
             );
+        }
+
+        // Detectar incoherencia semantica entre chunks del mismo documento (con IA).
+        DocumentAssessment incoherenceAssessment = detectIncoherence(doc, chunks, usageCount, lastUsedAt, snippet, proposedContent);
+        if (incoherenceAssessment != null) {
+            return incoherenceAssessment;
+        }
+
+        return null;
+    }
+
+    /**
+     * Llama a la IA con una muestra de chunks para detectar contradicciones o incoherencias.
+     * Solo se activa si el documento tiene suficientes chunks y la IA esta disponible.
+     * El coste es una llamada al modelo rapido, proporcional al numero de documentos sin problemas previos.
+     */
+    private DocumentAssessment detectIncoherence(KnowledgeDocument doc,
+                                                 List<KnowledgeChunk> chunks,
+                                                 long usageCount,
+                                                 Instant lastUsedAt,
+                                                 String snippet,
+                                                 String proposedContent) {
+        int minChunksForIncoherenceCheck = Math.max(3, properties.getPageSize() / 10);
+        if (chunks.size() < minChunksForIncoherenceCheck) {
+            return null;
+        }
+        if (!canUseDecisionModel(currentMonitoringState())) {
+            return null;
+        }
+
+        // Muestra: primero, ultimo y un chunk del medio para cubrir el rango del documento.
+        List<String> sample = new ArrayList<>();
+        sample.add(chunks.get(0).getText());
+        if (chunks.size() > 2) {
+            sample.add(chunks.get(chunks.size() / 2).getText());
+        }
+        sample.add(chunks.get(chunks.size() - 1).getText());
+
+        try {
+            RagMaintenanceAdvisorService.Advice advice = advisorService.detectIncoherence(
+                    doc.getTitle(),
+                    normalizeOwner(doc.getOwner()),
+                    sample
+            );
+
+            if (advice.action() == RagMaintenanceAction.RESTRUCTURE || advice.action() == RagMaintenanceAction.DELETE) {
+                return new DocumentAssessment(
+                        RagMaintenanceSeverity.WARNING,
+                        RagMaintenanceIssueType.INCOHERENT_CONTENT,
+                        "Incoherencia detectada por IA: " + advice.reason(),
+                        advice.action(),
+                        snippet,
+                        advice.normalizedContent() != null ? advice.normalizedContent() : proposedContent,
+                        usageCount,
+                        lastUsedAt
+                );
+            }
+        } catch (Exception e) {
+            log.debug("No se pudo analizar incoherencia en doc id={}: {}", doc.getId(), e.getMessage());
         }
 
         return null;
@@ -793,7 +860,26 @@ public class RagMaintenanceService {
                     throw new ResponseStatusException(BAD_REQUEST, "No hay proposedContent para reestructurar.");
                 }
                 if (!dryRun.get()) {
-                    ragService.upsertDocumentForOwner(ragCase.getOwner(), ragCase.getDocumentTitle(), content);
+                    // Preservamos source y tags del documento original para no perder metadata del scraper.
+                    String originalSource = null;
+                    String originalTags = null;
+                    if (ragCase.getDocumentId() != null) {
+                        var originalDoc = docRepo.findById(ragCase.getDocumentId());
+                        if (originalDoc.isPresent()) {
+                            originalSource = originalDoc.get().getSource();
+                        }
+                        var originalChunks = chunkRepo.findActiveByDocumentIdOrderByChunkIndexAsc(ragCase.getDocumentId());
+                        if (!originalChunks.isEmpty()) {
+                            originalTags = originalChunks.get(0).getTags();
+                        }
+                    }
+                    ragService.upsertDocumentForOwner(
+                            ragCase.getOwner(),
+                            ragCase.getDocumentTitle(),
+                            content,
+                            firstNonBlank(originalSource, "maintenance"),
+                            originalTags
+                    );
                 }
                 ragCase.setStatus(RagMaintenanceCaseStatus.EXECUTED);
                 ragCase.setFinalAction(RagMaintenanceAction.RESTRUCTURE);
