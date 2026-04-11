@@ -40,6 +40,9 @@ class RagOpsServiceTest {
     private ObjectProvider<RagVectorIndexService> vectorIndexProvider;
 
     @Mock
+    private ObjectProvider<RagMaintenanceService> maintenanceServiceProvider;
+
+    @Mock
     private RagVectorIndexService vectorIndexService;
 
     private RagOpsService service;
@@ -51,6 +54,7 @@ class RagOpsServiceTest {
                 chunkRepo,
                 vectorRepo,
                 vectorIndexProvider,
+                maintenanceServiceProvider,
                 10,
                 700,
                 120,

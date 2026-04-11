@@ -83,4 +83,23 @@ record ChatRagContext(List<RagService.ScoredChunk> scored,
                 true
         );
     }
+
+    static ChatRagContext retrievalUnavailable(ChatGroundingService groundingService,
+                                               RagService.RetrievalStats retrievalStats) {
+        ChatGroundingService.GroundingDecision defaultDecision =
+                new ChatGroundingService.GroundingDecision(false, 0.0, 0, 0.0);
+        return new ChatRagContext(
+                List.of(),
+                List.of(),
+                defaultDecision,
+                false,
+                ChatGroundingService.RagRoute.NO_RAG,
+                false,
+                false,
+                false,
+                groundingService.retrievalUnavailableMessage(),
+                retrievalStats,
+                true
+        );
+    }
 }

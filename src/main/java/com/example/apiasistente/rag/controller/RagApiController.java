@@ -62,7 +62,8 @@ public class RagApiController {
                                                 Principal principal) {
         String target = normalizePathUser(username);
         enforceSameUser(principal, target);
-        var doc = upsertWithOptionalMetadata(target, req);
+        // Compatibilidad legacy: la ruta por usuario sigue existiendo, pero el corpus es global.
+        var doc = upsertWithOptionalMetadata(RagService.GLOBAL_OWNER, req);
         return new UpsertDocumentResponse(doc.getId(), doc.getTitle());
     }
 
@@ -75,7 +76,7 @@ public class RagApiController {
         List<UpsertDocumentResponse> results = new ArrayList<>(reqs.size());
         for (var r : reqs) {
             try {
-                var doc = upsertWithOptionalMetadata(target, r);
+                var doc = upsertWithOptionalMetadata(RagService.GLOBAL_OWNER, r);
                 results.add(new UpsertDocumentResponse(doc.getId(), doc.getTitle()));
             } catch (Exception e) {
                 log.warn("rag_batch_user_item_fail user='{}' title='{}' cause={}", target, r.getTitle(), e.getMessage());
@@ -95,7 +96,7 @@ public class RagApiController {
         if (principal == null || principal.getName() == null || principal.getName().isBlank()) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Usuario autenticado requerido.");
         }
-        var doc = storeMemoryWithOptionalMetadata(principal.getName(), req);
+        var doc = storeMemoryWithOptionalMetadata(RagService.GLOBAL_OWNER, req);
         return new UpsertDocumentResponse(doc.getId(), doc.getTitle());
     }
 
@@ -172,5 +173,4 @@ public class RagApiController {
         return clean;
     }
 }
-
 

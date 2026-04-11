@@ -95,10 +95,11 @@ public class ChatRagFlowService {
             // Corpus unificado: retrieval sin filtro de propietario.
             retrieval = ragService.retrieveShared(retrievalQuery);
         } catch (Exception e) {
-            // Si el embedding o el indice fallan, respondemos sin RAG en lugar de romper el turno.
-            log.warn("rag_retrieval_error sessionId={} reason={} fallback=noRag",
+            // Si retrieval falla, el turno degrada explicitamente y no responde "a ojo" desde el LLM.
+            log.warn("rag_retrieval_error sessionId={} reason={} fallback=retrieval-unavailable",
                     context.session().getId(), e.getMessage());
-            return ChatRagContext.noRag(groundingService);
+            RagService.RetrievalStats stats = RagService.RetrievalStats.empty(gateDecision.owners(), 0.0, 0, 0.0);
+            return ChatRagContext.retrievalUnavailable(groundingService, stats);
         }
 
         logRetrievalTelemetry(

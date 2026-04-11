@@ -14,11 +14,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -62,10 +62,10 @@ class ChatRagFlowServiceTest {
         when(promptBuilder.buildRetrievalQuery("Que paso ayer en /api/ext/chat?", List.of(), List.of()))
                 .thenReturn("Que paso ayer en /api/ext/chat?");
         when(historyService.recentUserTurnsForRetrieval("sid-1")).thenReturn(List.of());
-        when(ragGateService.evaluate(any(ChatTurnPlanner.TurnPlan.class), any(ChatPromptSignals.RagDecision.class), eq("Que paso ayer en /api/ext/chat?"), eq("user"), isNull(), eq(false)))
-                .thenReturn(ChatRagGateService.GateDecision.allow("rag-required", List.of("global", "user"), 2, 10, List.of()));
-        when(ragService.retrieveForOwnerOrGlobal("Que paso ayer en /api/ext/chat?", "user"))
-                .thenReturn(RagService.RetrievalResult.empty(List.of("global", "user"), 1.25, 10, 0.45));
+        when(ragGateService.evaluate(any(ChatTurnPlanner.TurnPlan.class), any(ChatPromptSignals.RagDecision.class), eq("Que paso ayer en /api/ext/chat?"), eq("user"), eq(null), eq(false)))
+                .thenReturn(ChatRagGateService.GateDecision.allow("rag-required", List.of("global"), 2, 10, List.of()));
+        when(ragService.retrieveShared("Que paso ayer en /api/ext/chat?"))
+                .thenReturn(RagService.RetrievalResult.empty(List.of("global"), 1.25, 10, 0.45));
         when(groundingService.noEvidenceMessage()).thenReturn("No encontre evidencia en tu base");
 
         ChatRagContext result = service.resolve(context);
@@ -85,10 +85,10 @@ class ChatRagFlowServiceTest {
         when(promptBuilder.buildRetrievalQuery("Compara dos estrategias de cache para Spring Boot", List.of(), List.of()))
                 .thenReturn("Compara dos estrategias de cache para Spring Boot");
         when(historyService.recentUserTurnsForRetrieval("sid-1")).thenReturn(List.of());
-        when(ragGateService.evaluate(any(ChatTurnPlanner.TurnPlan.class), any(ChatPromptSignals.RagDecision.class), eq("Compara dos estrategias de cache para Spring Boot"), eq("user"), isNull(), eq(false)))
-                .thenReturn(ChatRagGateService.GateDecision.allow("preferred-metadata-hit", List.of("global", "user"), 5, 50, List.of("cache")));
-        when(ragService.retrieveForOwnerOrGlobal("Compara dos estrategias de cache para Spring Boot", "user"))
-                .thenReturn(RagService.RetrievalResult.empty(List.of("global", "user"), 0.95, 10, 0.45));
+        when(ragGateService.evaluate(any(ChatTurnPlanner.TurnPlan.class), any(ChatPromptSignals.RagDecision.class), eq("Compara dos estrategias de cache para Spring Boot"), eq("user"), eq(null), eq(false)))
+                .thenReturn(ChatRagGateService.GateDecision.allow("preferred-metadata-hit", List.of("global"), 5, 50, List.of("cache")));
+        when(ragService.retrieveShared("Compara dos estrategias de cache para Spring Boot"))
+                .thenReturn(RagService.RetrievalResult.empty(List.of("global"), 0.95, 10, 0.45));
         when(groundingService.fallbackMessage()).thenReturn("fallback");
         when(groundingService.shouldEnforceGrounding(false)).thenReturn(false);
 
@@ -107,10 +107,10 @@ class ChatRagFlowServiceTest {
                 ChatPromptSignals.RagDecision.preferred("Consulta tecnica", List.of("consulta-tecnica"))
         );
 
-        when(ragGateService.evaluate(any(ChatTurnPlanner.TurnPlan.class), any(ChatPromptSignals.RagDecision.class), eq("Compara estrategias de cache"), eq("user"), isNull(), eq(false)))
+        when(ragGateService.evaluate(any(ChatTurnPlanner.TurnPlan.class), any(ChatPromptSignals.RagDecision.class), eq("Compara estrategias de cache"), eq("user"), eq(null), eq(false)))
                 .thenReturn(ChatRagGateService.GateDecision.skip(
                         "preferred-sin-pistas-metadata",
-                        List.of("global", "user"),
+                        List.of("global"),
                         4,
                         40,
                         List.of("cache", "estrategias"),
@@ -133,12 +133,12 @@ class ChatRagFlowServiceTest {
                 ChatPromptSignals.RagDecision.required("Contexto propio", List.of("contexto-propio"))
         );
 
-        when(ragGateService.evaluate(any(ChatTurnPlanner.TurnPlan.class), any(ChatPromptSignals.RagDecision.class), eq("Que paso en nuestro endpoint interno?"), eq("user"), isNull(), eq(false)))
+        when(ragGateService.evaluate(any(ChatTurnPlanner.TurnPlan.class), any(ChatPromptSignals.RagDecision.class), eq("Que paso en nuestro endpoint interno?"), eq("user"), eq(null), eq(false)))
                 .thenReturn(new ChatRagGateService.GateDecision(
                         false,
                         true,
                         "corpus-vacio",
-                        List.of("global", "user"),
+                        List.of("global"),
                         0,
                         0,
                         List.of()
@@ -150,6 +150,54 @@ class ChatRagFlowServiceTest {
         assertTrue(result.missingEvidence());
         assertFalse(result.ragUsed());
         assertFalse(result.hasRagContext());
+    }
+
+    @Test
+    void requiredRagFailsClosedWhenRetrievalThrows() {
+        ChatTurnContext context = context(
+                "Explica el incidente del endpoint",
+                ChatPromptSignals.RagDecision.required("Contexto interno", List.of("endpoint", "incidente"))
+        );
+
+        when(promptBuilder.buildRetrievalQuery("Explica el incidente del endpoint", List.of(), List.of()))
+                .thenReturn("Explica el incidente del endpoint");
+        when(historyService.recentUserTurnsForRetrieval("sid-1")).thenReturn(List.of());
+        when(ragGateService.evaluate(any(ChatTurnPlanner.TurnPlan.class), any(ChatPromptSignals.RagDecision.class), eq("Explica el incidente del endpoint"), eq("user"), eq(null), eq(false)))
+                .thenReturn(ChatRagGateService.GateDecision.allow("rag-required", List.of("global"), 3, 20, List.of("endpoint")));
+        when(ragService.retrieveShared("Explica el incidente del endpoint"))
+                .thenThrow(new IllegalStateException("HNSW no disponible"));
+        when(groundingService.retrievalUnavailableMessage()).thenReturn("RAG caido");
+
+        ChatRagContext result = service.resolve(context);
+
+        assertTrue(result.missingEvidence());
+        assertFalse(result.ragUsed());
+        assertFalse(result.hasRagContext());
+        assertEquals("RAG caido", result.fallbackMessage());
+    }
+
+    @Test
+    void preferredRagDegradesExplicitlyWhenRetrievalThrows() {
+        ChatTurnContext context = context(
+                "Resume la documentacion del adaptador",
+                ChatPromptSignals.RagDecision.preferred("Consulta tecnica", List.of("adaptador"))
+        );
+
+        when(promptBuilder.buildRetrievalQuery("Resume la documentacion del adaptador", List.of(), List.of()))
+                .thenReturn("Resume la documentacion del adaptador");
+        when(historyService.recentUserTurnsForRetrieval("sid-1")).thenReturn(List.of());
+        when(ragGateService.evaluate(any(ChatTurnPlanner.TurnPlan.class), any(ChatPromptSignals.RagDecision.class), eq("Resume la documentacion del adaptador"), eq("user"), eq(null), eq(false)))
+                .thenReturn(ChatRagGateService.GateDecision.allow("preferred-metadata-hit", List.of("global"), 3, 20, List.of("adaptador")));
+        when(ragService.retrieveShared("Resume la documentacion del adaptador"))
+                .thenThrow(new IllegalStateException("embed timeout"));
+        when(groundingService.retrievalUnavailableMessage()).thenReturn("RAG temporalmente no disponible");
+
+        ChatRagContext result = service.resolve(context);
+
+        assertTrue(result.missingEvidence());
+        assertFalse(result.ragUsed());
+        assertFalse(result.hasRagContext());
+        assertEquals("RAG temporalmente no disponible", result.fallbackMessage());
     }
 
     private ChatTurnContext context(String userText, ChatPromptSignals.RagDecision ragDecision) {

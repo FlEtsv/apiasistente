@@ -16,8 +16,6 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyCollection;
-import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
@@ -47,10 +45,9 @@ class ChatRagGateServiceTest {
 
     @Test
     void preferredRagUsesMetadataHitsFromNewStructure() {
-        when(documentRepository.countByOwnerInAndActiveTrue(anyCollection())).thenReturn(3L);
-        when(chunkRepository.countActiveByOwners(anyList())).thenReturn(25L);
-        when(documentRepository.countActiveMetadataMatches(anyCollection(), anyString())).thenReturn(1L);
-        when(chunkRepository.countActiveTagMatches(anyList(), anyString())).thenReturn(0L);
+        when(documentRepository.countByActiveTrue()).thenReturn(3L);
+        when(chunkRepository.countActive()).thenReturn(25L);
+        when(documentRepository.countActiveMetadataMatchesAll(anyString())).thenReturn(1L);
         when(decisionEngine.assessQuery(anyString(), any(ChatTurnPlanner.TurnPlan.class), eq(false)))
                 .thenReturn(new ChatRagDecisionEngine.DecisionAssessment(
                         ChatRagDecisionEngine.QueryType.TECHNICAL,
@@ -88,8 +85,8 @@ class ChatRagGateServiceTest {
 
     @Test
     void preferredRagSkipsWhenMetadataHasNoSignals() {
-        when(documentRepository.countByOwnerInAndActiveTrue(anyCollection())).thenReturn(3L);
-        when(chunkRepository.countActiveByOwners(anyList())).thenReturn(25L);
+        when(documentRepository.countByActiveTrue()).thenReturn(3L);
+        when(chunkRepository.countActive()).thenReturn(25L);
         when(decisionEngine.assessQuery(anyString(), any(ChatTurnPlanner.TurnPlan.class), eq(false)))
                 .thenReturn(new ChatRagDecisionEngine.DecisionAssessment(
                         ChatRagDecisionEngine.QueryType.TECHNICAL,
@@ -127,8 +124,8 @@ class ChatRagGateServiceTest {
 
     @Test
     void requiredRagReturnsNoEvidenceWhenCorpusIsEmpty() {
-        when(documentRepository.countByOwnerInAndActiveTrue(anyCollection())).thenReturn(0L);
-        when(chunkRepository.countActiveByOwners(anyList())).thenReturn(0L);
+        when(documentRepository.countByActiveTrue()).thenReturn(0L);
+        when(chunkRepository.countActive()).thenReturn(0L);
         when(decisionEngine.assessQuery(anyString(), any(ChatTurnPlanner.TurnPlan.class), eq(false)))
                 .thenReturn(new ChatRagDecisionEngine.DecisionAssessment(
                         ChatRagDecisionEngine.QueryType.PERSONAL,

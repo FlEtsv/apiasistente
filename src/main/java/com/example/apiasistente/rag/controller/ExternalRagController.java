@@ -1,12 +1,10 @@
 package com.example.apiasistente.rag.controller;
 
-import com.example.apiasistente.apikey.security.ApiKeyAuthFilter;
 import com.example.apiasistente.rag.dto.MemoryRequest;
 import com.example.apiasistente.rag.dto.UpsertDocumentRequest;
 import com.example.apiasistente.rag.dto.UpsertDocumentResponse;
 import com.example.apiasistente.rag.entity.KnowledgeDocument;
 import com.example.apiasistente.rag.service.RagService;
-import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -59,30 +57,27 @@ public class ExternalRagController {
     @PostMapping("/users/{externalUserId}/documents")
     public UpsertDocumentResponse upsertForExternalUser(@PathVariable String externalUserId,
                                                         @Valid @RequestBody UpsertDocumentRequest req,
-                                                        Principal principal,
-                                                        HttpServletRequest request) {
+                                                        Principal principal) {
         resolveUsername(principal);
-        String scopedOwner = resolveScopedExternalOwner(externalUserId, request);
-        return toUpsertResponse(upsertWithOptionalMetadata(scopedOwner, req));
+        // Compatibilidad legacy: externalUserId ya no define un owner privado; todo entra al corpus global.
+        return toUpsertResponse(upsertWithOptionalMetadata(RagService.GLOBAL_OWNER, req));
     }
 
     @PostMapping("/users/{externalUserId}/documents/batch")
     public List<UpsertDocumentResponse> upsertBatchForExternalUser(@PathVariable String externalUserId,
                                                                    @Valid @RequestBody List<UpsertDocumentRequest> reqs,
-                                                                   Principal principal,
-                                                                   HttpServletRequest request) {
+                                                                   Principal principal) {
         resolveUsername(principal);
-        String scopedOwner = resolveScopedExternalOwner(externalUserId, request);
         return mapUpsertResponsesSafe(
                 reqs,
-                req -> toUpsertResponse(upsertWithOptionalMetadata(scopedOwner, req))
+                req -> toUpsertResponse(upsertWithOptionalMetadata(RagService.GLOBAL_OWNER, req))
         );
     }
 
     @PostMapping("/memory")
     public UpsertDocumentResponse storeMemory(@Valid @RequestBody MemoryRequest req, Principal principal) {
-        String owner = resolveUsername(principal);
-        return toUpsertResponse(storeMemoryWithOptionalMetadata(owner, req));
+        resolveUsername(principal);
+        return toUpsertResponse(storeMemoryWithOptionalMetadata(RagService.GLOBAL_OWNER, req));
     }
 
     private String resolveUsername(Principal principal) {
@@ -90,39 +85,6 @@ public class ExternalRagController {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "API key requerida.");
         }
         return principal.getName();
-    }
-
-    private String resolveScopedExternalOwner(String rawExternalUserId, HttpServletRequest request) {
-        boolean specialKey = Boolean.TRUE.equals(request.getAttribute(ApiKeyAuthFilter.ATTR_SPECIAL_KEY));
-        if (!specialKey) {
-            throw new ResponseStatusException(
-                    HttpStatus.FORBIDDEN,
-                    "Esta API key no tiene modo especial habilitado para RAG por usuario externo."
-            );
-        }
-
-        Long apiKeyId = (Long) request.getAttribute(ApiKeyAuthFilter.ATTR_API_KEY_ID);
-        if (apiKeyId == null) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Contexto de API key no disponible.");
-        }
-
-        String externalUserId = normalizeExternalUserId(rawExternalUserId);
-        if (!hasText(externalUserId)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "externalUserId es obligatorio.");
-        }
-
-        return "key:" + apiKeyId + "|user:" + externalUserId;
-    }
-
-    private String normalizeExternalUserId(String raw) {
-        if (!hasText(raw)) {
-            return null;
-        }
-        String clean = raw.trim();
-        if (clean.length() > 120) {
-            clean = clean.substring(0, 120);
-        }
-        return clean;
     }
 
     private UpsertDocumentResponse toUpsertResponse(KnowledgeDocument document) {
@@ -192,7 +154,4 @@ public class ExternalRagController {
         return results;
     }
 
-    private boolean hasText(String value) {
-        return value != null && !value.isBlank();
-    }
 }

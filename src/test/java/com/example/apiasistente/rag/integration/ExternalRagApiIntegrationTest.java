@@ -35,8 +35,16 @@ class ExternalRagApiIntegrationTest {
     private RagService ragService;
 
     @Test
-    void ragPerExternalUserRejectsGenericApiKey() throws Exception {
+    void ragPerExternalUserUsesSameGlobalIngestionWithGenericApiKey() throws Exception {
         stubApiKey("generic-token", 12L, false);
+
+        KnowledgeDocument doc = new KnowledgeDocument();
+        doc.setOwner(RagService.GLOBAL_OWNER);
+        doc.setTitle("Doc user");
+        when(ragService.upsertDocument(
+                eq("Doc user"),
+                eq("Contenido")
+        )).thenReturn(doc);
 
         mockMvc.perform(post("/api/ext/rag/users/cliente-9/documents")
                         .header("X-API-KEY", "generic-token")
@@ -44,18 +52,18 @@ class ExternalRagApiIntegrationTest {
                         .content("""
                                 {"title":"Doc user","content":"Contenido"}
                                 """))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Doc user"));
     }
 
     @Test
-    void ragPerExternalUserAcceptsSpecialApiKey() throws Exception {
+    void ragPerExternalUserKeepsWorkingWithSpecialApiKey() throws Exception {
         stubApiKey("special-token", 99L, true);
 
         KnowledgeDocument doc = new KnowledgeDocument();
-        doc.setOwner("key:99|user:cliente-9");
+        doc.setOwner(RagService.GLOBAL_OWNER);
         doc.setTitle("Doc user");
-        when(ragService.upsertDocumentForOwner(
-                eq("key:99|user:cliente-9"),
+        when(ragService.upsertDocument(
                 eq("Doc user"),
                 eq("Contenido privado")
         )).thenReturn(doc);
@@ -69,8 +77,7 @@ class ExternalRagApiIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.title").value("Doc user"));
 
-        verify(ragService).upsertDocumentForOwner(
-                eq("key:99|user:cliente-9"),
+        verify(ragService).upsertDocument(
                 eq("Doc user"),
                 eq("Contenido privado")
         );

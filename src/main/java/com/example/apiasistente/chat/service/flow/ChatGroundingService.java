@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.text.Normalizer;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -62,6 +63,9 @@ public class ChatGroundingService {
     @Value("${chat.grounding.no-evidence-message:No encontre evidencia en tu base para responder eso. Puedes compartir una ruta, fecha, log o fragmento del documento?}")
     private String groundingNoEvidenceMessage;
 
+    @Value("${chat.grounding.retrieval-unavailable-message:No puedo consultar la base RAG en este momento. Intentalo de nuevo en unos segundos.}")
+    private String groundingRetrievalUnavailableMessage;
+
     public ChatGroundingService(OllamaClient ollama, ChatModelSelector modelSelector) {
         this.ollama = ollama;
         this.modelSelector = modelSelector;
@@ -87,6 +91,17 @@ public class ChatGroundingService {
             return configured;
         }
         return "No encontre evidencia en tu base para responder eso. Puedes compartir una ruta, fecha, log o fragmento del documento?";
+    }
+
+    /**
+     * Mensaje especifico cuando el retrieval no puede ejecutarse por una caida operacional.
+     */
+    public String retrievalUnavailableMessage() {
+        String configured = groundingRetrievalUnavailableMessage == null ? "" : groundingRetrievalUnavailableMessage.trim();
+        if (!configured.isEmpty()) {
+            return configured;
+        }
+        return "No puedo consultar la base RAG en este momento. Intentalo de nuevo en unos segundos.";
     }
 
     /**
@@ -440,7 +455,28 @@ public class ChatGroundingService {
      * Identifica si el texto coincide exactamente con el fallback configurado.
      */
     private boolean isFallbackMessage(String text) {
-        return hasText(text) && fallbackMessage().equalsIgnoreCase(text.trim());
+        return matchesConfiguredFallback(text, fallbackMessage())
+                || matchesConfiguredFallback(text, noEvidenceMessage())
+                || matchesConfiguredFallback(text, retrievalUnavailableMessage());
+    }
+
+    private boolean matchesConfiguredFallback(String text, String configuredMessage) {
+        String normalizedText = normalizeFallbackText(text);
+        String normalizedMessage = normalizeFallbackText(configuredMessage);
+        return !normalizedText.isEmpty()
+                && !normalizedMessage.isEmpty()
+                && normalizedText.startsWith(normalizedMessage);
+    }
+
+    private String normalizeFallbackText(String text) {
+        if (!hasText(text)) {
+            return "";
+        }
+        return Normalizer.normalize(text, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("\\s+", " ")
+                .trim();
     }
 
     /**

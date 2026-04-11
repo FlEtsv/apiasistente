@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,6 +39,7 @@ public class RagOpsService {
     private final KnowledgeDocumentRepository docRepo;
     private final KnowledgeChunkRepository chunkRepo;
     private final KnowledgeVectorRepository vectorRepo;
+    private final JdbcTemplate jdbc;
     private final ObjectProvider<RagVectorIndexService> vectorIndexServiceProvider;
     private final ObjectProvider<RagMaintenanceService> maintenanceServiceProvider;
     private final int topK;
@@ -70,6 +72,7 @@ public class RagOpsService {
     public RagOpsService(KnowledgeDocumentRepository docRepo,
                          KnowledgeChunkRepository chunkRepo,
                          KnowledgeVectorRepository vectorRepo,
+                         JdbcTemplate jdbc,
                          ObjectProvider<RagVectorIndexService> vectorIndexServiceProvider,
                          ObjectProvider<RagMaintenanceService> maintenanceServiceProvider,
                          @Value("${rag.top-k:10}") int topK,
@@ -82,6 +85,7 @@ public class RagOpsService {
         this.docRepo = docRepo;
         this.chunkRepo = chunkRepo;
         this.vectorRepo = vectorRepo;
+        this.jdbc = jdbc;
         this.vectorIndexServiceProvider = vectorIndexServiceProvider;
         this.maintenanceServiceProvider = maintenanceServiceProvider;
         this.topK = topK;
@@ -326,10 +330,19 @@ public class RagOpsService {
             long chunkCount = chunkRepo.count();
             long vectorCount = vectorRepo.count();
 
-            // 2. Borrar en orden de FK (cada llamada es su propia transacción corta).
-            vectorRepo.deleteAllInBatch();
-            chunkRepo.deleteAllInBatch();
-            docRepo.deleteAllInBatch();
+            // 2. DELETE en orden FK: vectors (hijo) → chunks (medio) → documents (raiz).
+            // DELETE FROM respeta las restricciones FK sin necesidad de deshabilitarlas,
+            // siempre que se borre en el orden correcto de dependencia (hijo antes que padre).
+            // TRUNCATE es DDL y MySQL InnoDB sigue comprobando el esquema FK incluso con
+            // FOREIGN_KEY_CHECKS=0 en algunos motores/versiones, causando el error 1701.
+            jdbc.execute((java.sql.Connection conn) -> {
+                try (var st = conn.createStatement()) {
+                    st.execute("DELETE FROM vectors");
+                    st.execute("DELETE FROM chunks");
+                    st.execute("DELETE FROM documents");
+                }
+                return null;
+            });
 
             // 3. Limpiar el índice HNSW.
             RagVectorIndexService indexService = vectorIndexServiceProvider.getIfAvailable();

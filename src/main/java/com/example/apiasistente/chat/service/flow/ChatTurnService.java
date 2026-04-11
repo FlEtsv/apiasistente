@@ -16,8 +16,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.text.Normalizer;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -179,14 +181,18 @@ public class ChatTurnService {
             // 5. Actualiza metadata operativa de la sesion y resume el resultado para el cliente.
             stage = "finalize";
             sessionService.touchSession(context.session());
+            boolean terminalFallback = isTerminalFallbackResponse(outcome.assistantText(), ragContext.fallbackMessage());
             boolean safe = !ragContext.missingEvidence()
+                    && !terminalFallback
                     && (!ragContext.enforceGrounding() || outcome.answerAssessment().safe());
-            double confidence = ragContext.missingEvidence()
+            double confidence = (ragContext.missingEvidence() || terminalFallback)
                     ? 0.0
                     : (ragContext.ragUsed()
                     ? ragContext.groundingDecision().confidence()
                     : directAnswerConfidence(context.turnPlan().confidence(), answerVerification));
-            int groundedSources = ragContext.ragUsed() ? Math.max(0, outcome.answerAssessment().groundedSources()) : 0;
+            int groundedSources = ragContext.ragUsed() && !terminalFallback
+                    ? Math.max(0, outcome.answerAssessment().groundedSources())
+                    : 0;
             boolean ragNeeded = context.ragNeeded() || answerVerification.retryWithRag();
             telemetryService.recordTurnResult(
                     ragContext.ragUsed(),
@@ -360,6 +366,25 @@ public class ChatTurnService {
         return value == null ? "" : value;
     }
 
+    private boolean isTerminalFallbackResponse(String assistantText, String fallbackMessage) {
+        String normalizedReply = normalizeForFallbackComparison(assistantText);
+        String normalizedFallback = normalizeForFallbackComparison(fallbackMessage);
+        return !normalizedReply.isEmpty()
+                && !normalizedFallback.isEmpty()
+                && normalizedReply.startsWith(normalizedFallback);
+    }
+
+    private String normalizeForFallbackComparison(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        return Normalizer.normalize(value, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
     private Map<String, Object> turnStartPayload(String maybeSessionId,
                                                  String externalUserId,
                                                  String requestedModel,
@@ -506,5 +531,4 @@ public class ChatTurnService {
         return "No pude procesar tu consulta" + ("rag".equals(stage) ? " (error en retrieval)" : "") + ". Intenta de nuevo.";
     }
 }
-
 

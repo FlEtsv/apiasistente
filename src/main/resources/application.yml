@@ -45,19 +45,23 @@ ollama:
   base-url: ${OLLAMA_BASE_URL:http://localhost:11434/api}
   #base-url: ${OLLAMA_BASE_URL:http://ollama:11434/api}
   # Modelo para generaciÃƒÂ³n de chat.
-  chat-model: qwen3:14b
+  chat-model: qwen2.5:3b
   # Modelo rÃƒÂ¡pido para chats ligeros (menor consumo).
-  fast-chat-model: qwen2.5:7b
+  fast-chat-model: qwen2.5:3b
   # Modelo visual para etapa intermedia de imagen/camara/documento.
   visual-model: qwen2.5vl:7b
   # Alias de modelo para generación de imágenes desde el chat (ComfyUI checkpoint resolver).
   image-model: ${OLLAMA_IMAGE_MODEL:dreamshaper_8}
   # Mini-modelo opcional para depurar respuestas y quitar relleno.
-  response-guard-model: ${OLLAMA_RESPONSE_GUARD_MODEL:mistral:7b}
+  response-guard-model: ${OLLAMA_RESPONSE_GUARD_MODEL:qwen2.5:3b}
   # Modelo para embeddings de RAG.
   embed-model: nomic-embed-text:latest
   # Menor creatividad para reducir alucinaciones.
   temperature: ${OLLAMA_TEMPERATURE:0.2}
+  # Limita la ventana efectiva para evitar contextos inviables que bloqueen embeddings y chat.
+  num-ctx: ${OLLAMA_NUM_CTX:4096}
+  # Conserva una parte estable del prompt sin disparar el uso de memoria.
+  num-keep: ${OLLAMA_NUM_KEEP:256}
 
 rag:
   # NÃƒÂºmero de chunks mÃƒÂ¡s relevantes a recuperar por consulta.
@@ -360,6 +364,8 @@ chat:
     fallback-message: "No tengo suficiente contexto para responder con precision. Puedes compartir una frase mas o pegar el fragmento exacto?"
     # Mensaje especifico cuando el retrieval no encuentra evidencia util.
     no-evidence-message: "No encontre evidencia en tu base para responder eso. Puedes compartir una ruta, fecha, log o fragmento del documento?"
+    # Mensaje especifico cuando el retrieval no pudo ejecutarse por una caida del indice, embeddings o dependencia externa.
+    retrieval-unavailable-message: "No puedo consultar la base RAG en este momento. Intentalo de nuevo en unos segundos."
   response-guard:
     # Segunda pasada para eliminar informacion innecesaria en la respuesta final.
     enabled: true

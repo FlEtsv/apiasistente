@@ -19,7 +19,9 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
@@ -143,7 +145,7 @@ class ChatTurnServiceTest {
                         ChatRagDecisionEngine.AnswerVerification.skip("post-check-not-needed")
                 )
         );
-        when(historyService.saveAssistantMessage(session, "Respuesta final [S1]")).thenReturn(assistantMessage);
+        when(historyService.saveAssistantMessage(eq(session), eq("Respuesta final [S1]"), anyString())).thenReturn(assistantMessage);
         when(sourceSnapshotService.toSnapshots(scored)).thenReturn(List.of(
                 new ChatSourceSnapshotService.SourceSnapshot(2L, 1L, "Manual", "snippet", 0.91)
         ));
@@ -159,7 +161,7 @@ class ChatTurnServiceTest {
 
         verify(sourceSnapshotService).persistAfterCommit(eq(12L), eq("sid-77"), org.mockito.ArgumentMatchers.anyList());
         verify(sessionService).touchSession(session);
-        verify(historyService).saveAssistantMessage(session, "Respuesta final [S1]");
+        verify(historyService).saveAssistantMessage(eq(session), eq("Respuesta final [S1]"), anyString());
     }
 
     @Test
@@ -250,7 +252,7 @@ class ChatTurnServiceTest {
                         new ChatRagDecisionEngine.AnswerVerification(true, 0.41, "respuesta-incompleta", true)
                 )
         );
-        when(historyService.saveAssistantMessage(session, "Respuesta con fuentes [S1]")).thenReturn(assistantMessage);
+        when(historyService.saveAssistantMessage(eq(session), eq("Respuesta con fuentes [S1]"), anyString())).thenReturn(assistantMessage);
         when(sourceSnapshotService.toSnapshots(scored)).thenReturn(List.of(
                 new ChatSourceSnapshotService.SourceSnapshot(4L, 3L, "Runbook", "snippet", 0.93)
         ));
@@ -331,7 +333,7 @@ class ChatTurnServiceTest {
                         ChatRagDecisionEngine.AnswerVerification.skip("post-check-not-needed")
                 )
         );
-        when(historyService.saveAssistantMessage(session, "Respuesta final [S1]")).thenReturn(assistantMessage);
+        when(historyService.saveAssistantMessage(eq(session), eq("Respuesta final [S1]"), anyString())).thenReturn(assistantMessage);
         when(sourceSnapshotService.toSnapshots(scored)).thenReturn(List.of(
                 new ChatSourceSnapshotService.SourceSnapshot(2L, 1L, "Manual", "snippet", 0.91)
         ));
@@ -344,6 +346,83 @@ class ChatTurnServiceTest {
         assertEquals("Respuesta final [S1]", response.getReply());
         assertTrue(response.isRagUsed());
         verify(sessionService).touchSession(session);
+    }
+
+    @Test
+    void marksConfiguredFallbackResponsesAsUnsafeAndWithZeroConfidence() {
+        ChatSession session = new ChatSession();
+        session.setId("sid-fallback");
+        session.setSystemPrompt(new SystemPrompt());
+
+        ChatMessage userMessage = new ChatMessage();
+        ReflectionTestUtils.setField(userMessage, "id", 41L);
+        userMessage.setSession(session);
+        userMessage.setRole(ChatMessage.Role.USER);
+        userMessage.setContent("Que dice el runbook?");
+
+        ChatTurnContext context = new ChatTurnContext(
+                "user",
+                "Que dice el runbook?",
+                "auto",
+                null,
+                session,
+                userMessage,
+                List.of(),
+                new ChatTurnPlanner.TurnPlan(
+                        ChatPromptSignals.IntentRoute.FACTUAL_TECH,
+                        true,
+                        ChatTurnPlanner.ReasoningLevel.MEDIUM,
+                        false,
+                        false,
+                        0.83
+                ),
+                ChatPromptSignals.IntentRoute.FACTUAL_TECH,
+                true,
+                false,
+                false,
+                false,
+                false,
+                false
+        );
+
+        String fallback = "No tengo suficiente contexto para responder con precision. Puedes compartir una frase mas o pegar el fragmento exacto?";
+        ChatRagContext ragContext = new ChatRagContext(
+                List.of(),
+                List.of(),
+                new ChatGroundingService.GroundingDecision(true, 0.88, 2, 0.81),
+                true,
+                ChatGroundingService.RagRoute.STRONG,
+                true,
+                false,
+                true,
+                fallback
+        );
+        ChatAssistantOutcome outcome = new ChatAssistantOutcome(
+                fallback + " [S1]",
+                new ChatGroundingService.GroundingAnswerAssessment(true, 1)
+        );
+
+        ChatMessage assistantMessage = new ChatMessage();
+        ReflectionTestUtils.setField(assistantMessage, "id", 42L);
+
+        when(contextFactory.create("user", null, "Que dice el runbook?", "auto", null, List.of())).thenReturn(context);
+        when(ragFlowService.resolve(context)).thenReturn(ragContext);
+        when(assistantService.answer(context, ragContext)).thenReturn(outcome);
+        when(postCheckFlowService.run(context, ragContext, outcome)).thenReturn(
+                new ChatRagPostCheckFlowService.PostCheckResult(
+                        ragContext,
+                        outcome,
+                        ChatRagDecisionEngine.AnswerVerification.skip("post-check-not-needed")
+                )
+        );
+        when(historyService.saveAssistantMessage(eq(session), eq(fallback + " [S1]"), anyString())).thenReturn(assistantMessage);
+        when(sourceSnapshotService.toSnapshots(List.of())).thenReturn(List.of());
+
+        ChatResponse response = service.chat("user", null, "Que dice el runbook?", "auto", null, List.of());
+
+        assertFalse(response.isSafe());
+        assertEquals(0.0, response.getConfidence());
+        assertEquals(0, response.getGroundedSources());
     }
 }
 

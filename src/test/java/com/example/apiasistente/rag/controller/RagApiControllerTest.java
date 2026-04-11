@@ -69,9 +69,17 @@ class RagApiControllerTest {
     @Test
     void userScopedUpsertAllowsSamePrincipal() throws Exception {
         KnowledgeDocument doc = new KnowledgeDocument();
-        doc.setOwner("user-a");
+        doc.setOwner(RagService.GLOBAL_OWNER);
         doc.setTitle("Doc privado");
-        when(ragService.upsertDocumentForOwner(eq("user-a"), eq("Doc privado"), eq("Contenido privado")))
+        when(ragService.upsertStructuredDocumentForOwner(
+                eq(RagService.GLOBAL_OWNER),
+                eq("Doc privado"),
+                eq("Contenido privado"),
+                eq("manual"),
+                eq(null),
+                eq(null),
+                anyList()
+        ))
                 .thenReturn(doc);
 
         mockMvc.perform(post("/api/rag/users/user-a/documents")
@@ -89,7 +97,15 @@ class RagApiControllerTest {
         KnowledgeDocument doc = new KnowledgeDocument();
         doc.setOwner(RagService.GLOBAL_OWNER);
         doc.setTitle("Doc global");
-        when(ragService.upsertDocument(eq("Doc global"), eq("Contenido global"))).thenReturn(doc);
+        when(ragService.upsertStructuredDocumentForOwner(
+                eq(RagService.GLOBAL_OWNER),
+                eq("Doc global"),
+                eq("Contenido global"),
+                eq("manual"),
+                eq(null),
+                eq(null),
+                anyList()
+        )).thenReturn(doc);
 
         mockMvc.perform(post("/api/rag/documents")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -140,8 +156,24 @@ class RagApiControllerTest {
         first.setTitle("Doc 1");
         KnowledgeDocument second = new KnowledgeDocument();
         second.setTitle("Doc 2");
-        when(ragService.upsertDocument(eq("Doc 1"), eq("Contenido 1"))).thenReturn(first);
-        when(ragService.upsertDocument(eq("Doc 2"), eq("Contenido 2"))).thenReturn(second);
+        when(ragService.upsertStructuredDocumentForOwner(
+                eq(RagService.GLOBAL_OWNER),
+                eq("Doc 1"),
+                eq("Contenido 1"),
+                eq("manual"),
+                eq(null),
+                eq(null),
+                anyList()
+        )).thenReturn(first);
+        when(ragService.upsertStructuredDocumentForOwner(
+                eq(RagService.GLOBAL_OWNER),
+                eq("Doc 2"),
+                eq("Contenido 2"),
+                eq("manual"),
+                eq(null),
+                eq(null),
+                anyList()
+        )).thenReturn(second);
 
         mockMvc.perform(post("/api/rag/documents/batch")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -162,8 +194,24 @@ class RagApiControllerTest {
         first.setTitle("Doc 1");
         KnowledgeDocument second = new KnowledgeDocument();
         second.setTitle("Doc 2");
-        when(ragService.upsertDocumentForOwner(eq("user-a"), eq("Doc 1"), eq("Contenido 1"))).thenReturn(first);
-        when(ragService.upsertDocumentForOwner(eq("user-a"), eq("Doc 2"), eq("Contenido 2"))).thenReturn(second);
+        when(ragService.upsertStructuredDocumentForOwner(
+                eq(RagService.GLOBAL_OWNER),
+                eq("Doc 1"),
+                eq("Contenido 1"),
+                eq("manual"),
+                eq(null),
+                eq(null),
+                anyList()
+        )).thenReturn(first);
+        when(ragService.upsertStructuredDocumentForOwner(
+                eq(RagService.GLOBAL_OWNER),
+                eq("Doc 2"),
+                eq("Contenido 2"),
+                eq("manual"),
+                eq(null),
+                eq(null),
+                anyList()
+        )).thenReturn(second);
 
         mockMvc.perform(post("/api/rag/users/user-a/documents/batch")
                         .principal(() -> "user-a")
@@ -183,7 +231,7 @@ class RagApiControllerTest {
     void memoryStoresDocumentForPrincipal() throws Exception {
         KnowledgeDocument doc = new KnowledgeDocument();
         doc.setTitle("Memoria");
-        when(ragService.storeMemory(eq("user-a"), eq("Memoria"), eq("Hecho importante"))).thenReturn(doc);
+        when(ragService.storeMemory(eq(RagService.GLOBAL_OWNER), eq("Memoria"), eq("Hecho importante"))).thenReturn(doc);
 
         mockMvc.perform(post("/api/rag/memory")
                         .principal(() -> "user-a")
@@ -206,5 +254,3 @@ class RagApiControllerTest {
                 .andExpect(status().isForbidden());
     }
 }
-
-

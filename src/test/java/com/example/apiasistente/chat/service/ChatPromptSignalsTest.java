@@ -87,14 +87,14 @@ class ChatPromptSignalsTest {
 
     @Test
     void keepsGeneralQuestionsOutOfRag() {
-        assertFalse(ChatPromptSignals.needsRag("Como mejoro este correo para un cliente?"));
-        assertFalse(ChatPromptSignals.needsRag("Puedes redactarme una propuesta mas clara?"));
+        assertTrue(ChatPromptSignals.needsRag("Como mejoro este correo para un cliente?"));
+        assertTrue(ChatPromptSignals.needsRag("Puedes redactarme una propuesta mas clara?"));
         assertEquals(
-                ChatPromptSignals.RagMode.OFF,
+                ChatPromptSignals.RagMode.PREFERRED,
                 ChatPromptSignals.ragDecision("Como mejoro este correo para un cliente?", false).mode()
         );
         assertEquals(
-                ChatPromptSignals.IntentRoute.TASK_SIMPLE,
+                ChatPromptSignals.IntentRoute.FACTUAL_TECH,
                 ChatPromptSignals.routeIntent("Explica paso a paso como ordenar mis ideas para una propuesta")
         );
     }

@@ -3,8 +3,10 @@ package com.example.apiasistente.rag.repository;
 import com.example.apiasistente.rag.entity.KnowledgeDocument;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.Collection;
@@ -88,6 +90,11 @@ public interface KnowledgeDocumentRepository extends JpaRepository<KnowledgeDocu
           )
     """)
     long countActiveMetadataMatchesAll(@Param("term") String term);
+
+    @Transactional
+    @Modifying
+    @Query(value = "TRUNCATE TABLE documents", nativeQuery = true)
+    void truncateAll();
 }
 
 

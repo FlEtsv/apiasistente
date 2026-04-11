@@ -315,6 +315,8 @@ class ChatServiceTest {
             capturedModel.set(invocation.getArgument(1, String.class));
             return "Asunto: Reunion\n\nHola, me gustaria coordinar una reunion el martes.";
         });
+        when(ragService.retrieveShared("Redacta un correo breve para pedir una reunion el martes"))
+                .thenReturn(RagService.RetrievalResult.empty(List.of("global"), 0.0, 10, 0.38));
 
         ChatResponse response = service.chat(
                 "user",
@@ -323,8 +325,8 @@ class ChatServiceTest {
                 "auto"
         );
 
-        assertEquals("fast-model", capturedModel.get());
-        assertFalse(response.isRagNeeded());
+        assertEquals("chat-model", capturedModel.get());
+        assertTrue(response.isRagNeeded());
         assertFalse(response.isRagUsed());
         assertTrue(response.getReply().contains("Asunto: Reunion"));
 
@@ -333,10 +335,10 @@ class ChatServiceTest {
 
         String finalPrompt = messages.get(1).content();
         assertTrue(finalPrompt.contains("entrega el resultado completo en esta misma respuesta"));
-        assertTrue(finalPrompt.contains("Modo ejecucion directa"));
+        assertFalse(finalPrompt.contains("Modo ejecucion directa"));
         assertTrue(finalPrompt.contains("Mensaje del usuario: Redacta un correo breve para pedir una reunion el martes"));
 
-        verifyNoInteractions(ragService, sourceRepo);
+        verifyNoInteractions(sourceRepo);
     }
 
     @Test

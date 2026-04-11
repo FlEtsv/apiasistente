@@ -51,43 +51,22 @@ class ExternalRagControllerTest {
     }
 
     @Test
-    void ragPerExternalUserEndpointRequiresSpecialKey() throws Exception {
+    void ragPerExternalUserEndpointUsesGlobalCorpusAlias() throws Exception {
+        KnowledgeDocument doc = new KnowledgeDocument();
+        doc.setOwner(RagService.GLOBAL_OWNER);
+        doc.setTitle("Doc user");
+        when(ragService.upsertDocument(eq("Doc user"), eq("Contenido"))).thenReturn(doc);
+
         mockMvc.perform(post("/api/ext/rag/users/cliente-42/documents")
                         .principal(() -> "ext-user")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"title":"Doc user","content":"Contenido"}
                                 """))
-                .andExpect(status().isForbidden());
-    }
-
-    @Test
-    void ragPerExternalUserEndpointScopesOwnerByApiKey() throws Exception {
-        KnowledgeDocument doc = new KnowledgeDocument();
-        doc.setOwner("key:99|user:cliente-42");
-        doc.setTitle("Doc user");
-        when(ragService.upsertDocumentForOwner(
-                eq("key:99|user:cliente-42"),
-                eq("Doc user"),
-                eq("Contenido privado")
-        )).thenReturn(doc);
-
-        mockMvc.perform(post("/api/ext/rag/users/cliente-42/documents")
-                        .principal(() -> "ext-user")
-                        .requestAttr("ext.specialModeEnabled", true)
-                        .requestAttr("ext.apiKeyId", 99L)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {"title":"Doc user","content":"Contenido privado"}
-                                """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.title").value("Doc user"));
 
-        verify(ragService).upsertDocumentForOwner(
-                eq("key:99|user:cliente-42"),
-                eq("Doc user"),
-                eq("Contenido privado")
-        );
+        verify(ragService).upsertDocument(eq("Doc user"), eq("Contenido"));
     }
 
     @Test

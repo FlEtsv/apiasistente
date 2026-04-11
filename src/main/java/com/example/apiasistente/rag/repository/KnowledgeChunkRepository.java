@@ -2,8 +2,10 @@ package com.example.apiasistente.rag.repository;
 
 import com.example.apiasistente.rag.entity.KnowledgeChunk;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -105,6 +107,11 @@ public interface KnowledgeChunkRepository extends JpaRepository<KnowledgeChunk, 
           and lower(c.tags) like concat('%', lower(:term), '%')
     """)
     long countActiveTagMatchesAll(@Param("term") String term);
+
+    @Transactional
+    @Modifying
+    @Query(value = "TRUNCATE TABLE chunks", nativeQuery = true)
+    void truncateAll();
 }
 
 

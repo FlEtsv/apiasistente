@@ -3,8 +3,10 @@ package com.example.apiasistente.rag.repository;
 import com.example.apiasistente.rag.entity.KnowledgeVector;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collection;
 import java.util.List;
@@ -64,4 +66,9 @@ public interface KnowledgeVectorRepository extends JpaRepository<KnowledgeVector
     long countActive();
 
     void deleteByChunkIdIn(Collection<Long> chunkIds);
+
+    @Transactional
+    @Modifying
+    @Query(value = "TRUNCATE TABLE vectors", nativeQuery = true)
+    void truncateAll();
 }

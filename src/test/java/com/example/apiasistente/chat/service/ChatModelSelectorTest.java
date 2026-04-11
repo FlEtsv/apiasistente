@@ -57,7 +57,7 @@ class ChatModelSelectorTest {
 
         assertEquals("qwen2.5:32b", selector.resolveChatModel("chat"));
         assertEquals("qwen3.0:14b", selector.resolveChatModel("fast"));
-        assertEquals("qwen2.5:32b", selector.resolveChatModel("visual"));
+        assertEquals("qwen3.0:14b", selector.resolveChatModel("visual"));
         assertEquals("qwen2.5:32b", selector.resolveChatModel("qwen-vl:latest"));
         assertEquals("qwen3.0:14b", selector.resolveChatModel("qwen3.0:14b"));
         assertEquals("qwen2.5:32b", selector.resolveChatModel("qwen2.5:32b"));
