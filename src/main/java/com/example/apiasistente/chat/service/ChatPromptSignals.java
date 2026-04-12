@@ -33,6 +33,28 @@ public final class ChatPromptSignals {
         PREFERRED
     }
 
+    /**
+     * Categoria de intencion mas especifica para ajustar estilo de salida y guardrails.
+     */
+    public enum IntentCategory {
+        SMALL_TALK,
+        TEXT_RENDER,
+        TASK_EXECUTION,
+        FACT_LOOKUP,
+        ANALYSIS_AUDIT,
+        HOME_AUTOMATION,
+        UNKNOWN
+    }
+
+    /**
+     * Nivel de detalle esperado en la respuesta.
+     */
+    public enum ResponseStyle {
+        BRIEF,
+        STANDARD,
+        DETAILED
+    }
+
     private static final Pattern SMALL_TALK_PATTERN = Pattern.compile(
             "^(hola+|buenas|hey|hello|gracias|ok|vale|jaja+|buenos\\s+d(?:i|\\u00ed)as|buenas\\s+noches|qu(?:e|\\u00e9)\\s+tal)\\b",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
@@ -70,6 +92,57 @@ public final class ChatPromptSignals {
             "\\b(compara(?:r|tiva)?|defin(?:e|icion)|arquitectura|diagnostica(?:r)?|troubleshoot|debug|" +
                     "stack|spring|java|docker|sql|jwt|oauth|cache|latencia|rendimiento|prometheus|grafana|monitor(?:eo|ing)?|" +
                     "embeddings?|chunking|retrieval|rerank|rag)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
+    );
+
+    private static final Pattern TASK_EXECUTION_HINTS = Pattern.compile(
+            "\\b(redacta(?:r)?|escribe(?:r)?|traduce(?:r)?|corrige(?:r)?|mejora(?:r)?|resume(?:r)?|resume\\s+en|" +
+                    "genera(?:r)?|crea(?:r)?|haz(?:me)?|planifica(?:r)?|organiza(?:r)?|estructura(?:r)?|prepara(?:r)?|monta(?:r)?)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
+    );
+
+    private static final Pattern QUESTION_LIKE_HINTS = Pattern.compile(
+            "\\b(qu(?:e|\\u00e9)|c(?:o|\\u00f3)mo|por\\s+qu(?:e|\\u00e9)|cu(?:a|\\u00e1)l|d(?:o|\\u00f3)nde|cu(?:a|\\u00e1)ndo|qu(?:i|\\u00e9)n|why|what|how|which|when|where)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
+    );
+
+    private static final Pattern AUDIT_ANALYSIS_HINTS = Pattern.compile(
+            "\\b(audita(?:r)?|auditoria|audit|metricas?|cuantificables?|fallos?|errores?|incidente|postmortem|mejora(?:s)?|kpi|fluidez)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
+    );
+
+    private static final Pattern HOME_AUTOMATION_HINTS = Pattern.compile(
+            "\\b(domotica|dom\\u00f3tica|casa|hogar|luces?|lamparas?|termostato|calefaccion|aire\\s+acondicionado|persianas?|cerradura|puerta\\s+principal|garaje|alarma|riego|camara(?:s)?|enchufe(?:s)?\\s+inteligentes?)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
+    );
+
+    private static final Pattern HOME_AUTOMATION_ACTION_HINTS = Pattern.compile(
+            "\\b(enciende(?:r)?|apaga(?:r)?|abre(?:r)?|cierra(?:r)?|sube(?:r)?|baja(?:r)?|activa(?:r)?|desactiva(?:r)?|ajusta(?:r)?|bloquea(?:r)?|desbloquea(?:r)?|programa(?:r)?\\s+escena|modo\\s+ausente|modo\\s+noche)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
+    );
+
+    private static final Pattern HOME_CRITICAL_ACTUATION_HINTS = Pattern.compile(
+            "\\b(alarma|cerradura|desbloquea(?:r)?|puerta\\s+principal|garaje|cortina\\s+metalica|gas|caldera|calefaccion\\s+maxima)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
+    );
+
+    private static final Pattern AUTONOMOUS_DECISION_HINTS = Pattern.compile(
+            "\\b(decide\\s+tu|decide\\s+por\\s+mi|sin\\s+preguntar|automaticamente|autonom(?:a|o|amente)|toma\\s+decisiones|actua\\s+solo|hazlo\\s+siempre)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
+    );
+
+    private static final Pattern LEARNING_PROCESS_HINTS = Pattern.compile(
+            "\\b(aprende(?:r)?|aprendizaje|mejora\\s+continua|del\\s+proceso|retroalimentacion|feedback\\s+loop|memoria\\s+de\\s+sesion)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
+    );
+
+    private static final Pattern BRIEF_RESPONSE_HINTS = Pattern.compile(
+            "\\b(breve|corto|resumen\\s+rapido|en\\s+1\\s+linea|en\\s+una\\s+linea|sin\\s+detalle|solo\\s+la\\s+respuesta|directo\\s+al\\s+grano|conciso)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
+    );
+
+    private static final Pattern DETAILED_RESPONSE_HINTS = Pattern.compile(
+            "\\b(extenso|detallado|a\\s+fondo|paso\\s+a\\s+paso|completo|exhaustivo|auditoria\\s+extensa|muy\\s+detallado|profundiza)\\b",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
     );
 
@@ -141,6 +214,98 @@ public final class ChatPromptSignals {
         return IntentRoute.TASK_SIMPLE;
     }
 
+    public static IntentProfile captureIntent(String rawText) {
+        return captureIntent(rawText, false, false);
+    }
+
+    public static IntentProfile captureIntent(String rawText, boolean hasDocumentMedia) {
+        return captureIntent(rawText, hasDocumentMedia, false);
+    }
+
+    /**
+     * Captura una intencion estructurada para controlar fluidez, longitud y guardrails operativos.
+     */
+    public static IntentProfile captureIntent(String rawText,
+                                              boolean hasDocumentMedia,
+                                              boolean hasImageMedia) {
+        String clean = collapseSpaces(rawText);
+        String text = clean.toLowerCase(Locale.ROOT);
+        List<String> signals = new ArrayList<>();
+
+        if (text.isBlank()) {
+            return IntentProfile.unknown("sin-texto", List.of());
+        }
+
+        if (hasImageMedia) {
+            signals.add("adjunto-imagen");
+        }
+        if (hasDocumentMedia) {
+            signals.add("adjunto-documental");
+        }
+
+        boolean textRender = wantsTextRendering(text);
+        boolean smallTalk = isSmallTalk(text);
+        boolean complex = isComplexQuery(text);
+        boolean multiStep = isMultiStepQuery(text);
+        boolean auditLike = AUDIT_ANALYSIS_HINTS.matcher(text).find();
+        boolean homeAutomation = HOME_AUTOMATION_HINTS.matcher(text).find()
+                || HOME_AUTOMATION_ACTION_HINTS.matcher(text).find();
+        boolean autonomousRequested = AUTONOMOUS_DECISION_HINTS.matcher(text).find();
+        boolean learningRequested = LEARNING_PROCESS_HINTS.matcher(text).find();
+        boolean executionLike = TASK_EXECUTION_HINTS.matcher(text).find();
+        boolean briefRequested = BRIEF_RESPONSE_HINTS.matcher(text).find();
+        boolean detailedRequested = DETAILED_RESPONSE_HINTS.matcher(text).find();
+        boolean lookupLike = ragDecision(text, hasDocumentMedia).enabled();
+
+        collectBooleanSignal(signals, textRender, "text-render");
+        collectBooleanSignal(signals, smallTalk, "small-talk");
+        collectBooleanSignal(signals, complex, "consulta-compleja");
+        collectBooleanSignal(signals, multiStep, "multi-step");
+        collectBooleanSignal(signals, auditLike, "auditoria");
+        collectBooleanSignal(signals, homeAutomation, "domotica");
+        collectBooleanSignal(signals, autonomousRequested, "autonomia");
+        collectBooleanSignal(signals, learningRequested, "aprendizaje");
+        collectBooleanSignal(signals, executionLike, "ejecucion");
+
+        IntentCategory category = resolveIntentCategory(
+                textRender,
+                smallTalk,
+                homeAutomation,
+                auditLike,
+                complex,
+                multiStep,
+                executionLike,
+                lookupLike
+        );
+        ResponseStyle responseStyle = resolveResponseStyle(
+                clean,
+                briefRequested,
+                detailedRequested,
+                complex,
+                multiStep
+        );
+        boolean requiresConfirmation = homeAutomation && (autonomousRequested || containsCriticalActuation(text));
+
+        String reason = buildReason(
+                "intent="
+                        + category.name().toLowerCase(Locale.ROOT)
+                        + ",style="
+                        + responseStyle.name().toLowerCase(Locale.ROOT),
+                signals
+        );
+
+        return new IntentProfile(
+                category,
+                responseStyle,
+                homeAutomation,
+                autonomousRequested,
+                learningRequested,
+                requiresConfirmation,
+                reason,
+                signals
+        );
+    }
+
     /**
      * Detecta charla ligera para evitar rutas pesadas de modelo o RAG.
      */
@@ -191,6 +356,9 @@ public final class ChatPromptSignals {
         if (isSmallTalk(text)) {
             return RagDecision.off("Conversacion ligera o saludo");
         }
+        if (HOME_AUTOMATION_HINTS.matcher(text).find() || HOME_AUTOMATION_ACTION_HINTS.matcher(text).find()) {
+            return RagDecision.off("Control domotico: requiere politica/accion, no retrieval por defecto");
+        }
 
         // Estas senales implican dependencia fuerte del conocimiento propio del sistema.
         List<String> requiredSignals = new ArrayList<>();
@@ -217,6 +385,10 @@ public final class ChatPromptSignals {
                     buildReason("La consulta tecnica puede mejorar con contexto del proyecto", preferredSignals),
                     preferredSignals
             );
+        }
+
+        if (isStandaloneTaskRequest(text)) {
+            return RagDecision.off("Solicitud ejecutable sin dependencia explicita del corpus");
         }
 
         // Por defecto se intenta RAG en modo PREFERRED: la compuerta decide si hay contenido relevante.
@@ -305,6 +477,81 @@ public final class ChatPromptSignals {
         }
 
         return hasRepeatedSentence(text);
+    }
+
+    private static IntentCategory resolveIntentCategory(boolean textRender,
+                                                        boolean smallTalk,
+                                                        boolean homeAutomation,
+                                                        boolean auditLike,
+                                                        boolean complex,
+                                                        boolean multiStep,
+                                                        boolean executionLike,
+                                                        boolean lookupLike) {
+        if (textRender) {
+            return IntentCategory.TEXT_RENDER;
+        }
+        if (smallTalk) {
+            return IntentCategory.SMALL_TALK;
+        }
+        if (homeAutomation) {
+            return IntentCategory.HOME_AUTOMATION;
+        }
+        if (auditLike || complex || multiStep) {
+            return IntentCategory.ANALYSIS_AUDIT;
+        }
+        if (executionLike && !lookupLike) {
+            return IntentCategory.TASK_EXECUTION;
+        }
+        if (lookupLike) {
+            return IntentCategory.FACT_LOOKUP;
+        }
+        return IntentCategory.UNKNOWN;
+    }
+
+    private static ResponseStyle resolveResponseStyle(String text,
+                                                      boolean briefRequested,
+                                                      boolean detailedRequested,
+                                                      boolean complex,
+                                                      boolean multiStep) {
+        if (briefRequested) {
+            return ResponseStyle.BRIEF;
+        }
+        if (detailedRequested || complex || multiStep) {
+            return ResponseStyle.DETAILED;
+        }
+        if (countWords(text) <= 6 && !QUESTION_LIKE_HINTS.matcher(text).find()) {
+            return ResponseStyle.BRIEF;
+        }
+        return ResponseStyle.STANDARD;
+    }
+
+    private static boolean isStandaloneTaskRequest(String text) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        if (!TASK_EXECUTION_HINTS.matcher(text).find()) {
+            return false;
+        }
+        if (QUESTION_LIKE_HINTS.matcher(text).find() || text.contains("?") || text.contains("\u00BF")) {
+            return false;
+        }
+        if (RAG_REQUIRED_CONTEXT_HINTS.matcher(text).find() || RAG_PREFERRED_HINTS.matcher(text).find()) {
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean containsCriticalActuation(String text) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        return HOME_CRITICAL_ACTUATION_HINTS.matcher(text).find();
+    }
+
+    private static void collectBooleanSignal(List<String> signals, boolean condition, String label) {
+        if (condition) {
+            signals.add(label);
+        }
     }
 
     /**
@@ -402,6 +649,39 @@ public final class ChatPromptSignals {
             return 0;
         }
         return text.trim().split("\\s+").length;
+    }
+
+    /**
+     * Resultado estructurado de captura de intencion del turno.
+     */
+    public record IntentProfile(IntentCategory category,
+                                ResponseStyle responseStyle,
+                                boolean homeAutomation,
+                                boolean autonomousDecisionRequested,
+                                boolean learningRequested,
+                                boolean requiresConfirmation,
+                                String reason,
+                                List<String> signals) {
+
+        public IntentProfile {
+            category = category == null ? IntentCategory.UNKNOWN : category;
+            responseStyle = responseStyle == null ? ResponseStyle.STANDARD : responseStyle;
+            reason = reason == null ? "" : reason.trim();
+            signals = signals == null ? List.of() : List.copyOf(signals);
+        }
+
+        public static IntentProfile unknown(String reason, List<String> signals) {
+            return new IntentProfile(
+                    IntentCategory.UNKNOWN,
+                    ResponseStyle.STANDARD,
+                    false,
+                    false,
+                    false,
+                    false,
+                    reason,
+                    signals
+            );
+        }
     }
 
     /**

@@ -14,10 +14,8 @@ import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.model;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.view;
 
 @WebMvcTest(AuthController.class)
 @AutoConfigureMockMvc(addFilters = false)
@@ -33,19 +31,19 @@ class AuthControllerTest {
     private AuthService authService;
 
     @Test
-    void registerPageReturnsRegisterView() throws Exception {
+    void registerPageRedirectsToAngularRoute() throws Exception {
         mockMvc.perform(get("/register")
                         .requestAttr("_csrf", new DefaultCsrfToken("X-CSRF-TOKEN", "_csrf", "test-token")))
-                .andExpect(status().isOk())
-                .andExpect(view().name("register"));
+                .andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrl("/app/register"));
     }
 
     @Test
-    void loginPageReturnsLoginView() throws Exception {
+    void loginPageRedirectsToAngularRoute() throws Exception {
         mockMvc.perform(get("/login")
                         .requestAttr("_csrf", new DefaultCsrfToken("X-CSRF-TOKEN", "_csrf", "test-token")))
-                .andExpect(status().isOk())
-                .andExpect(view().name("login"));
+                .andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrl("/app/login"));
     }
 
     @Test
@@ -53,15 +51,15 @@ class AuthControllerTest {
         doNothing().when(authService).register(eq("ana"), eq("secret123"), eq("CODE-1"));
 
         mockMvc.perform(post("/register")
-                        .param("username", "ana")
-                        .param("password", "secret123")
-                        .param("code", "CODE-1"))
+                .param("username", "ana")
+                .param("password", "secret123")
+                .param("code", "CODE-1"))
                 .andExpect(status().is3xxRedirection())
-                .andExpect(redirectedUrl("/login?registered=1"));
+                .andExpect(redirectedUrl("/app/login?registered=1"));
     }
 
     @Test
-    void registerFailureReturnsRegisterViewWithError() throws Exception {
+    void registerFailureRedirectsBackToAngularRegister() throws Exception {
         doThrow(new IllegalArgumentException("Codigo invalido"))
                 .when(authService).register(eq("ana"), eq("secret123"), eq("BAD"));
 
@@ -70,8 +68,7 @@ class AuthControllerTest {
                         .param("username", "ana")
                         .param("password", "secret123")
                         .param("code", "BAD"))
-                .andExpect(status().isOk())
-                .andExpect(view().name("register"))
-                .andExpect(model().attribute("error", "Codigo invalido"));
+                .andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrl("/app/register?error=1&message=Codigo%20invalido"));
     }
 }

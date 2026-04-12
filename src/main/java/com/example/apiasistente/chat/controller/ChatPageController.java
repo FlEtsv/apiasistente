@@ -1,6 +1,5 @@
 package com.example.apiasistente.chat.controller;
 
-import com.example.apiasistente.setup.service.SetupConfigService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -12,25 +11,24 @@ import org.springframework.web.bind.annotation.GetMapping;
 @Controller
 public class ChatPageController {
 
-    private final SetupConfigService setupConfigService;
     private final String grafanaBaseUrl;
     private final String prometheusBaseUrl;
 
     public ChatPageController(
-            SetupConfigService setupConfigService,
             @Value("${monitoring.grafana-url:http://192.168.1.61:3000}") String grafanaBaseUrl,
             @Value("${monitoring.prometheus-url:http://192.168.1.61:9090}") String prometheusBaseUrl
     ) {
-        this.setupConfigService = setupConfigService;
         this.grafanaBaseUrl = normalizeBaseUrl(grafanaBaseUrl, 3000);
         this.prometheusBaseUrl = normalizeBaseUrl(prometheusBaseUrl, 9090);
     }
 
-    @GetMapping("/chat")
-    public String chatPage(Model model) {
-        if (!setupConfigService.isConfigured()) {
-            return "redirect:/setup";
-        }
+    @GetMapping({"/chat", "/chat/"})
+    public String chatPage() {
+        return "redirect:/app/chat";
+    }
+
+    @GetMapping("/chat/legacy")
+    public String legacyChatPage(Model model) {
         model.addAttribute("grafanaBaseUrl", grafanaBaseUrl);
         model.addAttribute("prometheusBaseUrl", prometheusBaseUrl);
         return "chat";

@@ -98,5 +98,42 @@ class ChatPromptSignalsTest {
                 ChatPromptSignals.routeIntent("Explica paso a paso como ordenar mis ideas para una propuesta")
         );
     }
+
+    @Test
+    void capturesHomeAutomationAutonomyAndConfirmationNeeds() {
+        ChatPromptSignals.IntentProfile profile = ChatPromptSignals.captureIntent(
+                "Quiero que controles mi casa y desactives la alarma automaticamente sin preguntar",
+                false,
+                false
+        );
+
+        assertEquals(ChatPromptSignals.IntentCategory.HOME_AUTOMATION, profile.category());
+        assertTrue(profile.homeAutomation());
+        assertTrue(profile.autonomousDecisionRequested());
+        assertTrue(profile.requiresConfirmation());
+    }
+
+    @Test
+    void avoidsRagForStandaloneExecutionTaskWithoutContextDependency() {
+        ChatPromptSignals.RagDecision decision = ChatPromptSignals.ragDecision(
+                "Redacta un correo de seguimiento para cliente enterprise en tono formal",
+                false
+        );
+
+        assertEquals(ChatPromptSignals.RagMode.OFF, decision.mode());
+        assertFalse(decision.enabled());
+    }
+
+    @Test
+    void capturesDetailedStyleForExtensiveAuditRequests() {
+        ChatPromptSignals.IntentProfile profile = ChatPromptSignals.captureIntent(
+                "Haz una auditoria extensa del sistema rag con metricas cuantificables y plan detallado",
+                false,
+                false
+        );
+
+        assertEquals(ChatPromptSignals.IntentCategory.ANALYSIS_AUDIT, profile.category());
+        assertEquals(ChatPromptSignals.ResponseStyle.DETAILED, profile.responseStyle());
+    }
 }
 

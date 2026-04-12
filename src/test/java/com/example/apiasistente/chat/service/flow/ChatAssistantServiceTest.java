@@ -131,6 +131,7 @@ class ChatAssistantServiceTest {
                 List.of(),
                 turnPlan,
                 ChatPromptSignals.IntentRoute.FACTUAL_TECH,
+                ChatPromptSignals.captureIntent(userText),
                 true,
                 false,
                 false,

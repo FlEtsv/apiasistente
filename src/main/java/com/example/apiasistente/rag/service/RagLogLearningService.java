@@ -45,6 +45,7 @@ public class RagLogLearningService {
             "(?i)((?:api[-_ ]?key|token|secret|password|passwd|pwd)\\s*[:=]\\s*)([^\\s,;]+)"
     );
     private static final Pattern JWT_PATTERN = Pattern.compile("\\beyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\b");
+    private static final int UPSERT_MAX_ATTEMPTS = 3;
 
     private final RagLogLearningProperties properties;
     private final RagService ragService;
@@ -142,10 +143,47 @@ public class RagLogLearningService {
         String source = normalizeSource(properties.getSource());
         String tags = normalizeTags(properties.getTags());
 
-        ragService.upsertDocumentForOwner(owner, title, document, source, tags);
+        upsertWithRetry(owner, title, document, source, tags);
         lastHashesByPath.put(path, digest);
         log.debug("RAG log-learning ingested path='{}' trigger='{}' sizeChars={}", path, trigger, document.length());
         return true;
+    }
+
+    private void upsertWithRetry(String owner,
+                                 String title,
+                                 String document,
+                                 String source,
+                                 String tags) {
+        RuntimeException last = null;
+        for (int attempt = 1; attempt <= UPSERT_MAX_ATTEMPTS; attempt++) {
+            try {
+                ragService.upsertDocumentForOwner(owner, title, document, source, tags);
+                return;
+            } catch (RuntimeException ex) {
+                last = ex;
+                if (!isTransientSqlContention(ex) || attempt >= UPSERT_MAX_ATTEMPTS) {
+                    throw ex;
+                }
+                long backoffMs = 120L * attempt;
+                log.warn(
+                        "RAG log-learning contention en upsert intento={} de {} title='{}'. Reintentando en {} ms. cause={}",
+                        attempt,
+                        UPSERT_MAX_ATTEMPTS,
+                        title,
+                        backoffMs,
+                        compactMessage(ex)
+                );
+                try {
+                    Thread.sleep(backoffMs);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException("Ingesta de logs interrumpida durante reintento.", ie);
+                }
+            }
+        }
+        if (last != null) {
+            throw last;
+        }
     }
 
     private String buildDocument(Path path, String body, Instant lastModifiedAt) {
@@ -321,6 +359,29 @@ public class RagLogLearningService {
 
     private static boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private boolean isTransientSqlContention(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            String message = compactMessage(current);
+            if (message.contains("deadlock found when trying to get lock")
+                    || message.contains("lock wait timeout exceeded")
+                    || message.contains("sqlstate: 40001")
+                    || message.contains("could not serialize")
+                    || message.contains("cannot acquire lock")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private String compactMessage(Throwable error) {
+        if (error == null || error.getMessage() == null || error.getMessage().isBlank()) {
+            return "sin detalle";
+        }
+        return error.getMessage().replaceAll("\\s+", " ").trim().toLowerCase();
     }
 
     private boolean isSetupReady() {

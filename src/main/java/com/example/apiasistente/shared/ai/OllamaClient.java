@@ -2,12 +2,15 @@ package com.example.apiasistente.shared.ai;
 
 import com.example.apiasistente.chat.service.ChatRuntimeAdaptationService;
 import com.example.apiasistente.shared.config.OllamaProperties;
+import com.example.apiasistente.shared.exception.ServiceUnavailableException;
 import com.example.apiasistente.setup.service.SetupConfigService;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.HttpClientErrorException;
@@ -15,6 +18,10 @@ import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
+import java.io.InterruptedIOException;
+import java.net.ConnectException;
+import java.net.SocketException;
+import java.net.SocketTimeoutException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +34,7 @@ public class OllamaClient {
 
     private static final double DEFAULT_TEMPERATURE = 0.2d;
     private static final Logger log = LoggerFactory.getLogger(OllamaClient.class);
+    private static final int TRANSIENT_MAX_ATTEMPTS = 2;
 
     private final RestClient ollama;
     private final OllamaProperties props;
@@ -73,24 +81,10 @@ public class OllamaClient {
 
         long startNanos = System.nanoTime();
         try {
-            ChatResponse res = resolveClient().post()
-                    .uri("/chat")
-                    .body(req)
-                    .retrieve()
-                    .body(ChatResponse.class);
+            ChatResponse res = postForJson("/chat", req, ChatResponse.class, "Ollama chat");
 
             if (res == null || res.message == null) return "";
             return res.message.content == null ? "" : res.message.content;
-        } catch (HttpClientErrorException | HttpServerErrorException e) {
-            throw new IllegalStateException(
-                    "Ollama chat fallo. Status=" + e.getStatusCode() +
-                            " Body=" + e.getResponseBodyAsString(),
-                    e
-            );
-        } catch (ResourceAccessException e) {
-            throw new IllegalStateException("Ollama chat no disponible: " + safeMessage(e), e);
-        } catch (RestClientException e) {
-            throw new IllegalStateException("Ollama chat fallo: " + safeMessage(e), e);
         } finally {
             recordModelLatency(startNanos);
         }
@@ -100,39 +94,23 @@ public class OllamaClient {
      * Retrieval usa un solo embedding por consulta; se alinea con el endpoint actual `/embed`.
      */
     public double[] embedOne(String text) {
-        try {
-            EmbedRequest req = new EmbedRequest(requireEmbedModel(), text);
-            EmbedResponse res = resolveClient().post()
-                    .uri("/embed")
-                    .body(req)
-                    .retrieve()
-                    .body(EmbedResponse.class);
+        EmbedRequest req = new EmbedRequest(requireEmbedModel(), text);
+        EmbedResponse res = postForJson("/embed", req, EmbedResponse.class, "Ollama embed");
 
-            if (res == null || res.embeddings == null || res.embeddings.isEmpty()) {
-                return new double[0];
-            }
-
-            List<Double> firstEmbedding = res.embeddings.get(0);
-            if (firstEmbedding == null || firstEmbedding.isEmpty()) {
-                return new double[0];
-            }
-            return toPrimitive(firstEmbedding);
-        } catch (HttpClientErrorException | HttpServerErrorException e) {
-            throw new IllegalStateException(
-                    "Ollama embed fallo. Status=" + e.getStatusCode() +
-                            " Body=" + e.getResponseBodyAsString(),
-                    e
-            );
+        if (res == null || res.embeddings == null || res.embeddings.isEmpty()) {
+            return new double[0];
         }
+
+        List<Double> firstEmbedding = res.embeddings.get(0);
+        if (firstEmbedding == null || firstEmbedding.isEmpty()) {
+            return new double[0];
+        }
+        return toPrimitive(firstEmbedding);
     }
 
     public List<double[]> embedMany(List<String> texts) {
         EmbedRequest req = new EmbedRequest(requireEmbedModel(), texts);
-        EmbedResponse res = resolveClient().post()
-                .uri("/embed")
-                .body(req)
-                .retrieve()
-                .body(EmbedResponse.class);
+        EmbedResponse res = postForJson("/embed", req, EmbedResponse.class, "Ollama embed");
 
         if (res == null || res.embeddings == null) return List.of();
         return res.embeddings.stream().map(this::toPrimitive).toList();
@@ -266,7 +244,115 @@ public class OllamaClient {
         if (defaultBase != null && defaultBase.equalsIgnoreCase(baseUrl.trim())) {
             return ollama;
         }
-        return RestClient.builder().baseUrl(baseUrl.trim()).build();
+        return RestClient.builder()
+                .baseUrl(baseUrl.trim())
+                .requestFactory(buildRequestFactory())
+                .build();
+    }
+
+    private SimpleClientHttpRequestFactory buildRequestFactory() {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        int connectMs = props.getConnectTimeoutMs() > 0 ? props.getConnectTimeoutMs() : 5_000;
+        int readMs = props.getReadTimeoutMs() > 0 ? props.getReadTimeoutMs() : 120_000;
+        factory.setConnectTimeout(connectMs);
+        factory.setReadTimeout(readMs);
+        return factory;
+    }
+
+    private <T> T postForJson(String uri, Object request, Class<T> responseType, String operationLabel) {
+        ResourceAccessException lastResourceAccess = null;
+        RestClientException lastRestClientException = null;
+        String lastBody = "";
+
+        for (int attempt = 1; attempt <= TRANSIENT_MAX_ATTEMPTS; attempt++) {
+            try {
+                String rawBody = resolveClient().post()
+                        .uri(uri)
+                        .body(request)
+                        .retrieve()
+                        .body(String.class);
+                lastBody = rawBody == null ? "" : rawBody;
+                if (rawBody == null || rawBody.isBlank()) {
+                    return null;
+                }
+                return mapper.readValue(rawBody, responseType);
+            } catch (JsonProcessingException e) {
+                throw new IllegalStateException(
+                        operationLabel + " devolvio JSON invalido: " + safeMessage(e)
+                                + " Body=" + previewBody(lastBody),
+                        e
+                );
+            } catch (HttpClientErrorException | HttpServerErrorException e) {
+                throw new IllegalStateException(
+                        operationLabel + " fallo. Status=" + e.getStatusCode() +
+                                " Body=" + e.getResponseBodyAsString(),
+                        e
+                );
+            } catch (ResourceAccessException e) {
+                lastResourceAccess = e;
+                if (!isTransientConnectivityIssue(e) || attempt >= TRANSIENT_MAX_ATTEMPTS) {
+                    throw new ServiceUnavailableException(operationLabel + " no disponible: " + safeMessage(e), e);
+                }
+                pauseBeforeRetry(operationLabel, attempt, e);
+            } catch (RestClientException e) {
+                lastRestClientException = e;
+                if (!isTransientConnectivityIssue(e) || attempt >= TRANSIENT_MAX_ATTEMPTS) {
+                    throw new ServiceUnavailableException(operationLabel + " fallo temporal: " + safeMessage(e), e);
+                }
+                pauseBeforeRetry(operationLabel, attempt, e);
+            }
+        }
+
+        if (lastResourceAccess != null) {
+            throw new ServiceUnavailableException(
+                    operationLabel + " no disponible: " + safeMessage(lastResourceAccess),
+                    lastResourceAccess
+            );
+        }
+        if (lastRestClientException != null) {
+            throw new ServiceUnavailableException(
+                    operationLabel + " fallo temporal: " + safeMessage(lastRestClientException),
+                    lastRestClientException
+            );
+        }
+        throw new ServiceUnavailableException(operationLabel + " no disponible: sin detalle");
+    }
+
+    private void pauseBeforeRetry(String operationLabel, int attempt, Exception error) {
+        long backoffMs = 200L * attempt;
+        log.warn(
+                "{} transitorio intento={} de {}. Reintentando en {} ms. cause={}",
+                operationLabel,
+                attempt,
+                TRANSIENT_MAX_ATTEMPTS,
+                backoffMs,
+                safeMessage(error)
+        );
+        try {
+            Thread.sleep(backoffMs);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw new ServiceUnavailableException(operationLabel + " interrumpido durante reintento.", ie);
+        }
+    }
+
+    private boolean isTransientConnectivityIssue(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof SocketTimeoutException
+                    || current instanceof ConnectException
+                    || current instanceof SocketException
+                    || current instanceof InterruptedIOException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        String message = safeMessage(error).toLowerCase();
+        return message.contains("timed out")
+                || message.contains("timeout")
+                || message.contains("connection reset")
+                || message.contains("connection refused")
+                || message.contains("closed by interrupt");
     }
 
     private String resolveConfiguredBaseUrl() {
@@ -302,6 +388,17 @@ public class OllamaClient {
             return "sin detalle";
         }
         return error.getMessage().replaceAll("\\s+", " ").trim();
+    }
+
+    private String previewBody(String rawBody) {
+        if (rawBody == null || rawBody.isBlank()) {
+            return "<vacio>";
+        }
+        String clean = rawBody.replaceAll("\\s+", " ").trim();
+        if (clean.length() <= 220) {
+            return clean;
+        }
+        return clean.substring(0, 220) + "...";
     }
 
     public record ChatRequest(String model, List<Message> messages, boolean stream, Map<String, Object> options) {}

@@ -12,6 +12,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.domain.Pageable;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
@@ -45,6 +46,9 @@ class RagOpsServiceTest {
     @Mock
     private RagVectorIndexService vectorIndexService;
 
+    @Mock
+    private JdbcTemplate jdbcTemplate;
+
     private RagOpsService service;
 
     @BeforeEach
@@ -53,6 +57,7 @@ class RagOpsServiceTest {
                 docRepo,
                 chunkRepo,
                 vectorRepo,
+                jdbcTemplate,
                 vectorIndexProvider,
                 maintenanceServiceProvider,
                 10,

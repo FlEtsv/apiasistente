@@ -12,7 +12,7 @@ public class RagAdminPageController {
 
     @GetMapping("/rag-admin")
     public String page() {
-        return "rag_admin";
+        return "redirect:/app/rag-admin";
     }
 }
 

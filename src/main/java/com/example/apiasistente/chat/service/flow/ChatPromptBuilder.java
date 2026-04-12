@@ -99,6 +99,7 @@ public class ChatPromptBuilder {
                                 List<RagService.ScoredChunk> scored,
                                 String visualBridge,
                                 List<ChatMediaService.PreparedMedia> media,
+                                ChatPromptSignals.IntentProfile intentProfile,
                                 String fallbackMessage) {
         StringBuilder sb = new StringBuilder();
         sb.append("Fuentes RAG (ordenadas por relevancia):\n");
@@ -130,17 +131,16 @@ public class ChatPromptBuilder {
 
         sb.append("\n---\n");
         sb.append("Instrucciones:\n");
-        sb.append("- Marco base: identifica objetivo, restricciones y formato esperado antes de responder.\n");
-        sb.append("- Responde usando SOLO estos fragmentos comprimidos del RAG.\n");
-        sb.append("- Cada afirmacion factual debe incluir cita [S#].\n");
-        sb.append("- Si no hay suficiente respaldo, responde exactamente: \"").append(fallbackMessage).append("\".\n");
-        sb.append("- No inventes, no asumas y no completes huecos.\n");
-        sb.append("- Si piden mejoras de codigo/sistema, prioriza cambios concretos con riesgo y beneficio.\n");
+        sb.append("- Responde usando SOLO el contenido de los fragmentos anteriores.\n");
+        sb.append("- Cita cada afirmacion factual con [S#] referenciando el fragmento correspondiente.\n");
+        sb.append("- Si los fragmentos no contienen informacion suficiente para responder, tu respuesta debe ser EXACTAMENTE esta frase y nada mas: \"").append(fallbackMessage).append("\"\n");
+        sb.append("- No inventes, no asumas y no rellenes huecos con conocimiento externo.\n");
         sb.append("- No afirmes ejecuciones o cambios reales que no consten en el contexto.\n");
-        sb.append("- Responde en castellano.\n");
-        sb.append("- Formatea en Markdown con titulos y subtitulos claros.\n");
-        sb.append("- Si incluyes codigo, usa bloques con triple backticks y lenguaje (ej: ```java).\n\n");
-        sb.append("Pregunta del usuario: ").append(userText);
+        sb.append("- Responde en castellano de forma directa y sin estructuras artificiales.\n");
+        sb.append("- Usa Markdown solo si la respuesta es larga o tecnica; evita encabezados para respuestas breves.\n");
+        sb.append("- Si incluyes codigo, usa bloques con triple backticks y el lenguaje (ej: ```java).\n\n");
+        appendIntentGuidance(sb, intentProfile, true);
+        sb.append("Pregunta: ").append(userText);
 
         return sb.toString();
     }
@@ -151,6 +151,7 @@ public class ChatPromptBuilder {
     public String buildChatBlock(String userText,
                                  String visualBridge,
                                  List<ChatMediaService.PreparedMedia> media,
+                                 ChatPromptSignals.IntentProfile intentProfile,
                                  boolean taskCompletionMode,
                                  boolean textRenderMode) {
         StringBuilder sb = new StringBuilder();
@@ -166,17 +167,14 @@ public class ChatPromptBuilder {
             sb.append('\n');
         }
 
-        sb.append("Instrucciones:\n");
-        sb.append("- Marco base: primero detecta objetivo, limites y formato de salida solicitado.\n");
-        sb.append("- Responde en castellano, de forma directa y util.\n");
-        sb.append("- Si el usuario pide crear, redactar, resolver, planificar o transformar algo, entrega el resultado completo en esta misma respuesta.\n");
-        sb.append("- Si el pedido es tecnico/codigo, propone mejoras accionables (problema -> cambio -> impacto).\n");
-        sb.append("- Usa el historial reciente para resolver referencias breves como \"mas grande\", \"asi\", \"con caracteres\" o \"sin emoji\".\n");
-        sb.append("- Si el usuario corrige formato, tamano o estilo de algo ya mencionado, aplica la correccion directamente.\n");
-        sb.append("- Solo haz UNA pregunta breve si, incluso usando el historial reciente, sigue siendo imposible saber que ejecutar.\n");
-        sb.append("- Evita inventar datos concretos.\n");
-        sb.append("- No afirmes despliegues, tests o cambios en codigo si no se han ejecutado realmente.\n");
-        sb.append("- Mantiene un tono natural y conciso.\n\n");
+        sb.append("Responde en castellano de forma natural y concisa.\n");
+        sb.append("- Si el usuario pide crear, redactar, resolver, planificar o transformar algo, entrega el resultado completo directamente.\n");
+        sb.append("- Si el pedido es tecnico o de codigo, propone mejoras accionables (problema -> cambio -> impacto).\n");
+        sb.append("- Usa el historial reciente para resolver referencias como \"mas grande\", \"asi\", \"sin emoji\".\n");
+        sb.append("- Si el usuario corrige formato, tamano o estilo de algo anterior, aplica solo ese cambio.\n");
+        sb.append("- Haz una pregunta breve solo si es imposible saber que ejecutar incluso con el historial.\n");
+        sb.append("- No inventes datos concretos ni afirmes cambios que no se hayan ejecutado.\n\n");
+        appendIntentGuidance(sb, intentProfile, false);
         if (taskCompletionMode) {
             sb.append("Modo ejecucion directa:\n");
             sb.append("- Devuelve el resultado final directamente, sin pedir confirmacion.\n");
@@ -250,6 +248,56 @@ public class ChatPromptBuilder {
             }
             sb.append('\n');
         }
+    }
+
+    private void appendIntentGuidance(StringBuilder sb,
+                                      ChatPromptSignals.IntentProfile intentProfile,
+                                      boolean ragMode) {
+        if (sb == null || intentProfile == null) {
+            return;
+        }
+
+        sb.append("Perfil de intencion:\n");
+        sb.append("- Categoria detectada: ")
+                .append(intentProfile.category().name())
+                .append(".\n");
+        sb.append("- Nivel de detalle esperado: ")
+                .append(intentProfile.responseStyle().name())
+                .append(".\n");
+
+        switch (intentProfile.responseStyle()) {
+            case BRIEF -> {
+                sb.append("- Responde en 3-6 lineas como maximo salvo que el usuario pida ampliar.\n");
+                sb.append("- Evita introducciones y cierres redundantes.\n");
+            }
+            case DETAILED -> {
+                sb.append("- Entrega respuesta estructurada, con pasos accionables y riesgos.\n");
+                sb.append("- Prioriza completitud tecnica sobre brevedad.\n");
+            }
+            default -> {
+                sb.append("- Mantiene un tono natural, directo y de longitud media.\n");
+                sb.append("- Evita relleno verbal y repeticiones.\n");
+            }
+        }
+
+        if (intentProfile.homeAutomation()) {
+            sb.append("- Domotica detectada: no afirmes que actuaste sobre dispositivos reales si no hubo ejecucion confirmada.\n");
+            sb.append("- Ofrece salida en formato operativo: intencion detectada -> accion propuesta -> validacion.\n");
+            if (intentProfile.requiresConfirmation()) {
+                sb.append("- Requiere confirmacion explicita antes de acciones de riesgo (cerraduras, alarma, accesos, energia).\n");
+            }
+            if (intentProfile.autonomousDecisionRequested()) {
+                sb.append("- El usuario pide autonomia: define limites de seguridad, modo manual de emergencia y registro de decisiones antes de automatizar.\n");
+            }
+        }
+
+        if (intentProfile.learningRequested()) {
+            sb.append("- Si propone aprendizaje continuo, explica feedback loop, metricas y criterios de rollback.\n");
+        }
+        if (ragMode) {
+            sb.append("- Si no hay evidencia suficiente en fuentes RAG, aplica el fallback sin completar con conocimiento externo.\n");
+        }
+        sb.append('\n');
     }
 
     /**

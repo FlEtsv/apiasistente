@@ -1,5 +1,6 @@
 package com.example.apiasistente.shared.controller;
 
+import com.example.apiasistente.shared.exception.ServiceUnavailableException;
 import com.example.apiasistente.shared.dto.ApiError;
 import com.example.apiasistente.shared.util.RequestIdHolder;
 import jakarta.servlet.http.HttpServletRequest;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerMapping;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -61,11 +63,29 @@ public class GlobalExceptionHandler {
         return build(resolved, message == null || message.isBlank() ? ex.getMessage() : message, List.of(), req, ex, resolved.is5xxServerError());
     }
 
+    @ExceptionHandler(ServiceUnavailableException.class)
+    public ResponseEntity<ApiError> handleServiceUnavailable(ServiceUnavailableException ex, HttpServletRequest req) {
+        return build(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), List.of(), req, ex, false);
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiError> handleNotFoundResource(NoResourceFoundException ex, HttpServletRequest req) {
+        return build(HttpStatus.NOT_FOUND, ex.getMessage(), List.of(), req, ex, false);
+    }
+
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<ApiError> handleIllegalState(IllegalStateException ex, HttpServletRequest req) {
         Throwable cause = ex.getCause();
         if (cause instanceof HttpStatusCodeException hse) {
             return handleHttpClient(hse, req);
+        }
+        String message = ex.getMessage() == null ? "" : ex.getMessage().toLowerCase();
+        if (message.contains("no disponible")
+                || message.contains("interrumpida")
+                || message.contains("interrumpido")
+                || message.contains("timed out")
+                || message.contains("timeout")) {
+            return build(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), List.of(), req, ex, false);
         }
         return build(HttpStatus.INTERNAL_SERVER_ERROR, ex.getMessage(), List.of(), req, ex, true);
     }

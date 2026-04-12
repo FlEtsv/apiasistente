@@ -7,8 +7,8 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.view;
 
 @WebMvcTest(MonitorPageController.class)
 @AutoConfigureMockMvc(addFilters = false)
@@ -21,9 +21,9 @@ class MonitorPageControllerTest {
     private MockMvc mockMvc;
 
     @Test
-    void monitorPageReturnsView() throws Exception {
+    void monitorPageRedirectsToAngularWorkspace() throws Exception {
         mockMvc.perform(get("/monitor"))
-                .andExpect(status().isOk())
-                .andExpect(view().name("monitor"));
+                .andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrl("/app/monitor"));
     }
 }

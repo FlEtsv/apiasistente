@@ -24,11 +24,11 @@ public class HomeController {
     @GetMapping("/")
     public String home(Authentication authentication) {
         if (authentication == null || !authentication.isAuthenticated()) {
-            return "redirect:/login";
+            return "redirect:/app/login";
         }
 
         if (!setupConfigService.isConfigured()) {
-            return "redirect:/setup";
+            return "redirect:/app/setup";
         }
 
         Set<String> auths = authentication.getAuthorities()
@@ -37,20 +37,23 @@ public class HomeController {
                 .collect(Collectors.toSet());
 
         if (auths.contains("PERM_CHAT")) {
-            return "redirect:/chat";
+            return "redirect:/app/chat";
         }
         if (auths.contains("PERM_MONITOR")) {
-            return "redirect:/monitor";
+            return "redirect:/app/monitor";
         }
         if (auths.contains("PERM_RAG")) {
-            return "redirect:/rag-admin";
+            return "redirect:/app/rag-admin";
         }
-        return "redirect:/access-denied";
+        if (auths.contains("PERM_API_KEYS")) {
+            return "redirect:/app/admin";
+        }
+        return "redirect:/app/access-denied";
     }
 
     @GetMapping("/access-denied")
     public String accessDenied() {
-        return "access_denied";
+        return "redirect:/app/access-denied";
     }
 }
 

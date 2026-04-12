@@ -1,6 +1,7 @@
 package com.example.apiasistente.shared.ai;
 
 import com.example.apiasistente.shared.config.OllamaProperties;
+import com.example.apiasistente.shared.exception.ServiceUnavailableException;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -11,10 +12,12 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OllamaClientTest {
@@ -60,6 +63,79 @@ class OllamaClientTest {
         assertArrayEquals(new double[]{0.1d, 0.2d, 0.3d}, embedding);
     }
 
+    @Test
+    void chatParsesJsonBodyEvenWhenServerRepliesAsOctetStream() throws Exception {
+        AtomicReference<String> pathRef = new AtomicReference<>();
+        AtomicReference<String> bodyRef = new AtomicReference<>();
+
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/api/chat", exchange -> {
+            pathRef.set(exchange.getRequestURI().getPath());
+            bodyRef.set(readBody(exchange));
+            respondWithContentType(exchange, """
+                    {"model":"test-chat","message":{"role":"assistant","content":"hola desde octet-stream"},"done":true}
+                    """, "application/octet-stream");
+        });
+        server.start();
+
+        OllamaProperties props = new OllamaProperties();
+        props.setBaseUrl("http://localhost:" + server.getAddress().getPort() + "/api");
+        props.setChatModel("test-chat");
+
+        OllamaClient client = new OllamaClient(
+                RestClient.builder().baseUrl(props.getBaseUrl()).build(),
+                props
+        );
+
+        String response = client.chat(List.of(new OllamaClient.Message("user", "hola")));
+
+        assertEquals("/api/chat", pathRef.get());
+        assertTrue(bodyRef.get().contains("\"model\":\"test-chat\""));
+        assertTrue(bodyRef.get().contains("\"content\":\"hola\""));
+        assertEquals("hola desde octet-stream", response);
+    }
+
+    @Test
+    void embedOneParsesJsonBodyEvenWhenServerRepliesAsOctetStream() throws Exception {
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/api/embed", exchange -> respondWithContentType(exchange, """
+                {"model":"test-embed","embeddings":[[0.4,0.5]]}
+                """, "application/octet-stream"));
+        server.start();
+
+        OllamaProperties props = new OllamaProperties();
+        props.setBaseUrl("http://localhost:" + server.getAddress().getPort() + "/api");
+        props.setEmbedModel("test-embed");
+
+        OllamaClient client = new OllamaClient(
+                RestClient.builder().baseUrl(props.getBaseUrl()).build(),
+                props
+        );
+
+        double[] embedding = client.embedOne("octet stream");
+
+        assertArrayEquals(new double[]{0.4d, 0.5d}, embedding);
+    }
+
+    @Test
+    void chatThrowsServiceUnavailableWhenOllamaIsUnreachable() {
+        OllamaProperties props = new OllamaProperties();
+        props.setBaseUrl("http://127.0.0.1:1/api");
+        props.setChatModel("test-chat");
+        props.setConnectTimeoutMs(200);
+        props.setReadTimeoutMs(200);
+
+        OllamaClient client = new OllamaClient(
+                RestClient.builder().baseUrl(props.getBaseUrl()).build(),
+                props
+        );
+
+        assertThrows(
+                ServiceUnavailableException.class,
+                () -> client.chat(List.of(new OllamaClient.Message("user", "hola")))
+        );
+    }
+
     private static String readBody(HttpExchange exchange) throws IOException {
         try (InputStream body = exchange.getRequestBody()) {
             return new String(body.readAllBytes(), StandardCharsets.UTF_8);
@@ -67,8 +143,12 @@ class OllamaClientTest {
     }
 
     private static void respondJson(HttpExchange exchange, String body) throws IOException {
+        respondWithContentType(exchange, body, "application/json");
+    }
+
+    private static void respondWithContentType(HttpExchange exchange, String body, String contentType) throws IOException {
         byte[] payload = body.getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().add("Content-Type", "application/json");
+        exchange.getResponseHeaders().add("Content-Type", contentType);
         exchange.sendResponseHeaders(200, payload.length);
         exchange.getResponseBody().write(payload);
         exchange.close();

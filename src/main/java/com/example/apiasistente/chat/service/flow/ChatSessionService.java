@@ -218,7 +218,7 @@ public class ChatSessionService {
     @Transactional
     public int deleteAllSessions(String username) {
         AppUser user = requireUser(username);
-        List<ChatSession> sessions = sessionRepo.findByUser_Id(user.getId());
+        List<ChatSession> sessions = sessionRepo.findByUser_IdAndExternalUserIdIsNull(user.getId());
         if (sessions.isEmpty()) {
             return 0;
         }

@@ -4,6 +4,7 @@ import com.example.apiasistente.chat.config.ChatQueueProperties;
 import com.example.apiasistente.chat.dto.ChatMediaInput;
 import com.example.apiasistente.chat.dto.ChatResponse;
 import com.example.apiasistente.monitoring.service.AppMetricsService;
+import com.example.apiasistente.shared.exception.ServiceUnavailableException;
 import com.example.apiasistente.shared.util.RequestIdHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,6 +23,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Serializa turnos de chat por clave de sesion.
@@ -36,6 +38,7 @@ public class ChatQueueService {
     private final ChatQueueProperties properties;
     private final ExecutorService executor;
     private final Map<String, SessionQueue> sessionQueues = new ConcurrentHashMap<>();
+    private final AtomicBoolean shuttingDown = new AtomicBoolean(false);
     private AppMetricsService metricsService;
 
     public ChatQueueService(ChatService chatService, ChatQueueProperties properties) {
@@ -81,6 +84,9 @@ public class ChatQueueService {
             return enqueueChat(username, sessionId, message, model, externalUserId, media).get();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            if (shuttingDown.get()) {
+                throw new ServiceUnavailableException("La cola de chat fue interrumpida por apagado.", e);
+            }
             throw new IllegalStateException("La cola de chat fue interrumpida.", e);
         } catch (ExecutionException e) {
             Throwable cause = e.getCause();
@@ -132,6 +138,12 @@ public class ChatQueueService {
                                                        String model,
                                                        String externalUserId,
                                                        List<ChatMediaInput> media) {
+        if (shuttingDown.get()) {
+            CompletableFuture<ChatResponse> failed = new CompletableFuture<>();
+            failed.completeExceptionally(new ServiceUnavailableException("La cola de chat esta en apagado."));
+            return failed;
+        }
+
         String queueKey = resolveQueueKey(username, sessionId, externalUserId);
         SessionQueue queue = sessionQueues.computeIfAbsent(queueKey, key -> new SessionQueue());
         String requestId = RequestIdHolder.ensure();
@@ -177,6 +189,11 @@ public class ChatQueueService {
             while (true) {
                 QueuedChat next = queue.poll();
                 if (next == null) {
+                    if (shuttingDown.get()) {
+                        queue.stopProcessing();
+                        cleanupIfIdle(queueKey, queue);
+                        return;
+                    }
                     // Evita condiciones de carrera: si entrÃ³ algo justo despuÃ©s del poll,
                     // no liberamos el procesamiento hasta confirmar que la cola sigue vacÃ­a.
                     if (queue.stopProcessingIfIdle()) {
@@ -319,7 +336,19 @@ public class ChatQueueService {
      */
     @PreDestroy
     public void shutdown() {
+        if (!shuttingDown.compareAndSet(false, true)) {
+            return;
+        }
+        ServiceUnavailableException shutdownError =
+                new ServiceUnavailableException("La cola de chat fue detenida por apagado del servidor.");
+        for (SessionQueue queue : sessionQueues.values()) {
+            for (QueuedChat queued : queue.drainPending()) {
+                queued.response().completeExceptionally(shutdownError);
+            }
+            queue.stopProcessing();
+        }
         executor.shutdownNow();
+        refreshQueueMetrics();
     }
 
     /**
@@ -367,6 +396,10 @@ public class ChatQueueService {
             return true;
         }
 
+        synchronized void stopProcessing() {
+            processing = false;
+        }
+
         /**
          * Indica si la cola no tiene trabajo pendiente ni worker activo.
          */
@@ -376,6 +409,17 @@ public class ChatQueueService {
 
         synchronized int pendingCount() {
             return queue.size();
+        }
+
+        synchronized List<QueuedChat> drainPending() {
+            if (queue.isEmpty()) {
+                return List.of();
+            }
+            List<QueuedChat> drained = new java.util.ArrayList<>(queue.size());
+            while (!queue.isEmpty()) {
+                drained.add(queue.pollFirst());
+            }
+            return drained;
         }
     }
 

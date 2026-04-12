@@ -223,12 +223,14 @@ public class ChatAssistantService {
                 ragContext.scored(),
                 visualBridge,
                 context.preparedMedia(),
+                context.intentProfile(),
                 ragContext.fallbackMessage()
         )
                 : promptBuilder.buildChatBlock(
                 context.userText(),
                 visualBridge,
                 context.preparedMedia(),
+                context.intentProfile(),
                 context.taskCompletionMode(),
                 context.textRenderMode()
         );
@@ -253,11 +255,14 @@ public class ChatAssistantService {
         boolean hasDocumentMedia = context.preparedMedia().stream().anyMatch(item -> hasText(item.documentText()));
 
         log.info(
-                "chat_model_route selected={} tier={} requested={} route={} ragUsed={} ragContext={} directExecution={} textRender={} complex={} multiStep={} hasImageMedia={} hasDocumentMedia={}",
+                "chat_model_route selected={} tier={} requested={} route={} intentCategory={} responseStyle={} requiresConfirmation={} ragUsed={} ragContext={} directExecution={} textRender={} complex={} multiStep={} hasImageMedia={} hasDocumentMedia={}",
                 model,
                 modelTier,
                 context.requestedModel(),
                 context.intentRoute(),
+                context.intentProfile().category(),
+                context.intentProfile().responseStyle(),
+                context.intentProfile().requiresConfirmation(),
                 ragContext.ragUsed(),
                 ragContext.hasRagContext(),
                 context.directExecutionMode(),

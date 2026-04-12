@@ -11,9 +11,8 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.model;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.view;
 
 @WebMvcTest(SetupPageController.class)
 @AutoConfigureMockMvc(addFilters = false)
@@ -26,13 +25,10 @@ class SetupPageControllerTest {
     private SetupConfigService setupConfigService;
 
     @Test
-    void returnsSetupPageWithConfiguredFlag() throws Exception {
-        when(setupConfigService.isConfigured()).thenReturn(true);
-
+    void redirectsSetupPageToAngularWorkspace() throws Exception {
         mockMvc.perform(get("/setup")
                         .requestAttr("_csrf", new DefaultCsrfToken("X-CSRF-TOKEN", "_csrf", "test-token")))
-                .andExpect(status().isOk())
-                .andExpect(view().name("setup"))
-                .andExpect(model().attribute("configured", true));
+                .andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrl("/app/setup"));
     }
 }

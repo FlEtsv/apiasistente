@@ -124,9 +124,12 @@ public class ChatTurnService {
             );
             stageTimes.put("context", elapsedMillis(t0));
             log.info(
-                    "chat_turn_stage stage=context_ready sessionId={} route={} ragNeeded={} reasoningLevel={} mediaCount={} ms={}",
+                    "chat_turn_stage stage=context_ready sessionId={} route={} intentCategory={} responseStyle={} requiresConfirmation={} ragNeeded={} reasoningLevel={} mediaCount={} ms={}",
                     context.session().getId(),
                     context.intentRoute(),
+                    context.intentProfile().category(),
+                    context.intentProfile().responseStyle(),
+                    context.intentProfile().requiresConfirmation(),
                     context.ragNeeded(),
                     context.turnPlan().reasoningLevel(),
                     context.preparedMedia().size(),
@@ -403,6 +406,13 @@ public class ChatTurnService {
         LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
         payload.put("sessionId", safe(context.session().getId()));
         payload.put("intentRoute", context.intentRoute().name());
+        payload.put("intentCategory", context.intentProfile().category().name());
+        payload.put("responseStyle", context.intentProfile().responseStyle().name());
+        payload.put("homeAutomation", context.intentProfile().homeAutomation());
+        payload.put("autonomousDecisionRequested", context.intentProfile().autonomousDecisionRequested());
+        payload.put("learningRequested", context.intentProfile().learningRequested());
+        payload.put("requiresConfirmation", context.intentProfile().requiresConfirmation());
+        payload.put("intentReason", safe(context.intentProfile().reason()));
         payload.put("ragNeeded", context.ragNeeded());
         payload.put("reasoningLevel", context.turnPlan().reasoningLevel().name());
         payload.put("mediaCount", context.preparedMedia().size());
@@ -480,6 +490,12 @@ public class ChatTurnService {
             LinkedHashMap<String, Object> meta = new LinkedHashMap<>();
             meta.put("requestedModel", safe(context.requestedModel()));
             meta.put("intentRoute", context.intentRoute().name());
+            meta.put("intentCategory", context.intentProfile().category().name());
+            meta.put("responseStyle", context.intentProfile().responseStyle().name());
+            meta.put("homeAutomation", context.intentProfile().homeAutomation());
+            meta.put("autonomousDecisionRequested", context.intentProfile().autonomousDecisionRequested());
+            meta.put("learningRequested", context.intentProfile().learningRequested());
+            meta.put("requiresConfirmation", context.intentProfile().requiresConfirmation());
             meta.put("ragUsed", ragContext.ragUsed());
             meta.put("ragRoute", ragContext.ragRoute().name());
             meta.put("sourceCount", ragContext.sources().size());
@@ -531,4 +547,3 @@ public class ChatTurnService {
         return "No pude procesar tu consulta" + ("rag".equals(stage) ? " (error en retrieval)" : "") + ". Intenta de nuevo.";
     }
 }
-

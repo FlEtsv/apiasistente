@@ -154,6 +154,20 @@ class ChatProcessRouterTest {
     }
 
     @Test
+    void routesHomeAutomationControlPromptToAction() {
+        ChatProcessRouter.ProcessDecision decision = router.decide(
+                "Controla mi casa: enciende luces y activa modo noche sin preguntar",
+                "auto",
+                List.of()
+        );
+
+        assertEquals(ChatProcessRouter.ProcessRoute.ACTION, decision.route());
+        assertTrue(decision.needsAction());
+        assertEquals(ChatProcessRouter.PipelineHint.ACTION_EXECUTION, decision.pipeline());
+        assertEquals("text", decision.expectedOutput());
+    }
+
+    @Test
     void routesRepositorySpecificQuestionToRagRoute() {
         ChatProcessRouter.ProcessDecision decision = router.decide(
                 "Cual es el endpoint de esta API para crear una api key?",
@@ -230,6 +244,33 @@ class ChatProcessRouterTest {
         assertEquals(ChatProcessRouter.ProcessRoute.CHAT, decision.route());
         assertEquals("fallback", decision.source());
         assertFalse(decision.usedLlm());
+    }
+
+    @Test
+    void downgradesImageRouteWhenLlmExpectedOutputIsText() {
+        properties.setLlmAssessmentEnabled(true);
+        properties.setHeuristicImageThreshold(0.99);
+        properties.setLlmConfidenceThreshold(0.60);
+        properties.setMinPromptCharsForLlm(6);
+        router = new ChatProcessRouter(modelSelector, ollamaClient, properties);
+
+        when(modelSelector.resolveChatModel(ChatModelSelector.FAST_ALIAS)).thenReturn("qwen2.5:7b");
+        when(ollamaClient.chat(anyList(), anyString())).thenReturn("""
+                {"route":"IMAGE_GENERATE","confidence":0.91,"needs_rag":false,"needs_action":false,"expected_output":"text","reason":"salida textual"}
+                """);
+
+        ChatProcessRouter.ProcessDecision decision = router.decide(
+                "algo visual cinematic 4k",
+                "auto",
+                List.of()
+        );
+
+        assertEquals(ChatProcessRouter.ProcessRoute.CHAT, decision.route());
+        assertEquals("guardrail", decision.source());
+        assertTrue(decision.usedLlm());
+        assertEquals(ChatProcessRouter.PipelineHint.CHAT_FAST, decision.pipeline());
+        assertEquals(ChatModelSelector.FAST_ALIAS, decision.recommendedModelAlias());
+        assertEquals("text", decision.expectedOutput());
     }
 
     private ChatMediaInput imageInput() {

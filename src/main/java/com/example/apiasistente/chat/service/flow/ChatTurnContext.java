@@ -19,12 +19,20 @@ record ChatTurnContext(String username,
                        List<ChatMediaService.PreparedMedia> preparedMedia,
                        ChatTurnPlanner.TurnPlan turnPlan,
                        ChatPromptSignals.IntentRoute intentRoute,
+                       ChatPromptSignals.IntentProfile intentProfile,
                        boolean ragNeeded,
                        boolean complexQuery,
                        boolean multiStepQuery,
                        boolean textRenderMode,
                        boolean directExecutionMode,
                        boolean taskCompletionMode) {
+
+    ChatTurnContext {
+        intentRoute = intentRoute == null ? ChatPromptSignals.IntentRoute.TASK_SIMPLE : intentRoute;
+        intentProfile = intentProfile == null
+                ? ChatPromptSignals.IntentProfile.unknown("missing-intent-profile", List.of())
+                : intentProfile;
+    }
 }
 
 

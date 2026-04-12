@@ -76,25 +76,36 @@ public class ChatTurnContextFactory {
 
         ChatPromptSignals.IntentRoute intentRoute = turnPlan.intentRoute();
         ChatPromptSignals.RagDecision ragDecision = turnPlan.ragDecision();
+        ChatPromptSignals.IntentProfile intentProfile = ChatPromptSignals.captureIntent(
+                userText,
+                hasDocumentMedia,
+                hasImageMedia
+        );
         boolean ragNeeded = turnPlan.ragNeeded();
         boolean complexQuery = turnPlan.complexQuery();
         boolean multiStepQuery = turnPlan.multiStepQuery();
         boolean followUpCorrectionMode = ChatPromptSignals.isFormatRevision(userText);
         boolean textRenderMode = intentRoute == ChatPromptSignals.IntentRoute.TEXT_RENDER;
         boolean directExecutionMode = textRenderMode || followUpCorrectionMode;
-        boolean taskCompletionMode = directExecutionMode
+        boolean taskCompletionMode = (directExecutionMode
                 || intentRoute == ChatPromptSignals.IntentRoute.TASK_SIMPLE
                 || complexQuery
-                || multiStepQuery;
+                || multiStepQuery)
+                && !intentProfile.requiresConfirmation();
 
         // Deja trazabilidad para entender por que el pipeline eligio cierto camino.
         log.info(
-                "rag_decision={} rag_mode={} rag_reason=\"{}\" rag_signals={} intent={} directExecution={} taskCompletion={} textRender={} reasoningLevel={} complex={} multiStep={} confidence={}",
+                "rag_decision={} rag_mode={} rag_reason=\"{}\" rag_signals={} intent={} intentCategory={} responseStyle={} homeAutomation={} autonomy={} requiresConfirmation={} directExecution={} taskCompletion={} textRender={} reasoningLevel={} complex={} multiStep={} confidence={}",
                 ragDecision.enabled() ? "ON" : "OFF",
                 ragDecision.mode(),
                 ragDecision.reason(),
                 ragDecision.signals(),
                 intentRoute,
+                intentProfile.category(),
+                intentProfile.responseStyle(),
+                intentProfile.homeAutomation(),
+                intentProfile.autonomousDecisionRequested(),
+                intentProfile.requiresConfirmation(),
                 directExecutionMode,
                 taskCompletionMode,
                 textRenderMode,
@@ -106,8 +117,13 @@ public class ChatTurnContextFactory {
 
         if (log.isDebugEnabled()) {
             log.debug(
-                    "Turn planner intent={} ragNeeded={} directExecution={} taskCompletion={} textRender={} reasoningLevel={} complex={} multiStep={} confidence={} ragMode={} ragReason=\"{}\"",
+                    "Turn planner intent={} intentCategory={} responseStyle={} homeAutomation={} autonomy={} requiresConfirmation={} ragNeeded={} directExecution={} taskCompletion={} textRender={} reasoningLevel={} complex={} multiStep={} confidence={} ragMode={} ragReason=\"{}\"",
                     intentRoute,
+                    intentProfile.category(),
+                    intentProfile.responseStyle(),
+                    intentProfile.homeAutomation(),
+                    intentProfile.autonomousDecisionRequested(),
+                    intentProfile.requiresConfirmation(),
                     ragNeeded,
                     directExecutionMode,
                     taskCompletionMode,
@@ -120,10 +136,12 @@ public class ChatTurnContextFactory {
                     ragDecision.reason()
             );
         }
-        log.info("chat_turn_matrix hasImageMedia={} hasDocumentMedia={} intent={} ragMode={} reasoningLevel={} expectedPath={}",
+        log.info("chat_turn_matrix hasImageMedia={} hasDocumentMedia={} intent={} intentCategory={} responseStyle={} ragMode={} reasoningLevel={} expectedPath={}",
                 hasImageMedia,
                 hasDocumentMedia,
                 intentRoute,
+                intentProfile.category(),
+                intentProfile.responseStyle(),
                 ragDecision.mode(),
                 turnPlan.reasoningLevel(),
                 hasImageMedia ? "visual-detection+chat" : "text-chat"
@@ -139,6 +157,7 @@ public class ChatTurnContextFactory {
                 preparedMedia,
                 turnPlan,
                 intentRoute,
+                intentProfile,
                 ragNeeded,
                 complexQuery,
                 multiStepQuery,

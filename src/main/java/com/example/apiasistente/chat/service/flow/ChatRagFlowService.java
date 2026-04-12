@@ -5,6 +5,7 @@ import com.example.apiasistente.rag.dto.SourceDto;
 import com.example.apiasistente.rag.service.RagService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -18,6 +19,7 @@ import java.util.Locale;
 public class ChatRagFlowService {
 
     private static final Logger log = LoggerFactory.getLogger(ChatRagFlowService.class);
+    private static final double SECOND_PASS_MIN_SCORE_DELTA = 0.02;
 
     private final ChatPromptBuilder promptBuilder;
     private final ChatHistoryService historyService;
@@ -25,6 +27,15 @@ public class ChatRagFlowService {
     private final ChatGroundingService groundingService;
     private final ChatRagGateService ragGateService;
     private final ChatRagTelemetryService telemetryService;
+
+    @Value("${chat.rag-flow.override-gate-for-uncertain-preferred:true}")
+    private boolean overrideGateForUncertainPreferred;
+
+    @Value("${chat.rag-flow.min-query-chars-for-gate-override:14}")
+    private int minQueryCharsForGateOverride;
+
+    @Value("${chat.rag-flow.second-pass-on-empty-enabled:true}")
+    private boolean secondPassOnEmptyEnabled;
 
     public ChatRagFlowService(ChatPromptBuilder promptBuilder,
                               ChatHistoryService historyService,
@@ -72,13 +83,23 @@ public class ChatRagFlowService {
                 hasDocumentMedia(context.preparedMedia())
         );
         logGateTelemetry(ragDecision, gateDecision);
+        boolean gateOverride = shouldOverrideGateSkip(context, ragDecision, gateDecision);
 
-        if (!gateDecision.attemptRag()) {
+        if (!gateDecision.attemptRag() && !gateOverride) {
             RagService.RetrievalStats stats = RagService.RetrievalStats.empty(gateDecision.owners(), 0.0, 0, 0.0);
             if (gateDecision.forceNoEvidence()) {
                 return ChatRagContext.noEvidence(groundingService, stats);
             }
             return ChatRagContext.noRag(groundingService, stats);
+        }
+        if (gateOverride) {
+            log.info(
+                    "rag_gate_override sessionId={} original_reason={} query_type={} decision_confidence={} reason=uncertain-preferred-skip",
+                    context.session().getId(),
+                    gateDecision.reason(),
+                    gateDecision.decisionAssessment().queryType(),
+                    String.format(Locale.US, "%.3f", gateDecision.decisionAssessment().confidence())
+            );
         }
 
         long retrievalStartNanos = System.nanoTime();
@@ -94,6 +115,13 @@ public class ChatRagFlowService {
         try {
             // Corpus unificado: retrieval sin filtro de propietario.
             retrieval = ragService.retrieveShared(retrievalQuery);
+            retrieval = maybeRunSecondPassRetrieval(
+                    context,
+                    ragDecision,
+                    gateDecision,
+                    retrievalQuery,
+                    retrieval
+            );
         } catch (Exception e) {
             // Si retrieval falla, el turno degrada explicitamente y no responde "a ojo" desde el LLM.
             log.warn("rag_retrieval_error sessionId={} reason={} fallback=retrieval-unavailable",
@@ -152,6 +180,133 @@ public class ChatRagFlowService {
         );
     }
 
+    private RagService.RetrievalResult maybeRunSecondPassRetrieval(ChatTurnContext context,
+                                                                    ChatPromptSignals.RagDecision ragDecision,
+                                                                    ChatRagGateService.GateDecision gateDecision,
+                                                                    String primaryQuery,
+                                                                    RagService.RetrievalResult primaryResult) {
+        if (!shouldRunSecondPass(context, ragDecision, gateDecision, primaryQuery, primaryResult)) {
+            return primaryResult;
+        }
+
+        String secondPassQuery = buildFallbackRetrievalQuery(context.userText());
+        try {
+            RagService.RetrievalResult secondPassResult = ragService.retrieveShared(secondPassQuery);
+            RagService.RetrievalResult selected = selectBestRetrieval(primaryResult, secondPassResult);
+            log.info(
+                    "rag_retrieval_second_pass sessionId={} selected={} primary_has_evidence={} second_has_evidence={} primary_topk={} second_topk={} primary_max_similarity={} second_max_similarity={}",
+                    context.session().getId(),
+                    selected == secondPassResult ? "second-pass" : "primary",
+                    primaryResult.hasEvidence(),
+                    secondPassResult.hasEvidence(),
+                    primaryResult.stats().topKReturned(),
+                    secondPassResult.stats().topKReturned(),
+                    String.format(Locale.US, "%.3f", primaryResult.stats().maxSimilarity()),
+                    String.format(Locale.US, "%.3f", secondPassResult.stats().maxSimilarity())
+            );
+            return selected;
+        } catch (Exception ex) {
+            log.warn(
+                    "rag_retrieval_second_pass_error sessionId={} reason={} fallback=primary-query",
+                    context.session().getId(),
+                    ex.getMessage()
+            );
+            return primaryResult;
+        }
+    }
+
+    private boolean shouldRunSecondPass(ChatTurnContext context,
+                                        ChatPromptSignals.RagDecision ragDecision,
+                                        ChatRagGateService.GateDecision gateDecision,
+                                        String primaryQuery,
+                                        RagService.RetrievalResult primaryResult) {
+        if (!secondPassOnEmptyEnabled || primaryResult == null || primaryResult.hasEvidence()) {
+            return false;
+        }
+        if (context == null || !hasText(context.userText())) {
+            return false;
+        }
+        if (hasDocumentMedia(context.preparedMedia())) {
+            return false;
+        }
+
+        String secondPassQuery = buildFallbackRetrievalQuery(context.userText());
+        if (!hasText(secondPassQuery) || sameRetrievalQuery(primaryQuery, secondPassQuery)) {
+            return false;
+        }
+
+        if (ragDecision != null && ragDecision.requiresEvidence()) {
+            return true;
+        }
+        if (gateDecision == null) {
+            return false;
+        }
+        ChatRagDecisionEngine.DecisionAssessment assessment = gateDecision.decisionAssessment();
+        return assessment.needsRag()
+                || assessment.needsExternalContext()
+                || assessment.verifyAfterDirectAnswer();
+    }
+
+    private RagService.RetrievalResult selectBestRetrieval(RagService.RetrievalResult primaryResult,
+                                                           RagService.RetrievalResult secondPassResult) {
+        if (secondPassResult == null) {
+            return primaryResult;
+        }
+        if (primaryResult == null) {
+            return secondPassResult;
+        }
+
+        if (secondPassResult.hasEvidence() && !primaryResult.hasEvidence()) {
+            return secondPassResult;
+        }
+        if (primaryResult.hasEvidence() && !secondPassResult.hasEvidence()) {
+            return primaryResult;
+        }
+
+        if (secondPassResult.stats().maxSimilarity() > primaryResult.stats().maxSimilarity() + SECOND_PASS_MIN_SCORE_DELTA) {
+            return secondPassResult;
+        }
+        if (secondPassResult.stats().topKReturned() > primaryResult.stats().topKReturned()) {
+            return secondPassResult;
+        }
+        return primaryResult;
+    }
+
+    private boolean shouldOverrideGateSkip(ChatTurnContext context,
+                                           ChatPromptSignals.RagDecision ragDecision,
+                                           ChatRagGateService.GateDecision gateDecision) {
+        if (!overrideGateForUncertainPreferred) {
+            return false;
+        }
+        if (ragDecision == null || ragDecision.requiresEvidence()) {
+            return false;
+        }
+        if (gateDecision == null || gateDecision.attemptRag() || gateDecision.forceNoEvidence()) {
+            return false;
+        }
+        String query = collapseSpaces(context == null ? "" : context.userText());
+        if (query.length() < Math.max(1, minQueryCharsForGateOverride)) {
+            return false;
+        }
+        ChatRagDecisionEngine.DecisionAssessment assessment = gateDecision.decisionAssessment();
+        if (assessment.needsRag() || assessment.needsExternalContext()) {
+            return true;
+        }
+        return assessment.verifyAfterDirectAnswer() && assessment.confidence() < 0.75;
+    }
+
+    private String buildFallbackRetrievalQuery(String userText) {
+        return collapseSpaces(userText);
+    }
+
+    private boolean sameRetrievalQuery(String left, String right) {
+        return normalizeForQueryComparison(left).equals(normalizeForQueryComparison(right));
+    }
+
+    private String normalizeForQueryComparison(String value) {
+        return collapseSpaces(value).toLowerCase(Locale.ROOT);
+    }
+
     /**
      * Emite telemetria de retrieval para diagnosticar calidad de contexto y routing RAG.
      */
@@ -205,6 +360,13 @@ public class ChatRagFlowService {
      */
     private boolean hasText(String value) {
         return value != null && !value.isBlank();
+    }
+
+    private String collapseSpaces(String value) {
+        if (!hasText(value)) {
+            return "";
+        }
+        return value.replaceAll("\\s+", " ").trim();
     }
 
     private boolean hasDocumentMedia(List<ChatMediaService.PreparedMedia> media) {

@@ -66,6 +66,21 @@ public class ChatProcessRouter {
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
     );
 
+    private static final Pattern HOME_AUTOMATION_HINTS = Pattern.compile(
+            "\\b(domotica|dom\\u00f3tica|casa|hogar|luces?|lamparas?|termostato|calefaccion|aire\\s+acondicionado|persianas?|cerradura|puerta\\s+principal|garaje|alarma|riego|camara(?:s)?|enchufe(?:s)?\\s+inteligentes?)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
+    );
+
+    private static final Pattern HOME_AUTOMATION_ACTION_HINTS = Pattern.compile(
+            "\\b(controla(?:r)?|enciende(?:r)?|apaga(?:r)?|abre(?:r)?|cierra(?:r)?|sube(?:r)?|baja(?:r)?|activa(?:r)?|desactiva(?:r)?|ajusta(?:r)?|bloquea(?:r)?|desbloquea(?:r)?|programa(?:r)?\\s+escena|modo\\s+ausente|modo\\s+noche)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
+    );
+
+    private static final Pattern AUTONOMOUS_ACTION_HINTS = Pattern.compile(
+            "\\b(decide\\s+tu|decide\\s+por\\s+mi|sin\\s+preguntar|automaticamente|autonom(?:a|o|amente)|toma\\s+decisiones|actua\\s+solo)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
+    );
+
     private static final Pattern TABLE_HINTS = Pattern.compile(
             "\\b(tabla|excel|csv|columnas?|filas?)\\b",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
@@ -319,6 +334,21 @@ public class ChatProcessRouter {
                     false,
                     false,
                     "image"
+            );
+        }
+
+        if (signals.hasHomeAutomationHint() && (signals.hasActionIntent() || signals.hasAutonomyHint())) {
+            return new ProcessDecision(
+                    ProcessRoute.ACTION,
+                    "hard-rule",
+                    0.94,
+                    "Solicitud de control domotico detectada",
+                    false,
+                    PipelineHint.ACTION_EXECUTION,
+                    ChatModelSelector.CHAT_ALIAS,
+                    false,
+                    true,
+                    "text"
             );
         }
 
@@ -745,7 +775,11 @@ public class ChatProcessRouter {
         boolean hasEditHint = IMAGE_EDIT_HINTS.matcher(text).find();
         boolean hasExtractHint = VISION_EXTRACT_HINTS.matcher(text).find();
         boolean hasAnalysisHint = IMAGE_ANALYSIS_HINTS.matcher(text).find();
-        boolean hasOperationalActionHint = ACTION_HINTS.matcher(text).find();
+        boolean hasHomeAutomationHint = HOME_AUTOMATION_HINTS.matcher(text).find();
+        boolean hasHomeActionHint = HOME_AUTOMATION_ACTION_HINTS.matcher(text).find();
+        boolean hasAutonomyHint = AUTONOMOUS_ACTION_HINTS.matcher(text).find();
+        boolean hasOperationalActionHint = ACTION_HINTS.matcher(text).find()
+                || (hasHomeAutomationHint && (hasHomeActionHint || hasAutonomyHint));
         boolean technicalDebug = TECHNICAL_DEBUG_HINTS.matcher(text).find();
         boolean promptStyle = PROMPT_STYLE_HINTS.matcher(text).find();
         boolean questionLike = isQuestionLike(text);
@@ -778,6 +812,8 @@ public class ChatProcessRouter {
                 tableHint,
                 jsonHint,
                 promptStyle,
+                hasHomeAutomationHint,
+                hasAutonomyHint,
                 ragDecision
         );
     }
@@ -1221,6 +1257,8 @@ public class ChatProcessRouter {
                                  boolean hasTableHint,
                                  boolean hasJsonHint,
                                  boolean hasPromptStyleHint,
+                                 boolean hasHomeAutomationHint,
+                                 boolean hasAutonomyHint,
                                  ChatPromptSignals.RagDecision ragDecision) {
     }
 }

@@ -23,6 +23,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.lenient;
 
 @ExtendWith(MockitoExtension.class)
 class RagLogLearningServiceTest {
@@ -52,7 +53,7 @@ class RagLogLearningServiceTest {
         service = new RagLogLearningService(properties, ragService);
 
         KnowledgeDocument doc = new KnowledgeDocument();
-        when(ragService.upsertDocumentForOwner(anyString(), anyString(), anyString(), anyString(), anyString()))
+        lenient().when(ragService.upsertDocumentForOwner(anyString(), anyString(), anyString(), anyString(), anyString()))
                 .thenReturn(doc);
     }
 
@@ -109,5 +110,26 @@ class RagLogLearningServiceTest {
         assertEquals(1, service.ingestNow());
         verify(ragService, times(2))
                 .upsertDocumentForOwner(eq("global"), eq("Runtime Logs :: trace.log"), anyString(), eq("app-log"), eq("logs,incident,runtime"));
+    }
+
+    @Test
+    void retriesWhenUpsertFailsWithDeadlockAndEventuallySucceeds() throws Exception {
+        Path logFile = tempDir.resolve("deadlock.log");
+        Files.writeString(logFile, """
+                2026-03-07 10:00:01 ERROR Deadlock found when trying to get lock
+                java.sql.SQLException: SQLState: 40001
+                """, StandardCharsets.UTF_8);
+        properties.setPaths(List.of(logFile.toString()));
+
+        KnowledgeDocument doc = new KnowledgeDocument();
+        when(ragService.upsertDocumentForOwner(eq("global"), eq("Runtime Logs :: deadlock.log"), anyString(), eq("app-log"), eq("logs,incident,runtime")))
+                .thenThrow(new IllegalStateException("Deadlock found when trying to get lock; try restarting transaction"))
+                .thenReturn(doc);
+
+        int ingested = service.ingestNow();
+
+        assertEquals(1, ingested);
+        verify(ragService, times(2))
+                .upsertDocumentForOwner(eq("global"), eq("Runtime Logs :: deadlock.log"), anyString(), eq("app-log"), eq("logs,incident,runtime"));
     }
 }

@@ -4,6 +4,8 @@ import com.example.apiasistente.chat.entity.ChatMessage;
 import com.example.apiasistente.chat.entity.ChatSession;
 import com.example.apiasistente.chat.service.ChatPromptSignals;
 import com.example.apiasistente.chat.service.ChatTurnPlanner;
+import com.example.apiasistente.rag.entity.KnowledgeChunk;
+import com.example.apiasistente.rag.entity.KnowledgeDocument;
 import com.example.apiasistente.prompt.entity.SystemPrompt;
 import com.example.apiasistente.rag.service.RagService;
 import org.junit.jupiter.api.BeforeEach;
@@ -11,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 
@@ -19,6 +22,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -50,6 +55,9 @@ class ChatRagFlowServiceTest {
     @BeforeEach
     void setUp() {
         service = new ChatRagFlowService(promptBuilder, historyService, ragService, groundingService, ragGateService, telemetryService);
+        ReflectionTestUtils.setField(service, "overrideGateForUncertainPreferred", true);
+        ReflectionTestUtils.setField(service, "minQueryCharsForGateOverride", 14);
+        ReflectionTestUtils.setField(service, "secondPassOnEmptyEnabled", true);
     }
 
     @Test
@@ -200,6 +208,146 @@ class ChatRagFlowServiceTest {
         assertEquals("RAG temporalmente no disponible", result.fallbackMessage());
     }
 
+    @Test
+    void retriesWithUserOnlyQueryWhenExpandedRetrievalMisses() {
+        ChatTurnContext context = context(
+                "Resume la estrategia de cache para monitor",
+                ChatPromptSignals.RagDecision.preferred("Consulta tecnica", List.of("cache", "monitor"))
+        );
+        String expandedQuery = "Resume la estrategia de cache para monitor\n\nContexto reciente del usuario:\n- hablame de monitor";
+        ChatRagDecisionEngine.DecisionAssessment uncertainAssessment = new ChatRagDecisionEngine.DecisionAssessment(
+                ChatRagDecisionEngine.QueryType.TECHNICAL,
+                true,
+                true,
+                0.62,
+                0.62,
+                false,
+                false,
+                true,
+                "heuristic",
+                "llm-no-disponible"
+        );
+        ChatRagGateService.GateDecision gateDecision = new ChatRagGateService.GateDecision(
+                true,
+                false,
+                "preferred-metadata-hit",
+                List.of("global"),
+                12,
+                120,
+                List.of("cache"),
+                uncertainAssessment
+        );
+        RagService.RetrievalResult miss = RagService.RetrievalResult.empty(List.of("global"), 1.10, 10, 0.45);
+        RagService.RetrievalResult hit = retrievalWithEvidence("Documento Cache", "Usa cache Caffeine con TTL corto", 0.83);
+        ChatGroundingService.GroundingDecision groundingDecision =
+                new ChatGroundingService.GroundingDecision(true, 0.84, 1, 0.83);
+
+        when(historyService.recentUserTurnsForRetrieval("sid-1"))
+                .thenReturn(List.of(userTurn("turno inicial"), userTurn("hablame de monitor")));
+        when(promptBuilder.buildRetrievalQuery(eq("Resume la estrategia de cache para monitor"), any(), eq(List.of())))
+                .thenReturn(expandedQuery);
+        when(ragGateService.evaluate(any(ChatTurnPlanner.TurnPlan.class), any(ChatPromptSignals.RagDecision.class), eq("Resume la estrategia de cache para monitor"), eq("user"), eq(null), eq(false)))
+                .thenReturn(gateDecision);
+        when(ragService.retrieveShared(expandedQuery)).thenReturn(miss);
+        when(ragService.retrieveShared("Resume la estrategia de cache para monitor")).thenReturn(hit);
+        when(groundingService.assessGrounding(any())).thenReturn(groundingDecision);
+        when(groundingService.resolveRagRoute(true, groundingDecision)).thenReturn(ChatGroundingService.RagRoute.STRONG);
+        when(groundingService.shouldEnforceGrounding(true)).thenReturn(true);
+        when(groundingService.fallbackMessage()).thenReturn("fallback");
+
+        ChatRagContext result = service.resolve(context);
+
+        assertTrue(result.ragUsed());
+        assertTrue(result.hasRagContext());
+        assertFalse(result.missingEvidence());
+        verify(ragService, times(1)).retrieveShared(expandedQuery);
+        verify(ragService, times(1)).retrieveShared("Resume la estrategia de cache para monitor");
+    }
+
+    @Test
+    void overridesPreferredGateSkipWhenDecisionIsUncertain() {
+        ChatTurnContext context = context(
+                "Compara estrategias de cache para endpoint interno",
+                ChatPromptSignals.RagDecision.preferred("Consulta tecnica", List.of("cache", "endpoint"))
+        );
+        ChatRagDecisionEngine.DecisionAssessment uncertainSkip = new ChatRagDecisionEngine.DecisionAssessment(
+                ChatRagDecisionEngine.QueryType.TECHNICAL,
+                false,
+                false,
+                0.58,
+                0.58,
+                false,
+                false,
+                true,
+                "heuristic",
+                "decision-incierta"
+        );
+
+        when(historyService.recentUserTurnsForRetrieval("sid-1")).thenReturn(List.of());
+        when(promptBuilder.buildRetrievalQuery("Compara estrategias de cache para endpoint interno", List.of(), List.of()))
+                .thenReturn("Compara estrategias de cache para endpoint interno");
+        when(ragGateService.evaluate(any(ChatTurnPlanner.TurnPlan.class), any(ChatPromptSignals.RagDecision.class), eq("Compara estrategias de cache para endpoint interno"), eq("user"), eq(null), eq(false)))
+                .thenReturn(ChatRagGateService.GateDecision.skip(
+                        "preferred-sin-pistas-metadata",
+                        List.of("global"),
+                        8,
+                        80,
+                        List.of("cache"),
+                        false,
+                        uncertainSkip
+                ));
+        when(ragService.retrieveShared("Compara estrategias de cache para endpoint interno"))
+                .thenReturn(RagService.RetrievalResult.empty(List.of("global"), 0.90, 10, 0.45));
+        when(groundingService.fallbackMessage()).thenReturn("fallback");
+        when(groundingService.shouldEnforceGrounding(false)).thenReturn(false);
+
+        ChatRagContext result = service.resolve(context);
+
+        assertFalse(result.ragUsed());
+        assertFalse(result.hasRagContext());
+        assertFalse(result.missingEvidence());
+        verify(ragService, times(1)).retrieveShared("Compara estrategias de cache para endpoint interno");
+    }
+
+    private RagService.RetrievalResult retrievalWithEvidence(String title, String chunkText, double score) {
+        KnowledgeDocument document = new KnowledgeDocument();
+        document.setTitle(title);
+        document.setOwner("global");
+        document.setSource("test");
+
+        KnowledgeChunk chunk = new KnowledgeChunk();
+        chunk.setDocument(document);
+        chunk.setChunkIndex(0);
+        chunk.setText(chunkText);
+        chunk.setHash("hash-test");
+        chunk.setTokenCount(12);
+
+        RagService.ScoredChunk scored = new RagService.ScoredChunk(chunk, score, chunkText);
+        return new RagService.RetrievalResult(
+                List.of(scored),
+                List.of(scored),
+                new RagService.RetrievalStats(
+                        List.of("global"),
+                        0.60,
+                        10,
+                        1,
+                        score,
+                        score,
+                        0.45,
+                        24,
+                        List.of(1L),
+                        List.of(title)
+                )
+        );
+    }
+
+    private ChatMessage userTurn(String text) {
+        ChatMessage message = new ChatMessage();
+        message.setRole(ChatMessage.Role.USER);
+        message.setContent(text);
+        return message;
+    }
+
     private ChatTurnContext context(String userText, ChatPromptSignals.RagDecision ragDecision) {
         SystemPrompt prompt = new SystemPrompt();
         prompt.setContent("sistema");
@@ -233,6 +381,7 @@ class ChatRagFlowServiceTest {
                 List.of(),
                 turnPlan,
                 ChatPromptSignals.IntentRoute.FACTUAL_TECH,
+                ChatPromptSignals.captureIntent(userText),
                 ragDecision.enabled(),
                 false,
                 false,

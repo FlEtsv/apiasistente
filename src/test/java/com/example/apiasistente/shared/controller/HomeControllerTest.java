@@ -32,15 +32,15 @@ class HomeControllerTest {
     void anonymousUserRedirectsToLogin() throws Exception {
         mockMvc.perform(get("/"))
                 .andExpect(status().is3xxRedirection())
-                .andExpect(redirectedUrl("/login"));
+                .andExpect(redirectedUrl("/app/login"));
     }
 
     @Test
-    void chatUserRedirectsToChat() throws Exception {
+    void chatUserRedirectsToAngularWorkspace() throws Exception {
         when(setupConfigService.isConfigured()).thenReturn(true);
         mockMvc.perform(get("/").principal(new TestingAuthenticationToken("ana", "pw", "PERM_CHAT")))
                 .andExpect(status().is3xxRedirection())
-                .andExpect(redirectedUrl("/chat"));
+                .andExpect(redirectedUrl("/app/chat"));
     }
 
     @Test
@@ -48,7 +48,7 @@ class HomeControllerTest {
         when(setupConfigService.isConfigured()).thenReturn(true);
         mockMvc.perform(get("/").principal(new TestingAuthenticationToken("ana", "pw", "PERM_MONITOR")))
                 .andExpect(status().is3xxRedirection())
-                .andExpect(redirectedUrl("/monitor"));
+                .andExpect(redirectedUrl("/app/monitor"));
     }
 
     @Test
@@ -56,7 +56,7 @@ class HomeControllerTest {
         when(setupConfigService.isConfigured()).thenReturn(true);
         mockMvc.perform(get("/").principal(new TestingAuthenticationToken("ana", "pw", "PERM_RAG")))
                 .andExpect(status().is3xxRedirection())
-                .andExpect(redirectedUrl("/rag-admin"));
+                .andExpect(redirectedUrl("/app/rag-admin"));
     }
 
     @Test
@@ -64,13 +64,13 @@ class HomeControllerTest {
         when(setupConfigService.isConfigured()).thenReturn(false);
         mockMvc.perform(get("/").principal(new TestingAuthenticationToken("ana", "pw", "PERM_CHAT")))
                 .andExpect(status().is3xxRedirection())
-                .andExpect(redirectedUrl("/setup"));
+                .andExpect(redirectedUrl("/app/setup"));
     }
 
     @Test
-    void accessDeniedPageReturnsView() throws Exception {
+    void accessDeniedPageRedirectsToAngularRoute() throws Exception {
         mockMvc.perform(get("/access-denied"))
-                .andExpect(status().isOk())
-                .andExpect(view().name("access_denied"));
+                .andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrl("/app/access-denied"));
     }
 }

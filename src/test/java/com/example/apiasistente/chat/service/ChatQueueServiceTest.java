@@ -2,6 +2,7 @@ package com.example.apiasistente.chat.service;
 
 import com.example.apiasistente.chat.config.ChatQueueProperties;
 import com.example.apiasistente.chat.dto.ChatResponse;
+import com.example.apiasistente.shared.exception.ServiceUnavailableException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -12,9 +13,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ExecutionException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.when;
 
@@ -70,6 +73,37 @@ class ChatQueueServiceTest {
         );
 
         assertEquals("Ollama embed fallo", error.getMessage());
+    }
+
+    @Test
+    void serializesSessionlessMessagesPerExternalUserScope() throws Exception {
+        when(chatService.chat("owner", null, "primero", "default", "key:7|user:cli-1", List.of()))
+                .thenReturn(new ChatResponse("sid-ext", "ok-1", List.of()));
+        when(chatService.chat("owner", null, "segundo", "default", "key:7|user:cli-1", List.of()))
+                .thenReturn(new ChatResponse("sid-ext", "ok-2", List.of()));
+
+        var first = queueService.enqueueChat("owner", null, "primero", "default", "key:7|user:cli-1");
+        var second = queueService.enqueueChat("owner", null, "segundo", "default", "key:7|user:cli-1");
+
+        assertEquals("ok-1", first.get(2, TimeUnit.SECONDS).getReply());
+        assertEquals("ok-2", second.get(2, TimeUnit.SECONDS).getReply());
+
+        InOrder order = inOrder(chatService);
+        order.verify(chatService).chat("owner", null, "primero", "default", "key:7|user:cli-1", List.of());
+        order.verify(chatService).chat("owner", null, "segundo", "default", "key:7|user:cli-1", List.of());
+    }
+
+    @Test
+    void enqueueChatFailsFastWhenQueueIsShuttingDown() throws Exception {
+        queueService.shutdown();
+
+        var future = queueService.enqueueChat("user", "sid", "hola", "default");
+
+        ExecutionException error = assertThrows(
+                ExecutionException.class,
+                () -> future.get(1, TimeUnit.SECONDS)
+        );
+        assertTrue(error.getCause() instanceof ServiceUnavailableException);
     }
 }
 

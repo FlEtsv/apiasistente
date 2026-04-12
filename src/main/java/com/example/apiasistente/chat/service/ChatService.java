@@ -121,8 +121,13 @@ public class ChatService {
         String effectiveRequestedModel = resolveRequestedModelForExecution(requestedModel, processDecision);
         boolean hasImageMedia = hasImageMedia(media);
         boolean hasDocumentMedia = hasDocumentMedia(media);
+        ChatPromptSignals.IntentProfile intentProfile = ChatPromptSignals.captureIntent(
+                userText,
+                hasDocumentMedia,
+                hasImageMedia
+        );
         log.info(
-                "chat_process_route sessionId={} requestedModel={} effectiveRequestedModel={} route={} pipeline={} source={} confidence={} usedLlm={} reason={} mediaCount={} promptPreview={}",
+                "chat_process_route sessionId={} requestedModel={} effectiveRequestedModel={} route={} pipeline={} source={} confidence={} usedLlm={} reason={} intentCategory={} responseStyle={} requiresConfirmation={} mediaCount={} promptPreview={}",
                 safe(maybeSessionId),
                 safe(requestedModel),
                 safe(effectiveRequestedModel),
@@ -132,6 +137,9 @@ public class ChatService {
                 String.format(java.util.Locale.US, "%.3f", processDecision.confidence()),
                 processDecision.usedLlm(),
                 safe(processDecision.reason()),
+                intentProfile.category(),
+                intentProfile.responseStyle(),
+                intentProfile.requiresConfirmation(),
                 media == null ? 0 : media.size(),
                 preview(userText)
         );
@@ -150,6 +158,7 @@ public class ChatService {
                 requestedModel,
                 effectiveRequestedModel,
                 processDecision,
+                intentProfile,
                 media == null ? 0 : media.size(),
                 hasImageMedia,
                 hasDocumentMedia,
@@ -180,6 +189,7 @@ public class ChatService {
                     requestedModel,
                     effectiveRequestedModel,
                     processDecision,
+                    intentProfile,
                     media == null ? 0 : media.size(),
                     hasImageMedia,
                     hasDocumentMedia,
@@ -314,6 +324,7 @@ public class ChatService {
                                              String requestedModel,
                                              String effectiveRequestedModel,
                                              ChatProcessRouter.ProcessDecision processDecision,
+                                             ChatPromptSignals.IntentProfile intentProfile,
                                              int mediaCount,
                                              boolean hasImageMedia,
                                              boolean hasDocumentMedia,
@@ -334,6 +345,13 @@ public class ChatService {
         payload.put("routeConfidence", String.format(java.util.Locale.US, "%.3f", processDecision.confidence()));
         payload.put("usedLlmRouter", processDecision.usedLlm());
         payload.put("routeReason", safe(processDecision.reason()));
+        payload.put("intentCategory", intentProfile == null ? "" : intentProfile.category().name());
+        payload.put("responseStyle", intentProfile == null ? "" : intentProfile.responseStyle().name());
+        payload.put("requiresConfirmation", intentProfile != null && intentProfile.requiresConfirmation());
+        payload.put("homeAutomation", intentProfile != null && intentProfile.homeAutomation());
+        payload.put("autonomousDecisionRequested", intentProfile != null && intentProfile.autonomousDecisionRequested());
+        payload.put("learningRequested", intentProfile != null && intentProfile.learningRequested());
+        payload.put("intentReason", intentProfile == null ? "" : safe(intentProfile.reason()));
         payload.put("mediaCount", mediaCount);
         payload.put("hasImageMedia", hasImageMedia);
         payload.put("hasDocumentMedia", hasDocumentMedia);
@@ -363,6 +381,7 @@ public class ChatService {
                                               String requestedModel,
                                               String effectiveRequestedModel,
                                               ChatProcessRouter.ProcessDecision processDecision,
+                                              ChatPromptSignals.IntentProfile intentProfile,
                                               int mediaCount,
                                               boolean hasImageMedia,
                                               boolean hasDocumentMedia,
@@ -383,6 +402,12 @@ public class ChatService {
         payload.put("routeSource", processDecision.source());
         payload.put("routeConfidence", String.format(java.util.Locale.US, "%.3f", processDecision.confidence()));
         payload.put("usedLlmRouter", processDecision.usedLlm());
+        payload.put("intentCategory", intentProfile == null ? "" : intentProfile.category().name());
+        payload.put("responseStyle", intentProfile == null ? "" : intentProfile.responseStyle().name());
+        payload.put("requiresConfirmation", intentProfile != null && intentProfile.requiresConfirmation());
+        payload.put("homeAutomation", intentProfile != null && intentProfile.homeAutomation());
+        payload.put("autonomousDecisionRequested", intentProfile != null && intentProfile.autonomousDecisionRequested());
+        payload.put("learningRequested", intentProfile != null && intentProfile.learningRequested());
         payload.put("mediaCount", mediaCount);
         payload.put("hasImageMedia", hasImageMedia);
         payload.put("hasDocumentMedia", hasDocumentMedia);

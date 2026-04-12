@@ -290,9 +290,9 @@ public class ChatGroundingService {
             }
 
             String clean = refined.trim();
-            // Si el guard expande demasiado la respuesta o rompe las citas, se descarta el resultado.
+            // Si el guard expande demasiado la respuesta, se conserva la original sin penalizar.
             if (clean.length() > original.length() + 260) {
-                return ragUsed ? fallbackMessage() : original;
+                return original;
             }
             if (isFallbackMessage(clean)) {
                 return fallbackMessage();
@@ -305,7 +305,7 @@ public class ChatGroundingService {
             return clean;
         } catch (Exception ex) {
             log.warn("No se pudo depurar respuesta con mini-modelo: {}", ex.getMessage());
-            return ragUsed ? fallbackMessage() : original;
+            return original;
         }
     }
 

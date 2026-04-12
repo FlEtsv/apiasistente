@@ -106,6 +106,7 @@ class ChatTurnServiceTest {
                         0.82
                 ),
                 ChatPromptSignals.IntentRoute.FACTUAL_TECH,
+                ChatPromptSignals.captureIntent("Que dice el log?"),
                 true,
                 false,
                 false,
@@ -195,6 +196,7 @@ class ChatTurnServiceTest {
                 List.of(),
                 turnPlan,
                 ChatPromptSignals.IntentRoute.FACTUAL_TECH,
+                ChatPromptSignals.captureIntent("Explica el error del endpoint"),
                 false,
                 false,
                 false,
@@ -294,6 +296,7 @@ class ChatTurnServiceTest {
                         0.85
                 ),
                 ChatPromptSignals.IntentRoute.FACTUAL_TECH,
+                ChatPromptSignals.captureIntent("Que dice el documento?"),
                 true,
                 false,
                 false,
@@ -377,6 +380,7 @@ class ChatTurnServiceTest {
                         0.83
                 ),
                 ChatPromptSignals.IntentRoute.FACTUAL_TECH,
+                ChatPromptSignals.captureIntent("Que dice el runbook?"),
                 true,
                 false,
                 false,

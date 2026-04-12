@@ -8,8 +8,8 @@ import org.springframework.security.web.csrf.DefaultCsrfToken;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.view;
 
 @WebMvcTest(RagAdminPageController.class)
 @AutoConfigureMockMvc(addFilters = false)
@@ -22,10 +22,10 @@ class RagAdminPageControllerTest {
     private MockMvc mockMvc;
 
     @Test
-    void ragAdminPageReturnsView() throws Exception {
+    void ragAdminPageRedirectsToAngularWorkspace() throws Exception {
         mockMvc.perform(get("/rag-admin")
                         .requestAttr("_csrf", new DefaultCsrfToken("X-CSRF-TOKEN", "_csrf", "test-token")))
-                .andExpect(status().isOk())
-                .andExpect(view().name("rag_admin"));
+                .andExpect(status().is3xxRedirection())
+                .andExpect(redirectedUrl("/app/rag-admin"));
     }
 }

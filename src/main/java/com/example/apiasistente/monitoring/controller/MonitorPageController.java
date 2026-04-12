@@ -11,6 +11,6 @@ public class MonitorPageController {
 
     @GetMapping("/monitor")
     public String monitorPage() {
-        return "monitor";
+        return "redirect:/app/monitor";
     }
 }
